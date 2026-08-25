@@ -12,8 +12,9 @@ import asyncio
 import re
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Iterable, Sequence
-from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 from urllib.robotparser import RobotFileParser
 
 import httpx
@@ -74,6 +75,57 @@ GATE_PRIORITY_FRAGMENTS: tuple[str, ...] = (
 )
 
 
+
+_URL_BLOCK = re.compile(r"<url>(.*?)</url>", re.I | re.S)
+_LOC = re.compile(r"<loc>\s*([^<\s]+)\s*</loc>", re.I)
+_LASTMOD = re.compile(r"<lastmod>\s*([^<\s]+)\s*</lastmod>", re.I)
+
+
+def parse_w3c_date(raw: str | None) -> datetime | None:
+    """Sitemap lastmod, which is a date or a full timestamp. None when unusable."""
+    if not raw:
+        return None
+    text = raw.strip()
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+# Places hands back the website with Google's own campaign tags attached, and
+# links on a site carry their own. Carrying them through has three costs: the
+# provider cache keys on the full URL and re-spends quota on the same page, the
+# evidence URL in a report shows a contractor a tracked link, and CrUX field
+# data is keyed per URL so a tagged URL never matches the real-user record for
+# the page.
+_TRACKING_PARAMS = frozenset({
+    "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id",
+    "gclid", "gbraid", "wbraid", "dclid", "fbclid", "msclkid", "twclid", "ttclid",
+    "mc_cid", "mc_eid", "_ga", "_gl", "yclid", "igshid", "si", "ref", "ref_src",
+    "hsa_acc", "hsa_cam", "hsa_grp", "hsa_ad", "hsa_src", "hsa_tgt", "hsa_kw",
+    "hsa_mt", "hsa_net", "hsa_ver", "campaignid", "adgroupid",
+})
+
+
+def strip_tracking(query: str) -> str:
+    """Drop campaign tags, keep everything else.
+
+    Only known tracking keys are removed. A query string can be load bearing,
+    and dropping ?page=2 would silently change which page we audited.
+    """
+    if not query:
+        return ""
+    kept = [
+        (key, value)
+        for key, value in parse_qsl(query, keep_blank_values=True)
+        if key.lower() not in _TRACKING_PARAMS
+    ]
+    return urlencode(kept)
+
+
 def normalize_url(url: str, *, base: str | None = None) -> str | None:
     """Absolutize, strip fragments and tracking noise. None means unusable."""
     if not url:
@@ -89,7 +141,9 @@ def normalize_url(url: str, *, base: str | None = None) -> str | None:
     if not parsed.netloc:
         return None
     path = parsed.path or "/"
-    return urlunparse((parsed.scheme, parsed.netloc.lower(), path, "", parsed.query, ""))
+    return urlunparse(
+        (parsed.scheme, parsed.netloc.lower(), path, "", strip_tracking(parsed.query), "")
+    )
 
 
 def registrable_host(url: str) -> str:
@@ -125,6 +179,7 @@ class SiteCrawl:
     homepage: FetchResult
     pages: dict[str, FetchResult] = field(default_factory=dict)
     sitemap_urls: list[str] = field(default_factory=list)
+    sitemap_lastmod: dict[str, datetime] = field(default_factory=dict)
     robots_present: bool = False
     robots_blocked: list[str] = field(default_factory=list)
     crawl_delay_seconds: float | None = None
@@ -308,14 +363,26 @@ class Crawler:
             elapsed_ms=int((time.monotonic() - started) * 1000),
         )
 
-    async def _sitemap_urls(self, base_url: str, *, limit: int = 200) -> list[str]:
+    async def _sitemap_urls(
+        self, base_url: str, *, limit: int = 200
+    ) -> tuple[list[str], dict[str, datetime]]:
         parsed = urlparse(base_url)
-        candidates = [f"{parsed.scheme}://{parsed.netloc}/sitemap.xml"]
+        root = f"{parsed.scheme}://{parsed.netloc}"
+        # /sitemap.xml alone misses most of the market. Yoast publishes
+        # /sitemap_index.xml and WordPress core publishes /wp-sitemap.xml, and
+        # neither is declared in robots.txt on every install.
+        candidates = [
+            f"{root}/sitemap.xml",
+            f"{root}/sitemap_index.xml",
+            f"{root}/wp-sitemap.xml",
+            f"{root}/sitemap-index.xml",
+        ]
         parser, _present, _delay = await self._robots_for(base_url)
         if parser is not None:
             candidates.extend(getattr(parser, "site_maps", None)() or [])
 
         found: list[str] = []
+        lastmod: dict[str, datetime] = {}
         seen_maps: set[str] = set()
         for candidate in candidates:
             if candidate in seen_maps or len(found) >= limit:
@@ -324,19 +391,35 @@ class Crawler:
             result = await self.fetch(candidate)
             if not result.ok or not result.html:
                 continue
-            locs = re.findall(r"<loc>\s*([^<\s]+)\s*</loc>", result.html, flags=re.I)
             is_index = "<sitemapindex" in result.html[:2000].lower()
-            for loc in locs:
+
+            # <url> blocks carry lastmod. A sitemap index carries none, so it is
+            # read for <loc> only and its children are queued.
+            blocks = _URL_BLOCK.findall(result.html)
+            pairs: list[tuple[str, str | None]] = []
+            if blocks and not is_index:
+                for block in blocks:
+                    loc_match = _LOC.search(block)
+                    if loc_match:
+                        mod_match = _LASTMOD.search(block)
+                        pairs.append((loc_match.group(1), mod_match.group(1) if mod_match else None))
+            else:
+                pairs = [(loc, None) for loc in _LOC.findall(result.html)]
+
+            for loc, mod in pairs:
                 normalized = normalize_url(loc)
                 if not normalized:
                     continue
-                if is_index and len(seen_maps) < 4:
+                if is_index and len(seen_maps) < 8:
                     candidates.append(normalized)
                 else:
                     found.append(normalized)
+                    parsed_mod = parse_w3c_date(mod)
+                    if parsed_mod:
+                        lastmod[normalized] = parsed_mod
                 if len(found) >= limit:
                     break
-        return found
+        return found, lastmod
 
     async def crawl_site(
         self,
@@ -382,7 +465,7 @@ class Crawler:
         offer(links_of(homepage.html, homepage.final_url or base_url))
 
         if fetch_sitemap:
-            crawl.sitemap_urls = await self._sitemap_urls(base_url)
+            crawl.sitemap_urls, crawl.sitemap_lastmod = await self._sitemap_urls(base_url)
             offer(crawl.sitemap_urls)
 
         candidates.sort(key=lambda url: _priority_rank(url, priority_fragments))

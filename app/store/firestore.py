@@ -344,3 +344,41 @@ def cache_put(provider: str, request: Any, response: Any, ttl_days: int | None =
             "expires_at": utcnow() + timedelta(days=days),
         }
     )
+
+
+def all_check_defs() -> list[dict[str, Any]]:
+    """Every definition, enabled or not, in display order."""
+    return sorted(
+        (snap.to_dict() or {} for snap in get_client().collection(CHECK_DEFS).stream()),
+        key=lambda d: d.get("sort_order", 0),
+    )
+
+
+def update_audit(audit_id: str, fields: Mapping[str, Any]) -> None:
+    get_client().collection(AUDITS).document(audit_id).set(_plain(dict(fields)), merge=True)
+
+
+def write_check_results(audit_id: str, rows: Iterable[Mapping[str, Any]]) -> int:
+    """Write audits/{auditId}/checks/{code}. One batch, one round trip."""
+    client = get_client()
+    batch = client.batch()
+    parent = client.collection(AUDITS).document(audit_id).collection(CHECKS)
+    count = 0
+    for row in rows:
+        batch.set(parent.document(str(row["code"])), _plain(dict(row)), merge=True)
+        count += 1
+        if count % 400 == 0:
+            batch.commit()
+            batch = client.batch()
+    batch.commit()
+    return count
+
+
+def audit_checks(audit_id: str) -> list[dict[str, Any]]:
+    parent = get_client().collection(AUDITS).document(audit_id).collection(CHECKS)
+    return [snap.to_dict() or {} for snap in parent.stream()]
+
+
+def get_audit(audit_id: str) -> dict[str, Any] | None:
+    snap = get_client().collection(AUDITS).document(audit_id).get()
+    return snap.to_dict() if snap.exists else None

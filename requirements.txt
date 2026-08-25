@@ -14,3 +14,4 @@ pydantic
 typer
 rich
 pytest
+pytest-cov

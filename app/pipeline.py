@@ -14,14 +14,25 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
+from app.checks import extract as facts
+from app.checks.base import AuditContext, CheckResult, run_checks, statuses
 from app.config import get_config
 from app.gate import GATE_FAIL, GATE_PASS, GATE_REVIEW, GateInput, GateVerdict, evaluate
 from app.markets import MarketSpec, resolve_market
 from app.store import firestore as store
-from app.tools.crawl import GATE_PRIORITY_FRAGMENTS, Crawler, SiteCrawl
+from app.scoring import Score, compute, outcomes_from
+from app.tools.crawl import (
+    GATE_PRIORITY_FRAGMENTS,
+    Crawler,
+    FetchResult,
+    SiteCrawl,
+    normalize_url,
+)
+from app.tools.pagespeed import PsiResult, analyze
 from app.tools.places import PlaceRecord, ingest_market
+from app.tools.render import RenderResult, render
 from app.tools.site_signals import SiteSignals, extract_signals
 
 # The gate asks whether this is a real, established, residential operator. That
@@ -46,6 +57,9 @@ PER_PROSPECT_TIMEOUT_SECONDS = 120.0
 # Distinct hosts, so this is not a politeness number. Per-host limits are
 # enforced separately and independently inside the shared Crawler.
 DEFAULT_GATE_CONCURRENCY = 8
+
+# A full audit crawls 25 pages rather than the gate's six, so it gets longer.
+AUDIT_TIMEOUT_SECONDS = 300.0
 
 
 @dataclass
@@ -276,4 +290,170 @@ async def run_sweep(
         found=ingested.found,
         suppressed=ingested.suppressed,
         outcomes=outcomes,
+    )
+
+
+# ── Audit ─────────────────────────────────────────────────────────────────────
+
+
+@dataclass
+class AuditOutcome:
+    prospect: Mapping[str, Any]
+    audit_id: str | None
+    score: Score
+    results: dict[str, CheckResult]
+    definitions: list[Mapping[str, Any]]
+    crawl_error: str | None = None
+
+    def by_section(self, section: str) -> list[tuple[Mapping[str, Any], CheckResult]]:
+        """Definitions joined to results, in display order."""
+        index = {str(d["code"]): d for d in self.definitions}
+        rows = [
+            (index[code], res)
+            for code, res in self.results.items()
+            if code in index and index[code].get("section") == section
+        ]
+        return sorted(rows, key=lambda row: row[0].get("sort_order", 0))
+
+
+
+
+def _canonical_homepage(crawl: SiteCrawl) -> str | None:
+    """The homepage URL without campaign tags.
+
+    A redirect can hand the tags straight back, so the final URL is normalized
+    again rather than trusted. Both inspector stages must agree on this string:
+    it is the provider cache key and it is what a report cites as evidence.
+    """
+    return normalize_url(crawl.homepage.final_url or crawl.base_url or "")
+
+
+async def _render_homepage(crawl: SiteCrawl) -> RenderResult | None:
+    """Render the homepage at a mobile viewport, or return None.
+
+    Guardrail 6 lives here rather than in the renderer. The renderer is
+    stateless and renders what it is told to, so the decision about whether we
+    are allowed to look belongs to the caller that already fetched robots.txt
+    during recon. A disallowed homepage is never rendered, and the checks that
+    needed it skip and say so.
+    """
+    if not get_config().renderer_url:
+        return None
+    if crawl.homepage.blocked_by_robots:
+        return None
+    if not crawl.reachable:
+        return None
+    target = _canonical_homepage(crawl)
+    if not target:
+        return None
+    try:
+        return await render(target)
+    except Exception as exc:  # noqa: BLE001 - a renderer fault skips its checks
+        return RenderResult(ok=False, url=target, error=f"{type(exc).__name__}: {exc}")
+
+
+
+async def _measure_speed(crawl: SiteCrawl) -> PsiResult | None:
+    """PageSpeed Insights on the homepage.
+
+    Google fetches the page itself here rather than us, but the robots guard
+    still applies: if we were told not to look at this page we do not go asking
+    a third party to look at it either.
+    """
+    if not get_config().pagespeed_api_key:
+        return None
+    if crawl.homepage.blocked_by_robots or not crawl.reachable:
+        return None
+    target = _canonical_homepage(crawl)
+    if not target:
+        return None
+    try:
+        return await analyze(target)
+    except Exception as exc:  # noqa: BLE001 - a provider fault skips its checks
+        return PsiResult(ok=False, url=target, error=f"{type(exc).__name__}: {exc}")
+
+
+async def audit_one(
+    crawler: Crawler,
+    prospect: Mapping[str, Any],
+    market: MarketSpec,
+    definitions: list[Mapping[str, Any]],
+    *,
+    batch_id: str = "manual",
+    persist: bool = True,
+) -> AuditOutcome:
+    """Recon, run every enabled check, score. Stage failures skip, they do not abort."""
+    website = prospect.get("website_url")
+    crawl: SiteCrawl | None = None
+    crawl_error: str | None = None
+
+    if website:
+        try:
+            crawl = await asyncio.wait_for(
+                crawler.crawl_site(website), timeout=AUDIT_TIMEOUT_SECONDS
+            )
+        except asyncio.TimeoutError:
+            crawl_error = f"crawl timed out after {AUDIT_TIMEOUT_SECONDS:.0f}s"
+        except Exception as exc:  # noqa: BLE001 - a bad host skips its checks
+            crawl_error = f"{type(exc).__name__}: {exc}"
+    else:
+        crawl_error = "no website on the Google profile"
+
+    if crawl is None:
+        crawl = SiteCrawl(base_url=website or "", homepage=FetchResult(url=website or "", error=crawl_error))
+
+    # The inspector stages are independent and I/O bound, which is exactly why
+    # the engine spec models them as a ParallelAgent. Sequentially this is a
+    # nine second render followed by a thirty second Lighthouse run.
+    render_result, psi_result = await asyncio.gather(
+        _render_homepage(crawl), _measure_speed(crawl)
+    )
+
+    ctx = AuditContext(
+        place=dict(prospect),
+        site=facts.build(crawl),
+        market=market,
+        render=render_result,
+        psi=psi_result,
+    )
+    results = run_checks(ctx, definitions)
+    score = compute(outcomes_from(statuses(results), definitions))
+
+    audit_id: str | None = None
+    if persist:
+        place_id = str(prospect.get("place_id"))
+        audit_id = await asyncio.to_thread(store.create_audit, place_id, batch_id)
+        points = {str(d["code"]): int(d.get("points", 0)) for d in definitions}
+        rows = []
+        for code, res in results.items():
+            row = res.to_dict()
+            row["points_awarded"] = points.get(code, 0) if res.passed else 0
+            rows.append(row)
+        await asyncio.to_thread(store.write_check_results, audit_id, rows)
+        await asyncio.to_thread(
+            store.update_audit,
+            audit_id,
+            {
+                "status": "scored",
+                "scores": {
+                    "found": score.found, "chosen": score.chosen,
+                    "booked": score.booked, "total": score.total,
+                },
+                "band": score.band,
+                "segment": score.segment,
+                "partial": score.partial,
+                "partial_sections": list(score.partial_sections),
+                "crawl_error": crawl_error,
+                "pages_crawled": len(ctx.site.pages),
+                "finished_at": store.utcnow(),
+            },
+        )
+
+    return AuditOutcome(
+        prospect=prospect,
+        audit_id=audit_id,
+        score=score,
+        results=results,
+        definitions=definitions,
+        crawl_error=crawl_error,
     )

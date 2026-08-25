@@ -18,10 +18,20 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from app.checks.definitions import CHECK_DEFINITIONS, MEASUREMENT, section_points
 from app.config import ConfigError, get_config
 from app.gate import GATE_FAIL, GATE_PASS, GATE_REVIEW
 from app.markets import known_markets, resolve_market
-from app.pipeline import DEFAULT_GATE_CONCURRENCY, GateOutcome, SweepResult, run_sweep
+from app.pipeline import (
+    DEFAULT_GATE_CONCURRENCY,
+    AuditOutcome,
+    GateOutcome,
+    SweepResult,
+    audit_one,
+    run_sweep,
+)
+from app.scoring import BOOKED, CHOSEN, FOUND
+from app.tools.crawl import Crawler
 from app.store import firestore as store
 
 app = typer.Typer(add_completion=False, help="Relay audit engine operator CLI.")
@@ -287,6 +297,184 @@ def show(place_id: str = typer.Argument(..., help="Places id, which is the prosp
                 reason.get("detail", ""),
             )
         console.print(table)
+
+
+# ── check definitions ─────────────────────────────────────────────────────────
+
+
+@app.command("seed-checks")
+def seed_checks(
+    force: bool = typer.Option(
+        False, "--force", help="Overwrite enabled flags and points already tuned in Firestore."
+    ),
+) -> None:
+    """Seed the 44 check definitions into Firestore.
+
+    Firestore is the source of truth once seeded, because the engine spec wants
+    a retune to be a document edit rather than a deploy. So a re-run merges the
+    descriptive fields and leaves `points` and `enabled` alone unless --force,
+    which stops this command from quietly reverting a weight you tuned after the
+    first batch.
+    """
+    existing = {row["code"]: row for row in store.all_check_defs()}
+    tuned: list[str] = []
+    payload: list[dict[str, Any]] = []
+
+    for definition in CHECK_DEFINITIONS:
+        row = dict(definition)
+        prior = existing.get(row["code"])
+        if prior and not force:
+            for field in ("points", "enabled"):
+                if field in prior and prior[field] != row[field]:
+                    tuned.append(f"{row['code']}.{field} {row[field]} -> {prior[field]}")
+                    row[field] = prior[field]
+        payload.append(row)
+
+    written = store.upsert_check_defs(payload)
+
+    table = Table(title="Seeded check definitions", header_style="bold")
+    table.add_column("Section")
+    table.add_column("Checks", justify="right")
+    table.add_column("Points", justify="right")
+    table.add_column("Enabled points", justify="right")
+    for section in ("found", "chosen", "booked", MEASUREMENT):
+        rows = [r for r in payload if r["section"] == section]
+        table.add_row(
+            section,
+            str(len(rows)),
+            str(section_points(section)),
+            str(sum(r["points"] for r in rows if r["enabled"])),
+        )
+    console.print(table)
+    console.print(f"wrote [bold]{written}[/] definitions to Firestore")
+
+    disabled = [r for r in payload if not r["enabled"]]
+    if disabled:
+        console.print(f"  [dim]not running this week: {', '.join(r['code'] for r in disabled)}[/]")
+    if tuned:
+        console.print("  [yellow]kept the tuned values already in Firestore:[/]")
+        for line in tuned:
+            console.print(f"    {line}")
+        console.print("  [dim]pass --force to overwrite them with the values in code.[/]")
+
+
+@app.command("checks")
+def list_checks() -> None:
+    """List the check definitions as Firestore currently holds them."""
+    rows = store.all_check_defs()
+    if not rows:
+        console.print("[yellow]No check definitions stored. Run: seed-checks[/]")
+        raise typer.Exit(code=1)
+
+    table = Table(header_style="bold")
+    table.add_column("Code", width=5)
+    table.add_column("Section", width=11)
+    table.add_column("Title", width=30)
+    table.add_column("Pts", justify="right", width=3)
+    table.add_column("Full credit", width=42, overflow="fold")
+    table.add_column("On", width=3, justify="center")
+    for row in rows:
+        on = "[green]y[/]" if row.get("enabled") else "[dim red]n[/]"
+        table.add_row(
+            row.get("code", ""),
+            row.get("section", ""),
+            _truncate(row.get("title"), 30),
+            str(row.get("points", 0)),
+            _truncate(row.get("full_credit"), 42),
+            on,
+        )
+    console.print(table)
+
+
+# ── audit ─────────────────────────────────────────────────────────────────────
+
+STATUS_STYLE = {"pass": "green", "fail": "red", "skipped": "yellow", "error": "bold red"}
+STATUS_MARK = {"pass": "pass", "fail": "FAIL", "skipped": "skip", "error": "ERR"}
+
+
+def _section_table(outcome: AuditOutcome, section: str) -> Table:
+    rows = outcome.by_section(section)
+    score = outcome.score.sections.get(section)
+    title = section.title()
+    if score:
+        title = (f"{section.title()}  {score.normalized:.0f}/{score.nominal}"
+                 f"   [dim]{score.earned} of {score.available} points measured[/]")
+        if score.partial:
+            title += "  [yellow]partial[/]"
+
+    table = Table(title=title, header_style="bold", title_justify="left")
+    table.add_column("", width=4)
+    table.add_column("Check", width=26)
+    table.add_column("", width=4, justify="center")
+    table.add_column("Pts", width=5, justify="right")
+    table.add_column("What we saw", overflow="fold")
+
+    for definition, res in rows:
+        style = STATUS_STYLE.get(res.status, "")
+        awarded = definition.get("points", 0) if res.passed else 0
+        table.add_row(
+            definition.get("code", ""),
+            _truncate(definition.get("title"), 26),
+            f"[{style}]{STATUS_MARK.get(res.status, res.status)}[/]",
+            f"{awarded}/{definition.get('points', 0)}",
+            res.note,
+        )
+    return table
+
+
+@app.command()
+def audit(
+    place_id: str = typer.Argument(..., help="Places id of a prospect already ingested."),
+    persist: bool = typer.Option(True, "--persist/--no-persist", help="Write the audit to Firestore."),
+    sections: str = typer.Option("found,chosen", "--sections", help="Comma separated, or 'all'."),
+) -> None:
+    """Run every implemented check against one prospect and score it."""
+    prospect = store.get_prospect(place_id)
+    if prospect is None:
+        console.print(f"[red]No prospect {place_id}. Run a sweep first.[/]")
+        raise typer.Exit(code=1)
+
+    definitions = store.all_check_defs()
+    if not definitions:
+        console.print("[yellow]No check definitions stored. Run: seed-checks[/]")
+        raise typer.Exit(code=1)
+
+    market = resolve_market(str(prospect.get("city") or prospect.get("market_id") or ""))
+    console.print(
+        f"Auditing [bold]{prospect.get('business_name', place_id)}[/]  "
+        f"{prospect.get('website_url') or '[dim]no website[/]'}"
+    )
+
+    async def go() -> AuditOutcome:
+        async with Crawler() as crawler:
+            return await audit_one(crawler, prospect, market, definitions, persist=persist)
+
+    outcome = asyncio.run(go())
+
+    wanted = [FOUND, CHOSEN, BOOKED, "measurement"] if sections.strip() == "all" else [
+        s.strip() for s in sections.split(",") if s.strip()
+    ]
+    for section in wanted:
+        console.print(_section_table(outcome, section))
+
+    score = outcome.score
+    console.print()
+    if outcome.crawl_error:
+        console.print(f"  [yellow]crawl: {outcome.crawl_error}[/]")
+    console.print(
+        f"  [bold]total {score.total}/100[/]   band [bold]{score.band}[/]   "
+        f"segment [bold]{score.segment or 'unsegmented'}[/]"
+        + ("   [yellow]partial: " + ", ".join(score.partial_sections) + "[/]" if score.partial else "")
+    )
+    for name in (FOUND, CHOSEN, BOOKED):
+        row = score.sections[name]
+        console.print(
+            f"    {name:<7} {row.normalized:>5.1f}/{row.nominal}"
+            f"   [dim]measured {row.available} of {row.basis} enabled points,"
+            f" coverage {row.coverage:.0%} of nominal[/]"
+        )
+    if outcome.audit_id:
+        console.print(f"  [dim]audit {outcome.audit_id}[/]")
 
 
 if __name__ == "__main__":
