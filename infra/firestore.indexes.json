@@ -1,0 +1,23 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "audits",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "batch_id", "order": "ASCENDING" },
+        { "fieldPath": "segment", "order": "ASCENDING" },
+        { "fieldPath": "scores.booked", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "prospects",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "market_id", "order": "ASCENDING" },
+        { "fieldPath": "gate_result", "order": "ASCENDING" },
+        { "fieldPath": "suppressed", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

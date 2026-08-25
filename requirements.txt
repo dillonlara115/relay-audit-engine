@@ -1,0 +1,16 @@
+google-adk
+google-genai
+google-cloud-firestore
+google-cloud-storage
+google-cloud-pubsub
+google-auth
+fastapi
+uvicorn[standard]
+httpx
+selectolax
+phonenumbers
+python-dotenv
+pydantic
+typer
+rich
+pytest
