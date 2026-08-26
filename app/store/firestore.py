@@ -420,3 +420,39 @@ def save_draft_findings(audit_id: str, findings: list[Mapping[str, Any]],
 def get_draft_findings(audit_id: str) -> dict[str, Any] | None:
     snap = get_client().collection(REPORT_FINDINGS).document(audit_id).get()
     return snap.to_dict() if snap.exists else None
+
+
+def batch_overview(days: int = 14) -> list[dict[str, Any]]:
+    """Recent batches aggregated from the task ledger.
+
+    The ledger is the truth about progress: the batches collection only counts
+    what a sweep created, and a batch dispatched by the console or the
+    coordinator never appears there at all.
+    """
+    from app.leases import AUDIT_TASKS
+
+    cutoff = utcnow() - timedelta(days=days)
+    grouped: dict[str, dict[str, Any]] = {}
+    query = get_client().collection(AUDIT_TASKS).where(
+        filter=firestore.FieldFilter("updated_at", ">=", cutoff)
+    )
+    for snap in query.stream():
+        task = snap.to_dict() or {}
+        batch_id = task.get("batch_id")
+        if not batch_id:
+            continue
+        row = grouped.setdefault(batch_id, {
+            "batch_id": batch_id, "total": 0, "done": 0,
+            "running": 0, "pending": 0, "failed": 0, "latest": None,
+        })
+        row["total"] += 1
+        status = task.get("status") or "pending"
+        row[status] = row.get(status, 0) + 1
+        updated = task.get("updated_at")
+        if updated and (row["latest"] is None or updated > row["latest"]):
+            row["latest"] = updated
+    rows = sorted(grouped.values(), key=lambda r: r["latest"] or utcnow(), reverse=True)
+    for row in rows:
+        row["latest_at"] = row["latest"]
+        row["latest"] = row["latest"].strftime("%b %d %H:%M") if row["latest"] else ""
+    return rows

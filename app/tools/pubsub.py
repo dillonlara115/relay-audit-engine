@@ -18,6 +18,7 @@ from google.cloud import pubsub_v1
 from app.config import get_config
 
 AUDIT_EVENT = "run_audit"
+JOB_EVENT = "run_job"
 
 
 @lru_cache(maxsize=1)
@@ -89,6 +90,10 @@ def parse_push(envelope: dict) -> dict:
     data = message.get("data")
     if not data:
         attributes = message.get("attributes") or {}
+        if attributes.get("job_id"):
+            return {"event": JOB_EVENT, "job_id": attributes["job_id"],
+                    "kind": attributes.get("kind"),
+                    "message_id": message.get("messageId")}
         if attributes.get("batch_id") and attributes.get("prospect_id"):
             return {
                 "event": attributes.get("event", AUDIT_EVENT),
@@ -105,9 +110,25 @@ def parse_push(envelope: dict) -> dict:
         raise ValueError(f"undecodable message data: {exc}") from exc
     if not isinstance(body, dict):
         raise ValueError("message data was not an object")
-    if not body.get("batch_id") or not body.get("prospect_id"):
+    if body.get("event") == JOB_EVENT:
+        if not body.get("job_id"):
+            raise ValueError("job message is missing job_id")
+    elif not body.get("batch_id") or not body.get("prospect_id"):
         raise ValueError("message is missing batch_id or prospect_id")
 
     body["message_id"] = message.get("messageId")
     body["delivery_attempt"] = envelope.get("deliveryAttempt")
     return body
+
+
+def publish_job(job_id: str, kind: str, *, topic: str | None = None) -> str:
+    """Queue a long running operator job. Same transport as an audit, because
+    the retry, dead letter and at-least-once behaviour are the same needs."""
+    cfg = get_config()
+    payload = json.dumps({"event": JOB_EVENT, "job_id": job_id, "kind": kind}).encode()
+    future = _publisher().publish(
+        topic_path(topic or cfg.pubsub_job_topic),
+        payload,
+        event=JOB_EVENT, job_id=job_id, kind=kind,
+    )
+    return future.result(timeout=60)

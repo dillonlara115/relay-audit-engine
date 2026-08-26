@@ -35,6 +35,26 @@ BUILD_SHA = os.getenv("BUILD_SHA", "dev")
 
 app = FastAPI(title="relay-audit-worker")
 
+from app.console.auth import authorize as _console_authorize  # noqa: E402
+from app.console.routes import router as console_router  # noqa: E402
+
+app.include_router(console_router)
+
+
+@app.middleware("http")
+async def console_gate(request: Request, call_next):
+    """Guard every console path before FastAPI parses a body.
+
+    In a handler this check ran after form validation, so an
+    unauthenticated POST got a 422 listing the fields it should have sent.
+    Here it also covers routes added later without anyone remembering to.
+    """
+    if request.url.path.startswith("/console"):
+        gate = _console_authorize(request)
+        if gate is not None:
+            return gate
+    return await call_next(request)
+
 # One worker identity per process, so leases can be attributed and reclaimed.
 WORKER = worker_id()
 
@@ -284,6 +304,36 @@ def _authorized(request: Request) -> bool:
         return True
     provided = request.query_params.get("token") or request.headers.get("x-relay-secret")
     return provided == secret
+
+
+@app.post("/pubsub/job")
+async def pubsub_job(request: Request) -> Response:
+    """Long running operator jobs. Same ack contract as the audit handler."""
+    if not _authorized(request):
+        return Response(status_code=401)
+    try:
+        envelope = await request.json()
+        message = parse_push(envelope)
+    except Exception as exc:  # noqa: BLE001
+        log.error("malformed job push: %s", exc)
+        return Response(status_code=400)
+
+    job_id = (message.get("job_id")
+              or ((envelope.get("message") or {}).get("attributes") or {}).get("job_id"))
+    if not job_id:
+        return Response(status_code=400)
+
+    from app.job_runner import run_job
+
+    try:
+        ack, reason = await run_job(job_id, worker=WORKER)
+    except Exception as exc:  # noqa: BLE001 - never ack work that did not finish
+        log.exception("job %s failed", job_id)
+        return Response(status_code=500, headers={"x-relay-error": type(exc).__name__})
+
+    log.info("job %s -> %s (ack=%s)", job_id, reason, ack)
+    return Response(status_code=204 if ack else 409,
+                    headers={"x-relay-reason": reason[:80]})
 
 
 @app.post("/pubsub/audit")

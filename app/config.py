@@ -111,6 +111,9 @@ class Config:
     pubsub_dead_letter_topic: str = field(
         default_factory=lambda: _str("PUBSUB_DEAD_LETTER_TOPIC", "run-audit-dlq")
     )
+    pubsub_job_topic: str = field(
+        default_factory=lambda: _str("PUBSUB_JOB_TOPIC", "run-job")
+    )
     worker_shared_secret: str = field(default_factory=lambda: _str("WORKER_SHARED_SECRET"))
 
     def require(self, *names: str) -> None:
