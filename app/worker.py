@@ -56,6 +56,92 @@ def health() -> dict:
     return {"ok": True, "build": BUILD_SHA, "worker": WORKER}
 
 
+@app.post("/tick")
+async def tick(request: Request) -> Response:
+    """The daily tick from Cloud Scheduler. Self-healing, not scheduling.
+
+    Finds batches from the last two days with unfinished tasks whose leases
+    have lapsed and republishes them. The same thing the resume command does,
+    run on a clock so a batch that stalled overnight is moving again before
+    anyone looks at it.
+    """
+    if not _authorized(request):
+        return Response(status_code=401)
+
+    import asyncio
+    from datetime import timedelta
+
+    from app.leases import DONE, MAX_ATTEMPTS, RUNNING, AUDIT_TASKS
+    from app.tools.pubsub import publish_batch
+    from google.cloud import firestore as gcf
+
+    def stalled_by_batch() -> dict[str, list[str]]:
+        now = store.utcnow()
+        cutoff = now - timedelta(days=2)
+        out: dict[str, list[str]] = {}
+        query = store.get_client().collection(AUDIT_TASKS).where(
+            filter=gcf.FieldFilter("updated_at", ">=", cutoff)
+        )
+        for snap in query.stream():
+            task = snap.to_dict() or {}
+            if task.get("status") == DONE:
+                continue
+            if (task.get("attempts") or 0) >= MAX_ATTEMPTS:
+                continue
+            if task.get("status") == RUNNING and (task.get("lease_expires_at") or now) > now:
+                continue
+            batch_id = task.get("batch_id")
+            prospect_id = task.get("prospect_id")
+            if batch_id and prospect_id:
+                out.setdefault(batch_id, []).append(prospect_id)
+        return out
+
+    stalled = await asyncio.to_thread(stalled_by_batch)
+    republished = 0
+    for batch_id, prospect_ids in stalled.items():
+        republished += await asyncio.to_thread(publish_batch, batch_id, prospect_ids)
+        log.info("tick: republished %d stalled tasks in %s", len(prospect_ids), batch_id)
+
+    return Response(
+        status_code=200,
+        content=f'{{"republished": {republished}, "batches": {len(stalled)}}}',
+        media_type="application/json",
+    )
+
+
+@app.get("/r/{slug}")
+def public_report(slug: str, request: Request) -> Response:
+    """The one-page report. Public by slug, and only by slug.
+
+    The slug is 16 CSPRNG characters and the only access control this page
+    has, which is why it never appears in a sitemap, a log line, or a search
+    index. The engine spec's noindex lives in the meta tag and here in the
+    header, and the view log stores a salted hash, never the address itself.
+    """
+    from app.report.publish import log_view, render_by_slug
+
+    if len(slug) < 12 or len(slug) > 24:
+        return Response(status_code=404)
+
+    page = render_by_slug(slug)
+    if page is None:
+        return Response(status_code=404)
+
+    try:
+        client_ip = (request.headers.get("x-forwarded-for") or
+                     (request.client.host if request.client else "")).split(",")[0].strip()
+        log_view(slug, client_ip, request.headers.get("user-agent"))
+    except Exception:  # noqa: BLE001 - a failed view log must not break the page
+        log.warning("view log failed for %s", slug)
+
+    return Response(
+        content=page,
+        media_type="text/html; charset=utf-8",
+        headers={"X-Robots-Tag": "noindex, nofollow",
+                 "Cache-Control": "private, no-store"},
+    )
+
+
 def _authorized(request: Request) -> bool:
     """Defence in depth behind Cloud Run IAM.
 

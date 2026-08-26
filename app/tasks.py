@@ -26,10 +26,10 @@ from app.leases import (
     release_task,
     renew_task,
 )
+from app.agents.audit_graph import audit_via_graph
 from app.markets import resolve_market
-from app.pipeline import audit_one
 from app.store import firestore as store
-from app.tools.crawl import Crawler, registrable_host
+from app.tools.crawl import registrable_host
 
 # Renew at a third of the TTL so two renewals can fail before the lease lapses.
 RENEW_EVERY_SECONDS = AUDIT_LEASE_SECONDS // 3
@@ -103,10 +103,12 @@ async def run_audit_task(
     renewer = asyncio.create_task(_renew_forever(batch_id, prospect_id, worker))
 
     try:
-        async with Crawler() as crawler:
-            outcome = await audit_one(
-                crawler, prospect, market, definitions, batch_id=batch_id, persist=True
-            )
+        # The audit runs through the ADK graph: recon (SequentialAgent stage),
+        # the inspector fan (ParallelAgent), then checks and scoring. Same
+        # functions, same persistence, one architecture.
+        outcome = await audit_via_graph(
+            prospect, market, definitions, batch_id=batch_id, persist=True
+        )
     except Exception as exc:  # noqa: BLE001 - one prospect must not end the batch
         await asyncio.to_thread(
             fail_task, batch_id, prospect_id, worker=worker,

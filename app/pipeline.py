@@ -263,11 +263,14 @@ async def run_sweep(
     market_id = await asyncio.to_thread(store.upsert_market, market.name)
     batch_id = await asyncio.to_thread(store.create_batch, market_id, f"sweep {market.name}")
 
+    from app.tools.places import queries_for_market
+
     ingested = await ingest_market(
         market.query_market(),
         batch_id=batch_id,
         market_id=market_id,
         limit=limit,
+        queries=queries_for_market(market),
     )
     if on_ingested is not None:
         on_ingested(ingested)
@@ -425,6 +428,75 @@ async def _read_homepage(rendered: RenderResult | None) -> VisionVerdict | None:
         return VisionVerdict(ok=False, error=f"{type(exc).__name__}: {exc}")
 
 
+async def persist_audit(
+    *,
+    prospect: Mapping[str, Any],
+    batch_id: str,
+    score: Score,
+    results: dict[str, CheckResult],
+    definitions: list[Mapping[str, Any]],
+    crawl_error: str | None,
+    pages_crawled: int,
+    render: RenderResult | None = None,
+) -> str:
+    """One write path for an audit, whoever ran it. The ADK graph and the plain
+    pipeline must be indistinguishable in Firestore, or resumption and ranking
+    would depend on which code path did the work."""
+    place_id = str(prospect.get("place_id"))
+    audit_id = await asyncio.to_thread(store.create_audit, place_id, batch_id)
+    points = {str(d["code"]): int(d.get("points", 0)) for d in definitions}
+    rows = []
+    for code, res in results.items():
+        row = res.to_dict()
+        row["points_awarded"] = points.get(code, 0) if res.passed else 0
+        rows.append(row)
+    await asyncio.to_thread(store.write_check_results, audit_id, rows)
+
+    # The homepage screenshot is the evidence most findings point at. Uploading
+    # it here rather than at publish time means it exists for every audit, so
+    # guardrail 10 has something to check against.
+    if render is not None and render.ok:
+        image = render.screenshot()
+        if image:
+            from app.store import evidence as evidence_store
+
+            try:
+                await asyncio.to_thread(
+                    evidence_store.upload,
+                    place_id, audit_id,
+                    f"homepage.{'jpg' if render.screenshot_format == 'jpeg' else 'png'}",
+                    image,
+                    content_type=render.screenshot_mime,
+                    code="C17", kind="screenshot",
+                )
+            except Exception as exc:  # noqa: BLE001 - evidence is additive, not fatal
+                await asyncio.to_thread(
+                    store.update_audit, audit_id,
+                    {"evidence_error": f"{type(exc).__name__}: {exc}"[:200]},
+                )
+    await asyncio.to_thread(
+        store.update_audit,
+        audit_id,
+        {
+            "status": "scored",
+            "scores": {
+                "found": score.found, "chosen": score.chosen,
+                "booked": score.booked, "total": score.total,
+            },
+            "band": score.band,
+            "segment": score.segment,
+            "partial": score.partial,
+            "partial_sections": list(score.partial_sections),
+            "crawl_error": crawl_error,
+            "pages_crawled": pages_crawled,
+            "finished_at": store.utcnow(),
+        },
+    )
+    return audit_id
+
+
+
+
 async def audit_one(
     crawler: Crawler,
     prospect: Mapping[str, Any],
@@ -486,32 +558,10 @@ async def audit_one(
 
     audit_id: str | None = None
     if persist:
-        place_id = str(prospect.get("place_id"))
-        audit_id = await asyncio.to_thread(store.create_audit, place_id, batch_id)
-        points = {str(d["code"]): int(d.get("points", 0)) for d in definitions}
-        rows = []
-        for code, res in results.items():
-            row = res.to_dict()
-            row["points_awarded"] = points.get(code, 0) if res.passed else 0
-            rows.append(row)
-        await asyncio.to_thread(store.write_check_results, audit_id, rows)
-        await asyncio.to_thread(
-            store.update_audit,
-            audit_id,
-            {
-                "status": "scored",
-                "scores": {
-                    "found": score.found, "chosen": score.chosen,
-                    "booked": score.booked, "total": score.total,
-                },
-                "band": score.band,
-                "segment": score.segment,
-                "partial": score.partial,
-                "partial_sections": list(score.partial_sections),
-                "crawl_error": crawl_error,
-                "pages_crawled": len(ctx.site.pages),
-                "finished_at": store.utcnow(),
-            },
+        audit_id = await persist_audit(
+            prospect=prospect, batch_id=batch_id, score=score, results=results,
+            definitions=definitions, crawl_error=crawl_error,
+            pages_crawled=len(ctx.site.pages), render=render_result,
         )
 
     return AuditOutcome(

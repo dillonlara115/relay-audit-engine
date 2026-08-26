@@ -664,3 +664,19 @@ def test_the_search_box_is_still_not_a_lead_form():
         '<form action="/search"><input name="s" type="search"></form>'
     )))
     assert res.status == FAIL, "no lead form found is a fail, the search box does not count"
+
+
+def test_locality_queries_cover_the_enumerated_metro():
+    from app.markets import COLORADO_SPRINGS, resolve_market
+    from app.tools.places import queries_for_market
+
+    queries = queries_for_market(COLORADO_SPRINGS)
+    assert "roofing contractor in Colorado Springs, CO" in queries
+    assert "roofing contractor in Monument, CO" in queries
+    assert "roofing contractor in Fountain, CO" in queries
+    # the anchor city is not repeated as a locality query
+    assert sum("Colorado Springs, CO" in q for q in queries) >= 1
+    assert len(queries) > 20
+
+    # an unmapped market gets the metro variants alone
+    assert len(queries_for_market(resolve_market("Boise"))) == 5

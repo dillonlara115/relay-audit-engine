@@ -1,0 +1,204 @@
+"""The report layer. Every enforced rule from engine spec section 8.
+
+The em-dash scan, the three-findings assertion, the no-scores payload walk and
+the publish gate are the rules CLAUDE.md marks as build-failing, so they live
+here rather than in review comments.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+
+import pytest
+
+from app.copy_rules import EM_DASH, contains_forbidden_dash
+from app.report.data import (
+    FORBIDDEN_PAYLOAD_TERMS,
+    PublicFinding,
+    PublicReport,
+    hash_ip,
+    new_slug,
+)
+from app.report.template import render_report
+
+
+def finding(i: int, **overrides) -> PublicFinding:
+    base = dict(
+        ordinal=i,
+        what_we_saw="Nobody can book a time without waiting for a call back.",
+        what_it_means="Homeowners who want an answer now call whoever gives one.",
+        what_fixing_takes="A service the office can turn on in an afternoon.",
+    )
+    base.update(overrides)
+    return PublicFinding(**base)
+
+
+def report(**overrides) -> PublicReport:
+    base = dict(
+        slug=new_slug(),
+        business_name="Peak Roofing & Sons",
+        city="Colorado Springs",
+        findings=(finding(1), finding(2), finding(3)),
+    )
+    base.update(overrides)
+    return PublicReport(**base)
+
+
+# ── Exactly three ─────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("count", [0, 1, 2, 4])
+def test_a_report_refuses_anything_but_three_findings(count):
+    with pytest.raises(ValueError, match="exactly 3"):
+        report(findings=tuple(finding(i + 1) for i in range(count)))
+
+
+# ── No scores in the public payload ───────────────────────────────────────────
+
+
+def test_the_public_payload_carries_no_scores_bands_or_segments():
+    from app.report.data import forbidden_terms_in
+
+    assert forbidden_terms_in(json.dumps(report().to_dict())) == []
+
+
+def test_the_rendered_page_carries_no_scores_bands_or_segments():
+    from app.report.data import forbidden_terms_in
+
+    assert forbidden_terms_in(render_report(report())) == []
+
+
+def test_the_term_scan_is_word_bounded():
+    """Found on the first real published page: 'band' inside 'abandoned'.
+
+    A homeowner abandoning a slow site is exactly the language findings should
+    use, so the internal-vocabulary scan matches words, not substrings."""
+    from app.report.data import forbidden_terms_in
+
+    assert forbidden_terms_in("leads are abandoned at the finish line") == []
+    assert forbidden_terms_in("scores a partially good result") == []
+    assert forbidden_terms_in("his Booked score drops") == ["score"]
+    assert forbidden_terms_in("the Leaky Bucket segment") == ["segment", "leaky"]
+
+
+# ── The em-dash build test ────────────────────────────────────────────────────
+
+
+def test_no_forbidden_dash_in_any_report_source_string():
+    """CLAUDE.md: a test fails the build if an em-dash appears in report
+    templates. This scans the template source itself."""
+    for module in ("app/report/template.py", "app/report/data.py", "app/report/publish.py"):
+        assert not contains_forbidden_dash(Path(module).read_text()), module
+
+
+def test_no_forbidden_dash_in_a_rendered_page():
+    assert not contains_forbidden_dash(render_report(report()))
+
+
+def test_findings_with_a_dash_still_cannot_reach_a_clean_page():
+    """Defence in depth: the diagnostician sanitizes, the publish gate rechecks
+    the rendered page. If both ever fail, this documents the second gate."""
+    dirty = report(findings=(
+        finding(1, what_it_means=f"Jobs {EM_DASH} gone."), finding(2), finding(3)))
+    assert contains_forbidden_dash(render_report(dirty)), \
+        "the dash survives rendering, which is why publish() re-scans the page"
+
+
+# ── Structure and escaping ────────────────────────────────────────────────────
+
+
+def test_the_page_holds_the_required_structure():
+    page = render_report(report())
+    assert 'name="robots" content="noindex,nofollow"' in page
+    assert "What we did" in page
+    assert "Three things costing you booked jobs" in page
+    assert "We cannot see how fast your team actually moves" in page, \
+        "the honest Booked framing is not optional"
+    assert "lead-leakage-calculator" in page
+    assert "reply to the message" in page.lower()
+    assert "#16120E".lower() in page.lower() and "#F25C1F".lower() in page.lower()
+    assert "Staatliches" in page and "Barlow" in page
+
+
+def test_untrusted_text_is_escaped():
+    page = render_report(report(business_name='Peak <script>alert(1)</script>'))
+    assert "<script>alert" not in page
+    assert "&lt;script&gt;" in page
+
+
+def test_the_screenshot_block_only_renders_when_evidence_exists():
+    with_shot = render_report(report(screenshot_url="https://storage.example/x.jpg"))
+    without = render_report(report(screenshot_url=None))
+    assert "What we found" in with_shot and "img" in with_shot
+    assert "What we found" not in without
+
+
+def test_sixteen_px_minimum_holds():
+    assert "font-size: 16px" in render_report(report())
+
+
+# ── Slug and IP hashing ───────────────────────────────────────────────────────
+
+
+def test_slugs_are_sixteen_chars_and_unique():
+    slugs = {new_slug() for _ in range(200)}
+    assert len(slugs) == 200
+    assert all(len(s) == 16 for s in slugs)
+    assert all(re.fullmatch(r"[A-Za-z0-9_-]{16}", s) for s in slugs)
+
+
+def test_ip_hashing_never_yields_the_raw_ip():
+    hashed = hash_ip("203.0.113.9", salt="pepper")
+    assert "203.0.113.9" not in hashed
+    assert hashed == hash_ip("203.0.113.9", salt="pepper"), "stable for counting"
+    assert hashed != hash_ip("203.0.113.9", salt="other"), "salt matters"
+
+
+def test_hashing_without_a_salt_refuses():
+    with pytest.raises(ValueError, match="REPORT_IP_SALT"):
+        hash_ip("203.0.113.9", salt="")
+
+
+# ── The publish gate ──────────────────────────────────────────────────────────
+
+
+def test_publish_blocks_unapproved_findings(monkeypatch):
+    """Rule 7 at the last gate: drafts do not ship."""
+    from app.report import publish as pub
+
+    monkeypatch.setattr(pub.store, "get_audit", lambda a: {"prospect_id": "p1"})
+    monkeypatch.setattr(pub.store, "get_prospect", lambda p: {"business_name": "X"})
+    monkeypatch.setattr(pub.store, "load_suppressions", lambda: {})
+    monkeypatch.setattr(pub.store, "suppression_hit", lambda *a, **k: None)
+    monkeypatch.setattr(pub.store, "get_draft_findings",
+                        lambda a: {"status": "draft", "findings": []})
+    with pytest.raises(pub.PublishBlocked, match="not approved"):
+        pub.publish("a1")
+
+
+def test_publish_blocks_without_evidence(monkeypatch):
+    """Guardrail 10: no stored evidence, no claims."""
+    from app.report import publish as pub
+
+    monkeypatch.setattr(pub.store, "get_audit", lambda a: {"prospect_id": "p1"})
+    monkeypatch.setattr(pub.store, "get_prospect", lambda p: {"business_name": "X"})
+    monkeypatch.setattr(pub.store, "load_suppressions", lambda: {})
+    monkeypatch.setattr(pub.store, "suppression_hit", lambda *a, **k: None)
+    monkeypatch.setattr(pub.store, "get_draft_findings",
+                        lambda a: {"status": "approved", "findings": []})
+    monkeypatch.setattr(pub.evidence_store, "audit_evidence", lambda a: [])
+    with pytest.raises(pub.PublishBlocked, match="evidence"):
+        pub.publish("a1")
+
+
+def test_publish_blocks_a_suppressed_prospect(monkeypatch):
+    """Rule 3, checked at the very last moment before anything ships."""
+    from app.report import publish as pub
+
+    monkeypatch.setattr(pub.store, "get_audit", lambda a: {"prospect_id": "p1"})
+    monkeypatch.setattr(pub.store, "get_prospect", lambda p: {"business_name": "X"})
+    monkeypatch.setattr(pub.store, "load_suppressions", lambda: {"place_id": {"p1"}})
+    with pytest.raises(pub.PublishBlocked, match="suppressed"):
+        pub.publish("a1")

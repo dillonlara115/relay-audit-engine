@@ -628,6 +628,155 @@ def resume(
     console.print(f"  published [bold green]{published}[/] messages")
 
 
+# ── suppression ───────────────────────────────────────────────────────────────
+
+
+@app.command()
+def suppress(
+    value: str = typer.Argument(..., help="A place_id, domain, phone, or email to suppress."),
+    match_type: str = typer.Option(None, "--type", help="place_id | domain | phone | email. Inferred if omitted."),
+    reason: str = typer.Option("requested", "--reason", help="Why. 'requested' means they asked."),
+) -> None:
+    """Permanently suppress a prospect. Any opt-out is immediate and forever.
+
+    Matched on every identifier before ingest marks, draft generation, and
+    publishing. If they gave more than one identifier, run this once per
+    identifier.
+    """
+    inferred = match_type
+    if inferred is None:
+        if value.startswith("ChIJ") or value.startswith("EiC"):
+            inferred = "place_id"
+        elif "@" in value:
+            inferred = "email"
+        elif any(c.isdigit() for c in value) and sum(c.isdigit() for c in value) >= 7:
+            inferred = "phone"
+        else:
+            inferred = "domain"
+
+    if inferred == "phone":
+        from app.tools.phones import parse_phone
+
+        parsed = parse_phone(value)
+        if parsed:
+            value = parsed.e164
+
+    store.add_suppression(inferred, value, reason)
+    console.print(f"[bold]Suppressed[/] {inferred}: {value}  ({reason})")
+
+    if inferred == "place_id":
+        prospect = store.get_prospect(value)
+        if prospect:
+            store.mark_suppressed(value, reason)
+            console.print(f"  prospect record marked: {prospect.get('business_name', value)}")
+    console.print("  [dim]This match is checked before ingest, drafts, and publishing.[/]")
+
+
+# ── approve and publish ───────────────────────────────────────────────────────
+
+
+@app.command()
+def approve(
+    audit_id: str = typer.Argument(..., help="Audit whose drafted findings to approve."),
+    yes: bool = typer.Option(False, "--yes", help="Confirm approval non-interactively."),
+) -> None:
+    """Approve the drafted findings. This command IS the human selection.
+
+    Rule 7: findings are never auto-selected. Running this after reading them
+    is the act the rule requires, so it prints them and asks.
+    """
+    doc = store.get_draft_findings(audit_id)
+    if doc is None:
+        console.print(f"[red]No drafted findings for {audit_id}.[/]")
+        raise typer.Exit(code=1)
+    if doc.get("status") == "approved":
+        console.print("[green]Already approved.[/]")
+        return
+
+    for f in doc.get("findings") or []:
+        flags = f.get("mechanism_flags")
+        mark = f" [yellow](flagged: {', '.join(flags)})[/]" if flags else ""
+        console.print(f"\n[bold]{f.get('ordinal')}. ({f.get('code')})[/]{mark}")
+        console.print(f"   saw:   {f.get('what_we_saw')}")
+        console.print(f"   means: {f.get('what_it_means')}")
+        console.print(f"   fix:   {f.get('what_fixing_takes')}")
+
+    if doc.get("needs_review"):
+        console.print("\n[yellow]The model flagged possible mechanism language above. "
+                      "Fix the wording in Firestore before approving if it names a tool.[/]")
+
+    if not yes and not typer.confirm("\nApprove these three findings for the report?"):
+        console.print("Left as draft.")
+        raise typer.Exit(code=1)
+
+    store.get_client().collection(store.REPORT_FINDINGS).document(audit_id).set(
+        {"status": "approved", "approved_at": store.utcnow()}, merge=True
+    )
+    console.print("[green]Approved.[/] Publish with: "
+                  f"[dim]python -m app.cli publish {audit_id}[/]")
+
+
+@app.command()
+def publish(
+    audit_id: str = typer.Argument(..., help="Audit to publish a report for."),
+) -> None:
+    """Publish the one-page report. Blocked unless every rule holds."""
+    from app.report.publish import PublishBlocked, publish as publish_report
+
+    try:
+        result = publish_report(audit_id)
+    except PublishBlocked as exc:
+        console.print(f"[red]Publish blocked:[/] {exc}")
+        raise typer.Exit(code=1)
+    worker = "https://audit-worker-660681537988.us-central1.run.app"
+    console.print(f"[green]Published.[/]  slug [bold]{result.slug}[/]")
+    console.print(f"  {worker}{result.url_path}")
+
+
+# ── the coordinator ───────────────────────────────────────────────────────────
+
+
+@app.command()
+def agent(
+    prompt: str = typer.Argument(..., help='e.g. "Sweep Colorado Springs, audit the top 20, hand me the call list"'),
+) -> None:
+    """Hand the sweep coordinator a job and watch it work.
+
+    The coordinator is an LlmAgent whose tools are the pipeline stages. Every
+    number it reports came back through a tool; it cannot invent one.
+    """
+    import asyncio as _asyncio
+    import json as _json
+
+    from google.adk.runners import InMemoryRunner
+    from google.genai import types as genai_types
+
+    from app.agents.coordinator import build_coordinator
+
+    async def go() -> None:
+        runner = InMemoryRunner(build_coordinator(), app_name="relay-sweep")
+        session = await runner.session_service.create_session(
+            app_name="relay-sweep", user_id="operator"
+        )
+        async for event in runner.run_async(
+            user_id="operator",
+            session_id=session.id,
+            new_message=genai_types.Content(role="user",
+                                            parts=[genai_types.Part(text=prompt)]),
+        ):
+            for part in (event.content.parts if event.content else []) or []:
+                if part.function_call:
+                    args = _json.dumps(dict(part.function_call.args or {}))
+                    console.print(f"  [cyan]→ {part.function_call.name}[/]([dim]{_truncate(args, 90)}[/])")
+                elif part.function_response:
+                    payload = _json.dumps(part.function_response.response, default=str)
+                    console.print(f"  [green]← {part.function_response.name}[/] [dim]{_truncate(payload, 110)}[/]")
+                elif part.text and not event.partial:
+                    console.print(part.text.rstrip())
+
+    _asyncio.run(go())
+
+
 # ── rescore ───────────────────────────────────────────────────────────────────
 
 

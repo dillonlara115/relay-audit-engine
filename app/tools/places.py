@@ -56,6 +56,32 @@ DEFAULT_QUERIES: tuple[str, ...] = (
     "storm damage roof repair {market}",
 )
 
+# Smaller towns' operators often do not surface for a metro-name query at all:
+# Google anchors text search on the named locality, and a Monument roofer can
+# sit past result sixty for "roofing contractor in Colorado Springs" while
+# being the first result for his own town. One query per enumerated locality
+# closes that gap, and the fit gate already screens whatever else the wider
+# net drags in.
+LOCALITY_QUERY = "roofing contractor in {city}, {state}"
+
+
+def queries_for_market(spec: Any) -> list[str]:
+    """The metro-wide variants plus one query per enumerated locality.
+
+    Returns fully formatted query strings. An unmapped market has no
+    enumerated localities and gets the metro variants alone.
+    """
+    market = spec.query_market()
+    out = [template.format(market=market) for template in DEFAULT_QUERIES]
+    cities = sorted(getattr(spec, "cities", ()) or ())
+    state = getattr(spec, "state", None)
+    metro_name = spec.name.strip().lower()
+    for city in cities:
+        if city == metro_name:
+            continue  # the metro variants already cover the anchor city
+        out.append(LOCALITY_QUERY.format(city=city.title(), state=state or ""))
+    return out
+
 MAX_PAGES_PER_QUERY = 3
 
 
@@ -192,7 +218,7 @@ async def search_market(
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
         for template in templates:
-            text_query = template.format(market=market)
+            text_query = template.format(market=market) if "{market}" in template else template
             page_token: str | None = None
             for _page in range(MAX_PAGES_PER_QUERY):
                 payload = await _search_page(client, cfg.places_api_key, text_query, page_token)
