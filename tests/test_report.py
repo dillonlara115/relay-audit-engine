@@ -202,3 +202,68 @@ def test_publish_blocks_a_suppressed_prospect(monkeypatch):
     monkeypatch.setattr(pub.store, "load_suppressions", lambda: {"place_id": {"p1"}})
     with pytest.raises(pub.PublishBlocked, match="suppressed"):
         pub.publish("a1")
+
+
+# ── The dashboard gate ────────────────────────────────────────────────────────
+
+
+@pytest.fixture()
+def dash_client(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.config import Config
+    from app.worker import app as worker_app
+
+    monkeypatch.setattr("app.worker.get_config",
+                        lambda: Config(worker_shared_secret="dash-secret"))
+    return TestClient(worker_app, raise_server_exceptions=False)
+
+
+def test_the_dashboard_is_gated(dash_client):
+    assert dash_client.get("/dashboard").status_code == 401
+    assert dash_client.get("/dashboard?key=wrong").status_code == 401
+
+
+def test_the_key_becomes_a_cookie_and_leaves_the_url(dash_client, monkeypatch):
+    monkeypatch.setattr("app.worker._batch_overview", lambda: [])
+    first = dash_client.get("/dashboard?key=dash-secret", follow_redirects=False)
+    assert first.status_code == 303
+    assert first.headers["location"] == "/dashboard"
+    assert "relay_dash" in first.cookies
+
+    page = dash_client.get("/dashboard")  # cookie persisted by the client
+    assert page.status_code == 200
+    assert "dash-secret" not in page.text, "the secret never appears in a page"
+    assert "Batches" in page.text
+
+
+def test_the_dashboard_never_renders_the_secret(dash_client, monkeypatch):
+    monkeypatch.setattr("app.worker._batch_overview", lambda: [])
+    dash_client.get("/dashboard?key=dash-secret", follow_redirects=False)
+    page = dash_client.get("/dashboard")
+    assert "dash-secret" not in page.text
+
+
+def test_dashboard_pages_are_noindex(dash_client, monkeypatch):
+    monkeypatch.setattr("app.worker._batch_overview", lambda: [])
+    dash_client.get("/dashboard?key=dash-secret", follow_redirects=False)
+    page = dash_client.get("/dashboard")
+    assert page.headers["x-robots-tag"] == "noindex, nofollow"
+
+
+def test_dashboard_templates_carry_no_forbidden_dash():
+    from app.report.dashboard import render_batch, render_overview
+
+    overview = render_overview([{"batch_id": "b1", "total": 4, "done": 2,
+                                 "running": 1, "pending": 1, "failed": 0,
+                                 "latest": "today"}])
+    batch = render_batch("b1", [{"rank": 1, "business_name": "Peak <script>",
+                                 "city": "COS", "segment": "Leaky Bucket",
+                                 "scores": {"found": 1, "chosen": 2, "booked": 3,
+                                            "total": 6}, "phone": "x",
+                                 "partial": True, "incumbent_agency": "scorpion"}],
+                         {"Leaky Bucket": 1})
+    assert not contains_forbidden_dash(overview)
+    assert not contains_forbidden_dash(batch)
+    assert "<script>" not in batch, "names are escaped"
+    assert "&lt;script&gt;" in batch

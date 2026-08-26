@@ -56,6 +56,137 @@ def health() -> dict:
     return {"ok": True, "build": BUILD_SHA, "worker": WORKER}
 
 
+# ── operator dashboard ────────────────────────────────────────────────────────
+#
+# Read only and internal. The gate: visit once with ?key=<WORKER_SHARED_SECRET>,
+# get a cookie holding the secret's hash, get redirected to a clean URL. The
+# secret itself never sits in a URL after that first hop, and the cookie cannot
+# be replayed against a rotated secret.
+
+import hashlib
+
+from fastapi.responses import RedirectResponse
+
+_DASH_COOKIE = "relay_dash"
+
+
+def _dash_token() -> str:
+    secret = get_config().worker_shared_secret
+    return hashlib.sha256(f"dash:{secret}".encode()).hexdigest() if secret else ""
+
+
+def _dash_authorized(request: Request) -> Response | None:
+    """None when authorized, otherwise the response to send instead."""
+    token = _dash_token()
+    if not token:
+        return None  # no secret configured: local dev, IAM is the only gate
+    key = request.query_params.get("key")
+    if key is not None:
+        if key == get_config().worker_shared_secret:
+            # Secure follows the real scheme: Cloud Run terminates TLS and
+            # forwards http, so the header is the truth, and a local test
+            # client speaks plain http where a Secure cookie would vanish.
+            https = (request.headers.get("x-forwarded-proto") or request.url.scheme) == "https"
+            response = RedirectResponse(url=request.url.path, status_code=303)
+            response.set_cookie(_DASH_COOKIE, token, httponly=True, secure=https,
+                                max_age=12 * 3600, samesite="lax")
+            return response
+        return Response(status_code=401)
+    if request.cookies.get(_DASH_COOKIE) == token:
+        return None
+    return Response(status_code=401)
+
+
+def _batch_overview() -> list:
+    """Recent batches, aggregated from the task ledger client side. The ledger
+    is the truth about progress; the batches collection only counts sweeps."""
+    from datetime import timedelta
+
+    from google.cloud import firestore as gcf
+
+    from app.leases import AUDIT_TASKS
+
+    cutoff = store.utcnow() - timedelta(days=14)
+    grouped: dict = {}
+    query = store.get_client().collection(AUDIT_TASKS).where(
+        filter=gcf.FieldFilter("updated_at", ">=", cutoff)
+    )
+    for snap in query.stream():
+        task = snap.to_dict() or {}
+        batch_id = task.get("batch_id")
+        if not batch_id:
+            continue
+        row = grouped.setdefault(batch_id, {"batch_id": batch_id, "total": 0,
+                                            "done": 0, "running": 0, "pending": 0,
+                                            "failed": 0, "latest": None})
+        row["total"] += 1
+        row[task.get("status") or "pending"] = row.get(task.get("status") or "pending", 0) + 1
+        updated = task.get("updated_at")
+        if updated and (row["latest"] is None or updated > row["latest"]):
+            row["latest"] = updated
+    rows = sorted(grouped.values(), key=lambda r: r["latest"] or store.utcnow(), reverse=True)
+    for row in rows:
+        row["latest"] = row["latest"].strftime("%b %d %H:%M") if row["latest"] else ""
+    return rows
+
+
+@app.get("/dashboard")
+async def dashboard(request: Request) -> Response:
+    import asyncio
+
+    from app.report.dashboard import render_overview
+
+    gate = _dash_authorized(request)
+    if gate is not None:
+        return gate
+    batches = await asyncio.to_thread(_batch_overview)
+    return Response(content=render_overview(batches),
+                    media_type="text/html; charset=utf-8",
+                    headers={"X-Robots-Tag": "noindex, nofollow",
+                             "Cache-Control": "private, no-store"})
+
+
+@app.get("/dashboard/{batch_id}")
+async def dashboard_batch(batch_id: str, request: Request) -> Response:
+    import asyncio
+
+    from app.ranker import rank
+    from app.report.dashboard import render_batch
+
+    gate = _dash_authorized(request)
+    if gate is not None:
+        return gate
+
+    def assemble():
+        audits = list(store.audits_for_batch(batch_id))
+        prospects = {}
+        for audit in audits:
+            pid = audit.get("prospect_id")
+            if pid and pid not in prospects:
+                prospects[pid] = store.get_prospect(pid) or {}
+        slugs = {a.get("audit_id"): a.get("report_slug") for a in audits}
+        ranked = rank(audits, prospects)
+        rows = []
+        segments: dict = {}
+        for r in ranked:
+            segments[r.segment or "incomplete"] = segments.get(r.segment or "incomplete", 0) + 1
+            findings = store.get_draft_findings(r.audit_id)
+            rows.append({
+                "rank": r.rank, "business_name": r.business_name, "city": r.city,
+                "segment": r.segment, "scores": dict(r.scores), "phone": r.phone,
+                "partial": r.partial, "incumbent_agency": r.incumbent_agency,
+                "report_slug": slugs.get(r.audit_id),
+                "findings_status": (findings or {}).get("status"),
+            })
+        return rows, segments
+
+    rows, segments = await asyncio.to_thread(assemble)
+    return Response(content=render_batch(batch_id, rows, segments),
+                    media_type="text/html; charset=utf-8",
+                    headers={"X-Robots-Tag": "noindex, nofollow",
+                             "Cache-Control": "private, no-store"})
+
+
 @app.post("/tick")
 async def tick(request: Request) -> Response:
     """The daily tick from Cloud Scheduler. Self-healing, not scheduling.
