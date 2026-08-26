@@ -24,6 +24,39 @@ MOBILE_VIEWPORT = {"width": 390, "height": 844}
 MIN_BODY_FONT_PX = 16
 
 
+# A site can serve real HTML to a plain fetch and still hand a headless browser
+# an interstitial. Measured on a real prospect: httpx got 200 and 136KB of
+# roofing site, the browser got redirected to a Sucuri captcha at HTTP 202 with
+# 175 characters on it. Judging that page would have produced five false
+# findings, including a vision verdict that his homepage "shows absolutely no
+# business information".
+CHALLENGE_URL_MARKERS = (
+    "/.well-known/sgcaptcha",
+    "/cdn-cgi/challenge-platform",
+    "__cf_chl",
+    "/_incapsula_resource",
+    "/distil_r_captcha",
+    "/challenge?",
+)
+
+CHALLENGE_TITLES = (
+    "robot challenge screen",
+    "just a moment",
+    "attention required",
+    "checking your browser",
+    "security check",
+    "verifying you are human",
+    "are you a robot",
+    "one moment, please",
+    "access denied",
+    "ddos protection",
+)
+
+# A real homepage has more on it than this. Used only alongside an unusual
+# status, so a genuinely sparse page served at 200 is never caught by it.
+THIN_PAGE_CHARS = 400
+
+
 @dataclass(frozen=True)
 class RenderResult:
     ok: bool
@@ -43,6 +76,7 @@ class RenderResult:
     console_errors: Sequence[str] = ()
     screenshot_b64: str | None = None
     screenshot_bytes: int | None = None
+    screenshot_format: str = "png"
     error: str | None = None
 
     # ── Derived reads over the font histogram ─────────────────────────────────
@@ -92,8 +126,42 @@ class RenderResult:
     def ctas_above_fold(self) -> list[Mapping[str, Any]]:
         return [x for x in self.ctas if x.get("above_fold")]
 
+    def bot_challenge(self) -> str | None:
+        """The marker that says this is an interstitial, or None.
+
+        Returning the marker rather than a bool means the skip note can say
+        which one fired, so a wrong guess here is visible in the evidence
+        instead of silently dropping five checks.
+        """
+        target = (self.final_url or self.url or "").lower()
+        for marker in CHALLENGE_URL_MARKERS:
+            if marker in target:
+                return f"url:{marker}"
+
+        title = (self.title or "").strip().lower()
+        for marker in CHALLENGE_TITLES:
+            if marker in title:
+                return f"title:{marker}"
+
+        # Neither name matched, so fall back to shape: almost no text, nothing
+        # to interact with, and a status a homepage does not normally return.
+        unusual_status = self.status is not None and self.status != 200
+        if unusual_status and self.total_chars < THIN_PAGE_CHARS:
+            if not self.forms and not self.tel_links and not self.ctas:
+                return f"thin page at HTTP {self.status}"
+        return None
+
+    @property
+    def usable(self) -> bool:
+        """ok, and actually his homepage rather than something guarding it."""
+        return self.ok and self.bot_challenge() is None
+
     def screenshot(self) -> bytes | None:
         return base64.b64decode(self.screenshot_b64) if self.screenshot_b64 else None
+
+    @property
+    def screenshot_mime(self) -> str:
+        return "image/jpeg" if self.screenshot_format == "jpeg" else "image/png"
 
 
 def _from_payload(payload: Mapping[str, Any], url: str) -> RenderResult:
@@ -116,6 +184,7 @@ def _from_payload(payload: Mapping[str, Any], url: str) -> RenderResult:
         console_errors=payload.get("console_errors") or (),
         screenshot_b64=shot.get("bytes"),
         screenshot_bytes=shot.get("size_bytes"),
+        screenshot_format=shot.get("format") or "png",
         error=payload.get("error"),
     )
 
@@ -126,6 +195,8 @@ async def render(
     client: httpx.AsyncClient | None = None,
     screenshot: str = "viewport",
     viewport: Mapping[str, int] | None = None,
+    image_format: str = "png",
+    max_height: int = 6000,
     timeout: float = 90.0,
 ) -> RenderResult:
     """Render one URL. Never raises: an unreachable renderer is a skipped check."""
@@ -136,6 +207,8 @@ async def render(
         "url": url,
         "viewport": dict(viewport or MOBILE_VIEWPORT),
         "screenshot": screenshot,
+        "format": image_format,
+        "max_height": max_height,
     }
     endpoint = cfg.renderer_url.rstrip("/") + "/render"
 

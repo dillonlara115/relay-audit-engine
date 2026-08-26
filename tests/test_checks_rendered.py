@@ -211,3 +211,59 @@ def test_screenshot_decodes_from_base64():
     result = render(screenshot_b64=base64.b64encode(payload).decode())
     assert result.screenshot() == payload
     assert render().screenshot() is None
+
+
+# ── Bot protection ────────────────────────────────────────────────────────────
+#
+# Found on a real prospect: httpx received 200 and 136KB of roofing site while
+# the headless browser was redirected to a Sucuri captcha at HTTP 202 with 175
+# characters on it. Five checks scored that page, and the vision verdict read
+# "shows absolutely no business information". None of it was his site.
+
+
+@pytest.mark.parametrize(
+    "overrides, marker",
+    [
+        ({"final_url": "http://x.com/.well-known/sgcaptcha/?r=%2F"}, "url:/.well-known/sgcaptcha"),
+        ({"final_url": "http://x.com/cdn-cgi/challenge-platform/h/b"}, "url:/cdn-cgi/challenge-platform"),
+        ({"title": "Robot Challenge Screen"}, "title:robot challenge screen"),
+        ({"title": "Just a moment..."}, "title:just a moment"),
+        ({"title": "Attention Required! | Cloudflare"}, "title:attention required"),
+        ({"title": "Access denied"}, "title:access denied"),
+    ],
+)
+def test_named_interstitials_are_recognised(overrides, marker):
+    assert render(**overrides).bot_challenge() == marker
+
+
+def test_a_thin_page_on_an_unusual_status_is_caught_by_shape():
+    """The real case: HTTP 202, 175 characters, nothing to interact with."""
+    result = render(status=202, title="", fonts={"histogram": {"16": 175}, "total_chars": 175},
+                    tel_links=[], forms=[], ctas=[])
+    assert result.bot_challenge() == "thin page at HTTP 202"
+
+
+def test_a_sparse_but_healthy_page_is_not_a_challenge():
+    """A genuinely minimal homepage served at 200 must not be mistaken for one."""
+    result = render(status=200, title="Peak Roofing",
+                    fonts={"histogram": {"16": 120}, "total_chars": 120},
+                    tel_links=[], forms=[], ctas=[])
+    assert result.bot_challenge() is None
+    assert result.usable
+
+
+def test_a_normal_render_is_usable():
+    assert render().bot_challenge() is None
+    assert render().usable is True
+
+
+def test_a_failed_render_is_not_usable():
+    assert RenderResult(ok=False, url="https://x.com/", error="Timeout").usable is False
+
+
+@pytest.mark.parametrize("code", ["C2", "C5", "C7"])
+def test_render_checks_skip_on_a_bot_challenge_rather_than_scoring_the_door(code):
+    res = run(code, render(title="Robot Challenge Screen", status=202))
+    assert res.status == SKIPPED
+    assert "bot protection screen" in res.note
+    assert res.observed["challenge"] == "title:robot challenge screen"

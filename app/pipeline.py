@@ -30,6 +30,7 @@ from app.tools.crawl import (
     SiteCrawl,
     normalize_url,
 )
+from app.agents.vision import VisionVerdict, read_screenshot
 from app.tools.pagespeed import PsiResult, analyze
 from app.tools.places import PlaceRecord, ingest_market
 from app.tools.render import RenderResult, render
@@ -347,7 +348,9 @@ async def _render_homepage(crawl: SiteCrawl) -> RenderResult | None:
     if not target:
         return None
     try:
-        return await render(target)
+        # A clipped full page rather than the fold: C9 asks about project
+        # photos, and those live below the hero on every roofing site.
+        return await render(target, screenshot="full", image_format="jpeg")
     except Exception as exc:  # noqa: BLE001 - a renderer fault skips its checks
         return RenderResult(ok=False, url=target, error=f"{type(exc).__name__}: {exc}")
 
@@ -371,6 +374,26 @@ async def _measure_speed(crawl: SiteCrawl) -> PsiResult | None:
         return await analyze(target)
     except Exception as exc:  # noqa: BLE001 - a provider fault skips its checks
         return PsiResult(ok=False, url=target, error=f"{type(exc).__name__}: {exc}")
+
+
+
+async def _read_homepage(rendered: RenderResult | None) -> VisionVerdict | None:
+    """Hand the screenshot to the vision component.
+
+    This is the one stage that cannot run beside the render, because it is the
+    render's output. PageSpeed still runs alongside both.
+    """
+    if rendered is None or not rendered.usable:
+        # Includes the bot challenge case. Sending an interstitial to the model
+        # costs money to be told the page is a captcha.
+        return None
+    image = rendered.screenshot()
+    if not image:
+        return None
+    try:
+        return await read_screenshot(image, mime_type=rendered.screenshot_mime)
+    except Exception as exc:  # noqa: BLE001 - a model fault skips its checks
+        return VisionVerdict(ok=False, error=f"{type(exc).__name__}: {exc}")
 
 
 async def audit_one(
@@ -405,8 +428,12 @@ async def audit_one(
     # The inspector stages are independent and I/O bound, which is exactly why
     # the engine spec models them as a ParallelAgent. Sequentially this is a
     # nine second render followed by a thirty second Lighthouse run.
-    render_result, psi_result = await asyncio.gather(
-        _render_homepage(crawl), _measure_speed(crawl)
+    async def look() -> tuple[RenderResult | None, VisionVerdict | None]:
+        rendered = await _render_homepage(crawl)
+        return rendered, await _read_homepage(rendered)
+
+    (render_result, vision_result), psi_result = await asyncio.gather(
+        look(), _measure_speed(crawl)
     )
 
     ctx = AuditContext(
@@ -415,6 +442,7 @@ async def audit_one(
         market=market,
         render=render_result,
         psi=psi_result,
+        vision=vision_result,
     )
     results = run_checks(ctx, definitions)
     score = compute(outcomes_from(statuses(results), definitions))

@@ -429,8 +429,8 @@ def test_run_checks_marks_unimplemented_definitions_skipped():
     from app.checks.definitions import CHECK_DEFINITIONS
 
     results = run_checks(context(homepage_html=doc("<p>hi</p>")), CHECK_DEFINITIONS)
-    assert results["C9"].status == SKIPPED, "the vision agent is not built yet"
-    assert results["C9"].note == "Not implemented yet."
+    assert results["B1"].status == SKIPPED, "the Booked checks land on Friday"
+    assert results["B1"].note == "Not implemented yet."
     assert "F1" not in results, "disabled definitions never run"
     assert results["F3"].status == PASS
 

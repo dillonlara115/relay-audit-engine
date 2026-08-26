@@ -88,6 +88,7 @@ function collectMetrics() {
   // ── Horizontal overflow ────────────────────────────────────────────────────
   const doc = document.documentElement;
   const scrollWidth = Math.max(doc.scrollWidth, document.body ? document.body.scrollWidth : 0);
+  const scrollHeight = Math.max(doc.scrollHeight, document.body ? document.body.scrollHeight : 0);
   const overflowing = [];
   for (const el of document.querySelectorAll("body *")) {
     if (overflowing.length >= 5) break;
@@ -163,7 +164,14 @@ function collectMetrics() {
 
   return {
     viewport: { width: vw, height: vh },
-    document: { scroll_width: Math.round(scrollWidth), client_width: vw },
+    document: {
+      scroll_width: Math.round(scrollWidth),
+      client_width: vw,
+      // How much page exists below the fold. The vision screenshot is clipped,
+      // so this is what says whether the model saw the whole story.
+      scroll_height: Math.round(scrollHeight),
+      client_height: vh,
+    },
     horizontal_scroll: scrollWidth > vw + 2,
     overflowing_elements: overflowing,
     fonts: { histogram, total_chars: totalChars },
@@ -181,6 +189,8 @@ async function render(payload) {
     viewport = DEFAULT_VIEWPORT,
     screenshot = "viewport",
     settle_ms = 1200,
+    format = "png",
+    max_height = 6000,
   } = payload;
 
   const browser = await getBrowser();
@@ -217,11 +227,35 @@ async function render(payload) {
 
     let shot = null;
     if (screenshot !== "none") {
-      const buffer = await page.screenshot({
-        type: "png",
-        fullPage: screenshot === "full",
-      });
-      shot = { encoding: "base64", bytes: buffer.toString("base64"), size_bytes: buffer.length };
+      let options = { type: format === "jpeg" ? "jpeg" : "png" };
+      if (options.type === "jpeg") options.quality = 82;
+
+      if (screenshot === "full") {
+        // A roofing homepage can run past 20000px, and a model downsamples a
+        // strip that tall until nothing in it is legible. Clipping keeps the
+        // hero, the services band and the start of the gallery at a size worth
+        // looking at, which is where project photos actually live.
+        // clip on its own intersects the viewport and silently returns the
+        // fold, byte for byte identical to a viewport shot. fullPage is what
+        // makes clip address the whole scrollable page. Both are required.
+        const height = await page.evaluate(() => document.documentElement.scrollHeight);
+        options.fullPage = true;
+        options.clip = {
+          x: 0,
+          y: 0,
+          width: viewport.width,
+          height: Math.min(height, max_height),
+        };
+      }
+
+      const buffer = await page.screenshot(options);
+      shot = {
+        encoding: "base64",
+        format: options.type,
+        bytes: buffer.toString("base64"),
+        size_bytes: buffer.length,
+        clipped_height: options.clip ? options.clip.height : viewport.height,
+      };
     }
 
     return {

@@ -30,6 +30,12 @@ def _needs_render(ctx: AuditContext, code: str) -> CheckResult | None:
     if not getattr(render, "ok", False):
         return skip(code, "The page could not be rendered in a browser.",
                     error=getattr(render, "error", None))
+    challenge = render.bot_challenge()
+    if challenge:
+        # His site is fine. Ours got stopped at the door, and scoring the door
+        # would be scoring the wrong page.
+        return skip(code, "The site showed a bot protection screen instead of the page, "
+                          "so this was not checked.", challenge=challenge)
     return None
 
 
