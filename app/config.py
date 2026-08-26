@@ -101,6 +101,18 @@ class Config:
 
     max_concurrent_audits: int = field(default_factory=lambda: _int("MAX_CONCURRENT_AUDITS", 4))
 
+    # Pub/Sub
+    pubsub_audit_topic: str = field(
+        default_factory=lambda: _str("PUBSUB_AUDIT_TOPIC", "run-audit")
+    )
+    pubsub_audit_subscription: str = field(
+        default_factory=lambda: _str("PUBSUB_AUDIT_SUBSCRIPTION", "run-audit-push")
+    )
+    pubsub_dead_letter_topic: str = field(
+        default_factory=lambda: _str("PUBSUB_DEAD_LETTER_TOPIC", "run-audit-dlq")
+    )
+    worker_shared_secret: str = field(default_factory=lambda: _str("WORKER_SHARED_SECRET"))
+
     def require(self, *names: str) -> None:
         """Raise unless every named attribute is set. Call at entry points."""
         missing = [name for name in names if not getattr(self, name)]
@@ -125,6 +137,8 @@ _ENV_NAME = {
     "meta_ads_access_token": "META_ADS_ACCESS_TOKEN",
     "gcs_evidence_bucket": "GCS_EVIDENCE_BUCKET",
     "report_ip_salt": "REPORT_IP_SALT",
+    "pubsub_audit_topic": "PUBSUB_AUDIT_TOPIC",
+    "worker_shared_secret": "WORKER_SHARED_SECRET",
 }
 
 

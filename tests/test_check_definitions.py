@@ -48,8 +48,8 @@ def test_by_code_indexes_every_definition():
 
 def test_enabled_only_excludes_the_checks_we_are_not_running():
     assert section_points(FOUND, enabled_only=True) == 18
-    assert section_points(CHOSEN, enabled_only=True) == 30
-    assert section_points(BOOKED, enabled_only=True) == 40
+    assert section_points(CHOSEN, enabled_only=True) == 28  # C9 cut
+    assert section_points(BOOKED, enabled_only=True) == 36  # B6 cut, see its disabled_reason
 
 
 def test_every_disabled_check_says_why():
@@ -58,10 +58,14 @@ def test_every_disabled_check_says_why():
             assert row.get("disabled_reason"), f"{row['code']} is off with no reason given"
 
 
-def test_no_booked_check_is_disabled():
+def test_only_the_unmeasurable_booked_check_is_disabled():
     """Booked carries the most weight and is the section nobody else audits.
-    Disabling one silently would gut the segment logic."""
-    assert all(r["enabled"] for r in CHECK_DEFINITIONS if r["section"] == BOOKED)
+    B6 is off because measuring it requires submitting the form, which hard
+    rule 1 forbids absolutely. Anything else going dark here needs a reason
+    as strong as that one."""
+    disabled = [r["code"] for r in CHECK_DEFINITIONS
+                if r["section"] == BOOKED and not r["enabled"]]
+    assert disabled == ["B6"]
 
 
 def test_every_definition_carries_the_fields_firestore_expects():

@@ -23,18 +23,10 @@ from app.checks.definitions import BOOKED, CHOSEN, FOUND, MEASUREMENT, SECTION_W
 __all__ = [n for n in dir() if not n.startswith('_')]
 
 # ── Statuses ──────────────────────────────────────────────────────────────────
+# Defined in app.status (a leaf module) and re-exported here so this module and
+# the check runner can share them without importing each other.
 
-PASS = "pass"
-FAIL = "fail"
-SKIPPED = "skipped"
-ERROR = "error"
-
-VALID_STATUSES = frozenset({PASS, FAIL, SKIPPED, ERROR})
-
-# Skipped and errored both mean "we did not measure this". They are recorded
-# separately because one is a policy outcome and the other is a defect, but they
-# leave the denominator identically.
-NOT_MEASURED = frozenset({SKIPPED, ERROR})
+from app.status import ERROR, FAIL, NOT_MEASURED, PASS, SKIPPED, VALID_STATUSES  # noqa: E402
 
 SCORED_SECTIONS = (FOUND, CHOSEN, BOOKED)
 

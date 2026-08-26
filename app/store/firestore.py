@@ -115,9 +115,16 @@ def create_batch(market_id: str, label: str) -> str:
 
 
 def bump_batch_counts(batch_id: str, **deltas: int) -> None:
-    updates = {f"counts.{k}": firestore.Increment(v) for k, v in deltas.items() if v}
-    if updates:
-        get_client().collection(BATCHES).document(batch_id).update(updates)
+    """Increment counters, creating the batch doc if it does not exist.
+
+    update() raises NotFound on a missing doc, and a dispatched batch id has no
+    doc unless a sweep created one. That NotFound surfaced after an audit had
+    already completed, turning a finished prospect into a 500 and a redelivery.
+    set(merge) with Increment does the same arithmetic without the precondition.
+    """
+    updates = {"counts": {k: firestore.Increment(v) for k, v in deltas.items() if v}}
+    if updates["counts"]:
+        get_client().collection(BATCHES).document(batch_id).set(updates, merge=True)
 
 
 def complete_batch(batch_id: str, status: str = "complete") -> None:
@@ -219,13 +226,21 @@ def create_audit(prospect_id: str, batch_id: str) -> str:
 
 
 def audits_for_batch(batch_id: str, segment: str | None = None) -> Iterator[dict[str, Any]]:
-    """Backed by composite index: batch_id ASC, segment ASC, scores.booked ASC."""
+    """Every audit in a batch, or one segment of it.
+
+    Ordering happens in the ranker, not here. An order_by("segment") looks free
+    given the composite index, but Firestore excludes any document missing an
+    ordered field, and an unsegmented audit stores no segment at all (absent is
+    absent). The first ranked batch silently lost its 22 unsegmented audits
+    that way: the call list reported 18 of 40 and nothing errored. The index
+    still serves the segment-filtered form below.
+    """
     query = get_client().collection(AUDITS).where(
         filter=firestore.FieldFilter("batch_id", "==", batch_id)
     )
     if segment is not None:
         query = query.where(filter=firestore.FieldFilter("segment", "==", segment))
-    query = query.order_by("segment").order_by("scores.booked")
+        query = query.order_by("scores.booked")
     for snap in query.stream():
         yield {"audit_id": snap.id, **(snap.to_dict() or {})}
 
@@ -381,4 +396,27 @@ def audit_checks(audit_id: str) -> list[dict[str, Any]]:
 
 def get_audit(audit_id: str) -> dict[str, Any] | None:
     snap = get_client().collection(AUDITS).document(audit_id).get()
+    return snap.to_dict() if snap.exists else None
+
+
+def save_draft_findings(audit_id: str, findings: list[Mapping[str, Any]],
+                        *, needs_review: bool, model: str | None) -> None:
+    """Store the diagnostician's draft. Status is draft until a human approves.
+
+    Rule 7: findings are human-selected. Nothing that reads this collection may
+    publish a report from a doc whose status is not approved.
+    """
+    get_client().collection(REPORT_FINDINGS).document(audit_id).set(
+        _plain({
+            "findings": list(findings),
+            "status": "draft",
+            "needs_review": needs_review,
+            "model": model,
+            "drafted_at": utcnow(),
+        })
+    )
+
+
+def get_draft_findings(audit_id: str) -> dict[str, Any] | None:
+    snap = get_client().collection(REPORT_FINDINGS).document(audit_id).get()
     return snap.to_dict() if snap.exists else None

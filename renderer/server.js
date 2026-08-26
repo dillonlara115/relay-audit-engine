@@ -56,6 +56,141 @@ async function getBrowser() {
  * C5 and C7 live in Python next to the criteria doc, so retuning one does not
  * mean redeploying a browser.
  */
+
+/**
+ * B2 form health, run inside the page. Fills the most likely lead form and
+ * reads the browser's own constraint validation state. It never calls
+ * form.submit(), never clicks a submit control, and never dispatches a submit
+ * event. Filling to test validation is check B2; submitting sends a real
+ * person a real lead notification, and nothing here can do it.
+ */
+function probeFormHealth() {
+  const INVISIBLE = ["hidden", "submit", "button", "image", "reset"];
+  const visible = (el) => {
+    const s = window.getComputedStyle(el);
+    if (s.display === "none" || s.visibility === "hidden") return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 1 && r.height > 1;
+  };
+
+  const forms = [...document.querySelectorAll("form")];
+  const candidates = forms
+    .map((form) => {
+      const controls = [...form.querySelectorAll("input, select, textarea")].filter((c) => {
+        const type = (c.getAttribute("type") || "").toLowerCase();
+        return !INVISIBLE.includes(type);
+      });
+      const names = controls.map((c) => (c.getAttribute("name") || c.id || "").toLowerCase()).join(" ");
+      const kinds = new Set(controls.map((c) => (c.getAttribute("type") || c.tagName).toLowerCase()));
+      // By name, by input type (Gravity Forms names fields input_9 but still
+      // types the email field), or by shape: several fields plus a message box.
+      const contactish =
+        /email|phone|tel|name|message|zip|address/.test(names) ||
+        kinds.has("email") || kinds.has("tel") ||
+        (controls.length >= 3 && kinds.has("textarea"));
+      const searchish = /(^|[^a-z])s(earch)?([^a-z]|$)/.test(names) && controls.length < 2;
+      // The form a homeowner would use, not the first one in the DOM. A page
+      // carries newsletter strips and hidden modal forms alongside the real
+      // one; probing an invisible modal produced a verdict about a form no
+      // visitor can see.
+      const score =
+        (visible(form) ? 100 : 0) +
+        controls.filter(visible).length * 2 +
+        (kinds.has("email") ? 10 : 0) +
+        (kinds.has("tel") ? 10 : 0) +
+        (kinds.has("textarea") ? 5 : 0);
+      return { form, controls, contactish, searchish, score };
+    })
+    .filter((c) => c.controls.length >= 2 && c.contactish && !c.searchish)
+    .sort((a, b) => b.score - a.score);
+
+  if (!candidates.length) return { found: false };
+
+  const { form, controls } = candidates[0];
+  const requiredControls = controls.filter(
+    (c) => c.required || (c.getAttribute("aria-required") || "").toLowerCase() === "true"
+  );
+
+  // Browser-enforced validation only counts when the form has not opted out.
+  const novalidate = form.hasAttribute("novalidate");
+  const emptyValid = form.checkValidity();
+
+  // Fill with an obviously-an-audit identity. Values never leave the page.
+  for (const c of controls) {
+    const kind = (c.getAttribute("type") || c.tagName).toLowerCase();
+    const name = (c.getAttribute("name") || c.id || "").toLowerCase();
+    try {
+      if (kind === "checkbox" || kind === "radio") {
+        // A required consent box left unticked reads as "rejects a correctly
+        // filled entry", which is a false finding about a working form. Tick
+        // what the form requires: the value never leaves the page, nothing is
+        // ever submitted, so no consent is ever actually given.
+        const requiredGroup =
+          c.required ||
+          (c.name && form.querySelector(`input[name="${CSS.escape(c.name)}"][required]`));
+        if (requiredGroup && !c.checked) {
+          c.checked = true;
+          c.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        continue;
+      }
+      if (kind === "select") {
+        const opt = [...c.options].find((o) => o.value && !o.disabled);
+        if (opt) c.value = opt.value;
+      } else if (kind === "email" || name.includes("email")) {
+        c.value = "audit@relayforroofers.com";
+      } else if (kind === "tel" || /phone|tel|mobile/.test(name)) {
+        c.value = "7195550100";
+      } else if (/zip|postal/.test(name)) {
+        c.value = "80903";
+      } else if (kind === "textarea" || /message|comment|detail/.test(name)) {
+        c.value = "Relay site audit. This form is being checked, not submitted.";
+      } else {
+        c.value = "Relay Audit";
+      }
+      c.dispatchEvent(new Event("input", { bubbles: true }));
+      c.dispatchEvent(new Event("change", { bubbles: true }));
+    } catch (e) { /* a readonly control is fine */ }
+  }
+  const filledValid = form.checkValidity();
+
+  // When a filled form still refuses, name the control and the browser's own
+  // words for why. "Your phone field rejects 7195550100" is a demonstrable
+  // finding; "the form is broken" is an assertion.
+  const invalidFields = [];
+  if (!filledValid) {
+    for (const c of controls) {
+      if (invalidFields.length >= 5) break;
+      if (typeof c.checkValidity === "function" && !c.checkValidity()) {
+        invalidFields.push({
+          name: c.getAttribute("name") || c.id || c.tagName.toLowerCase(),
+          type: (c.getAttribute("type") || c.tagName).toLowerCase(),
+          value_we_entered: String(c.value || "").slice(0, 40),
+          browser_says: String(c.validationMessage || "").slice(0, 120),
+        });
+      }
+    }
+  }
+
+  const submitControl = form.querySelector(
+    'button[type="submit"], input[type="submit"], button:not([type])'
+  );
+
+  return {
+    found: true,
+    action: form.getAttribute("action"),
+    method: (form.getAttribute("method") || "get").toLowerCase(),
+    field_count: controls.filter(visible).length,
+    required_count: requiredControls.length,
+    novalidate,
+    empty_valid: emptyValid,
+    filled_valid: filledValid,
+    invalid_fields: invalidFields,
+    has_submit_control: !!submitControl,
+    visible: visible(form),
+  };
+}
+
 function collectMetrics() {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
@@ -191,6 +326,7 @@ async function render(payload) {
     settle_ms = 1200,
     format = "png",
     max_height = 6000,
+    form_health = false,
   } = payload;
 
   const browser = await getBrowser();
@@ -224,6 +360,13 @@ async function render(payload) {
     }
 
     const metrics = await page.evaluate(collectMetrics);
+
+    let formHealth = null;
+    if (form_health) {
+      // Read-only in effect: values are set and validity is read, nothing is
+      // ever submitted. See probeFormHealth.
+      formHealth = await page.evaluate(probeFormHealth);
+    }
 
     let shot = null;
     if (screenshot !== "none") {
@@ -266,6 +409,7 @@ async function render(payload) {
       elapsed_ms: Date.now() - started,
       console_errors: consoleErrors,
       screenshot: shot,
+      form_health: formHealth,
       ...metrics,
     };
   } finally {

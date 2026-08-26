@@ -18,7 +18,7 @@ from typing import Any, Callable, Iterable, Mapping
 
 from app.checks.extract import SiteFacts
 from app.markets import MarketSpec
-from app.scoring import ERROR, FAIL, PASS, SKIPPED
+from app.status import ERROR, FAIL, PASS, SKIPPED
 
 CheckFn = Callable[["AuditContext"], "CheckResult"]
 
@@ -57,7 +57,8 @@ class AuditContext:
 
     # Filled in later in the week. A check whose input is missing skips itself
     # rather than guessing, which is what keeps `partial` meaningful.
-    render: Any = None      # tools.render.RenderResult
+    render: Any = None      # tools.render.RenderResult, homepage
+    form_render: Any = None # tools.render.RenderResult, the page carrying the lead form
     psi: Any = None         # tools.pagespeed.PsiResult
     vision: Any = None
     ads: Mapping[str, Any] | None = None

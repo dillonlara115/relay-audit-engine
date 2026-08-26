@@ -74,6 +74,7 @@ class RenderResult:
     forms: Sequence[Mapping[str, Any]] = ()
     ctas: Sequence[Mapping[str, Any]] = ()
     console_errors: Sequence[str] = ()
+    form_health: Mapping[str, Any] | None = None
     screenshot_b64: str | None = None
     screenshot_bytes: int | None = None
     screenshot_format: str = "png"
@@ -182,6 +183,7 @@ def _from_payload(payload: Mapping[str, Any], url: str) -> RenderResult:
         forms=payload.get("forms") or (),
         ctas=payload.get("ctas") or (),
         console_errors=payload.get("console_errors") or (),
+        form_health=payload.get("form_health"),
         screenshot_b64=shot.get("bytes"),
         screenshot_bytes=shot.get("size_bytes"),
         screenshot_format=shot.get("format") or "png",
@@ -197,6 +199,7 @@ async def render(
     viewport: Mapping[str, int] | None = None,
     image_format: str = "png",
     max_height: int = 6000,
+    form_health: bool = False,
     timeout: float = 90.0,
 ) -> RenderResult:
     """Render one URL. Never raises: an unreachable renderer is a skipped check."""
@@ -209,6 +212,7 @@ async def render(
         "screenshot": screenshot,
         "format": image_format,
         "max_height": max_height,
+        "form_health": form_health,
     }
     endpoint = cfg.renderer_url.rstrip("/") + "/render"
 

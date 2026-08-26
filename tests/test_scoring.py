@@ -318,31 +318,28 @@ def test_a_real_definition_set_scores_end_to_end():
     for code in ("B1", "B2", "B3"):
         statuses[code] = FAIL
     score = compute(outcomes_from(statuses, CHECK_DEFINITIONS))
-    assert score.booked == 16
-    assert score.booked_max == 40
+    assert score.booked == 12
+    assert score.booked_max == 36, "B6 is off the basis, see its disabled_reason"
     assert score.segment == SEG_LEAKY_BUCKET, "high Found, Booked under 20 of 40"
     assert not score.partial
 
 
-def test_the_canonical_wedge_case_does_not_reach_leaky_bucket():
-    """Calibration, not a bug. Worth knowing before the thresholds are trusted.
-
-    The criteria doc describes the wedge as "a roofer spending on ads with no
-    booking path and a broken form". That is exactly B1 and B2 failing, and it
-    scores Booked 22 of 40, which is over the 20 point Leaky Bucket ceiling. He
-    lands in the uncovered middle with no segment at all.
-
-    Reaching Leaky Bucket takes 20 of 40 Booked points gone, and B1 plus B2 is
-    only 18. Either the ceiling moves to 22, or the wedge needs a third failure
-    to qualify. That is a threshold decision, so it is recorded here rather than
-    quietly adjusted.
+def test_the_canonical_wedge_case_reaches_leaky_bucket():
+    """Calibration history. When B6's 4 points were in the Booked basis, the
+    criteria doc's own archetype (ads running, no booking path, broken form,
+    exactly B1 plus B2 failing) normalized to Booked 22 of 40 and missed the
+    Leaky Bucket ceiling by two points. Disabling B6 (see its disabled_reason)
+    shrank the basis to 36, so the same two failures now normalize to exactly
+    20.0 and the doc's wedge lands in the doc's segment without any threshold
+    being touched.
     """
     statuses = {r["code"]: PASS for r in CHECK_DEFINITIONS}
     statuses["B1"] = FAIL  # no self-serve booking, 10 points
     statuses["B2"] = FAIL  # broken form, 8 points
     score = compute(outcomes_from(statuses, CHECK_DEFINITIONS))
-    assert score.booked == 22
-    assert score.segment is None
+    assert score.booked == 18
+    assert score.normalized(BOOKED) == pytest.approx(20.0)
+    assert score.segment == SEG_LEAKY_BUCKET
 
 
 # ── Guards ────────────────────────────────────────────────────────────────────

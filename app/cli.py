@@ -30,7 +30,19 @@ from app.pipeline import (
     audit_one,
     run_sweep,
 )
+from app.leases import (
+    DONE,
+    FAILED,
+    MAX_ATTEMPTS,
+    PENDING,
+    RUNNING,
+    seed_tasks,
+    tasks_for_batch,
+)
 from app.scoring import BOOKED, CHOSEN, FOUND
+from app.ranker import by_segment, rank
+from app.scoring import compute, outcomes_from
+from app.tools.pubsub import publish_batch
 from app.tools.crawl import Crawler
 from app.store import firestore as store
 
@@ -475,6 +487,315 @@ def audit(
         )
     if outcome.audit_id:
         console.print(f"  [dim]audit {outcome.audit_id}[/]")
+
+
+# ── batch dispatch and resume ─────────────────────────────────────────────────
+
+TASK_STYLE = {DONE: "green", RUNNING: "cyan", PENDING: "yellow", FAILED: "red"}
+
+
+def _stale(task: dict) -> bool:
+    """Running, but nobody has renewed the lease. The worker is presumed dead."""
+    if task.get("status") != RUNNING:
+        return False
+    expires = task.get("lease_expires_at")
+    return expires is None or expires <= store.utcnow()
+
+
+@app.command()
+def dispatch(
+    batch_id: str = typer.Argument(..., help="Batch to fan out."),
+    market: str = typer.Option(..., "--market", "-m", help="Metro whose gated prospects to audit."),
+    limit: int = typer.Option(0, "--limit", "-n", help="0 means every eligible prospect."),
+) -> None:
+    """Publish one audit message per gated prospect.
+
+    Only PASS and REVIEW continue, and suppressed prospects never do. The
+    message carries nothing but the two ids: everything else is read from
+    Firestore by whichever worker picks it up, because a message that carries
+    state goes stale the moment it is redelivered.
+    """
+    market_id = store.market_id_for(resolve_market(market).name)
+    eligible = [
+        p for p in store.prospects_for_market(market_id, suppressed=False)
+        if p.get("gate_result") in (GATE_PASS, GATE_REVIEW)
+    ]
+    eligible.sort(key=lambda p: -(p.get("review_count") or 0))
+    if limit:
+        eligible = eligible[:limit]
+
+    if not eligible:
+        console.print(f"[yellow]No gated prospects in {market_id}. Run a sweep first.[/]")
+        raise typer.Exit(code=1)
+
+    console.print(f"Publishing [bold]{len(eligible)}[/] audits for batch [cyan]{batch_id}[/]…")
+    ids = [p["place_id"] for p in eligible]
+    seeded = seed_tasks(batch_id, ids)
+    console.print(f"  seeded {seeded} pending tasks in the ledger")
+    published = publish_batch(batch_id, ids)
+    console.print(f"  published [bold green]{published}[/] messages to the audit topic")
+    console.print(f"  watch with: [dim]python -m app.cli batch {batch_id}[/]")
+
+
+@app.command()
+def batch(
+    batch_id: str = typer.Argument(..., help="Batch to report on."),
+    show: int = typer.Option(0, "--show", help="List this many task rows."),
+) -> None:
+    """Where a batch has got to, read from the task ledger."""
+    tasks = tasks_for_batch(batch_id)
+    if not tasks:
+        console.print(f"[yellow]No tasks recorded for {batch_id}.[/]")
+        raise typer.Exit(code=1)
+
+    counts: dict[str, int] = {}
+    for task in tasks:
+        counts[task.get("status") or PENDING] = counts.get(task.get("status") or PENDING, 0) + 1
+    stale = [t for t in tasks if _stale(t)]
+    exhausted = [t for t in tasks if (t.get("attempts") or 0) >= MAX_ATTEMPTS
+                 and t.get("status") != DONE]
+
+    table = Table(title=f"batch {batch_id}", header_style="bold", title_justify="left")
+    table.add_column("Status", width=10)
+    table.add_column("Count", justify="right", width=6)
+    for status in (DONE, RUNNING, PENDING, FAILED):
+        if counts.get(status):
+            table.add_row(f"[{TASK_STYLE[status]}]{status}[/]", str(counts[status]))
+    console.print(table)
+
+    total = len(tasks)
+    done = counts.get(DONE, 0)
+    console.print(f"  [bold]{done}/{total}[/] complete" + ("  [bold green]batch finished[/]" if done == total else ""))
+    if stale:
+        console.print(f"  [yellow]{len(stale)} lease(s) lapsed, the holder is presumed dead[/]")
+    if exhausted:
+        console.print(f"  [red]{len(exhausted)} at the attempt ceiling, see the dead letter topic[/]")
+
+    if show:
+        rows = Table(header_style="bold")
+        rows.add_column("Prospect", width=30)
+        rows.add_column("Status", width=8)
+        rows.add_column("Try", justify="right", width=3)
+        rows.add_column("Total", justify="right", width=5)
+        rows.add_column("Worker", width=26, overflow="fold")
+        for task in sorted(tasks, key=lambda t: (t.get("status") or "", t.get("prospect_id") or ""))[:show]:
+            status = task.get("status") or PENDING
+            rows.add_row(
+                _truncate(task.get("prospect_id"), 30),
+                f"[{TASK_STYLE.get(status, '')}]{status}[/]",
+                str(task.get("attempts") or 0),
+                str(task.get("total") if task.get("total") is not None else "-"),
+                _truncate(task.get("lease_owner") or task.get("last_worker"), 26),
+            )
+        console.print(rows)
+
+
+@app.command()
+def resume(
+    batch_id: str = typer.Argument(..., help="Batch to resume."),
+    force: bool = typer.Option(False, "--force", help="Also retry tasks at the attempt ceiling."),
+) -> None:
+    """Republish everything that has not finished.
+
+    Pub/Sub redelivers on its own, so this is for the cases it cannot see: a
+    message that was acked while contended, a subscription recreated, or a
+    worker killed after the last delivery. Completed prospects are never
+    republished, and a duplicate delivery is harmless anyway because the claim
+    is what decides, not the message.
+    """
+    tasks = tasks_for_batch(batch_id)
+    if not tasks:
+        console.print(f"[yellow]No tasks recorded for {batch_id}.[/]")
+        raise typer.Exit(code=1)
+
+    unfinished = []
+    for task in tasks:
+        if task.get("status") == DONE:
+            continue
+        if (task.get("attempts") or 0) >= MAX_ATTEMPTS and not force:
+            continue
+        if task.get("status") == RUNNING and not _stale(task):
+            continue  # someone is actively on it
+        unfinished.append(task["prospect_id"])
+
+    if not unfinished:
+        done = sum(1 for t in tasks if t.get("status") == DONE)
+        console.print(f"[green]Nothing to resume. {done}/{len(tasks)} complete.[/]")
+        return
+
+    console.print(f"Republishing [bold]{len(unfinished)}[/] unfinished prospects…")
+    published = publish_batch(batch_id, unfinished)
+    console.print(f"  published [bold green]{published}[/] messages")
+
+
+# ── rescore ───────────────────────────────────────────────────────────────────
+
+
+@app.command()
+def rescore(
+    batch_id: str = typer.Argument(..., help="Batch whose audits to rescore."),
+) -> None:
+    """Recompute scores and segments from stored check results.
+
+    This is why check definitions live in Firestore: a retune is a document
+    edit plus a rescore, not a re-crawl. Checks that were run and later
+    disabled are ignored; checks enabled since are counted as skipped, which
+    keeps the partial flag honest about what this audit actually measured.
+    """
+    definitions = store.all_check_defs()
+    audits = list(store.audits_for_batch(batch_id))
+    if not audits:
+        console.print(f"[yellow]No audits for batch {batch_id}.[/]")
+        raise typer.Exit(code=1)
+
+    moved = 0
+    for audit in audits:
+        checks = store.audit_checks(audit["audit_id"])
+        statuses = {c["code"]: c["status"] for c in checks if c.get("code")}
+        score = compute(outcomes_from(statuses, definitions))
+        changed = (
+            audit.get("scores", {}).get("total") != score.total
+            or audit.get("segment") != score.segment
+            or bool(audit.get("partial")) != score.partial
+        )
+        if changed:
+            moved += 1
+        store.update_audit(audit["audit_id"], {
+            "scores": {"found": score.found, "chosen": score.chosen,
+                       "booked": score.booked, "total": score.total},
+            "band": score.band,
+            "segment": score.segment,
+            "partial": score.partial,
+            "partial_sections": list(score.partial_sections),
+            "rescored_at": store.utcnow(),
+        })
+    console.print(f"rescored [bold]{len(audits)}[/] audits, [bold]{moved}[/] changed")
+
+
+# ── call list ─────────────────────────────────────────────────────────────────
+
+SEGMENT_STYLE = {"Leaky Bucket": "bold orange1", "Invisible Pro": "bold cyan",
+                 "Both Broken": "bold red", "Dialed": "bold green"}
+
+
+def _load_ranked(batch_id: str):
+    audits = list(store.audits_for_batch(batch_id))
+    if not audits:
+        console.print(f"[yellow]No audits recorded for batch {batch_id}.[/]")
+        raise typer.Exit(code=1)
+    prospects = {}
+    for audit in audits:
+        pid = audit.get("prospect_id")
+        if pid and pid not in prospects:
+            prospects[pid] = store.get_prospect(pid) or {}
+    return rank(audits, prospects)
+
+
+@app.command("call-list")
+def call_list(
+    batch_id: str = typer.Argument(..., help="Batch to rank."),
+    draft: int = typer.Option(0, "--draft", help="Draft findings for the top N prospects."),
+) -> None:
+    """The ranked call list: segment priority first, emptiest bucket first.
+
+    With --draft, the diagnostician drafts three findings per top prospect.
+    Drafts only. A human approves before anything becomes a report, and
+    suppression is checked before every draft.
+    """
+    rows = _load_ranked(batch_id)
+
+    for segment, group in by_segment(rows):
+        style = SEGMENT_STYLE.get(segment, "dim")
+        table = Table(
+            title=f"[{style}]{segment}[/]  ({len(group)})",
+            header_style="bold", title_justify="left",
+        )
+        table.add_column("#", justify="right", width=4)
+        table.add_column("Business", width=34)
+        table.add_column("City", width=16)
+        table.add_column("F", justify="right", width=3)
+        table.add_column("C", justify="right", width=3)
+        table.add_column("B", justify="right", width=3)
+        table.add_column("Total", justify="right", width=5)
+        table.add_column("Phone", width=15)
+        table.add_column("", width=10)
+        for row in group:
+            scores = row.scores
+            tags = []
+            if row.incumbent_agency:
+                tags.append("[magenta]agency[/]")
+            if row.partial:
+                tags.append("[yellow]partial[/]")
+            table.add_row(
+                str(row.rank), _truncate(row.business_name, 34), _truncate(row.city, 16),
+                str(scores.get("found", "-")), str(scores.get("chosen", "-")),
+                str(scores.get("booked", "-")), str(scores.get("total", "-")),
+                row.phone or "-", " ".join(tags),
+            )
+        console.print(table)
+
+    if draft:
+        _draft_top(rows[:draft])
+
+
+def _draft_top(rows) -> None:
+    import asyncio as _asyncio
+
+    from app.agents.diagnostician import draft_findings
+
+    suppressions = store.load_suppressions()
+    definitions = {d["code"]: d for d in store.all_check_defs()}
+
+    async def draft_one(row):
+        prospect = store.get_prospect(row.prospect_id) or {}
+        # Rule 3: suppression is checked before every outreach action, drafts
+        # included, and matched on every identifier we hold.
+        hit = store.suppression_hit(
+            suppressions,
+            place_id=row.prospect_id,
+            domain=prospect.get("domain"),
+            phone=prospect.get("gbp_phone"),
+            email=prospect.get("owner_email"),
+        )
+        if hit:
+            return row, None, f"suppressed ({hit})"
+        checks = store.audit_checks(row.audit_id)
+        failures = [
+            {**c, "title": definitions.get(c.get("code"), {}).get("title"),
+             "points": definitions.get(c.get("code"), {}).get("points", 0)}
+            for c in checks if c.get("status") == "fail"
+        ]
+        failures.sort(key=lambda f: -f["points"])
+        diagnosis = await draft_findings(
+            business_name=row.business_name, city=row.city or "",
+            failures=failures,
+        )
+        if not diagnosis.ok:
+            return row, None, diagnosis.error
+        store.save_draft_findings(
+            row.audit_id, [f.to_dict() for f in diagnosis.findings],
+            needs_review=diagnosis.needs_review, model=diagnosis.model,
+        )
+        return row, diagnosis, None
+
+    async def run_all():
+        return await _asyncio.gather(*(draft_one(r) for r in rows))
+
+    console.print()
+    console.print(f"[bold]Drafting findings for the top {len(rows)}…[/] "
+                  "(drafts only, a human approves)")
+    for row, diagnosis, error in _asyncio.run(run_all()):
+        console.print(f"\n[bold]{row.rank}. {row.business_name}[/]  "
+                      f"[{SEGMENT_STYLE.get(row.segment or '', 'dim')}]{row.segment or 'incomplete'}[/]")
+        if error:
+            console.print(f"   [yellow]no draft: {error}[/]")
+            continue
+        for f in diagnosis.findings:
+            review = " [yellow](flagged for review)[/]" if f.mechanism_flags else ""
+            console.print(f"   [bold]{f.ordinal}. {f.check_code}[/]{review}")
+            console.print(f"      saw:   {f.what_we_saw}")
+            console.print(f"      means: {f.what_it_means}")
+            console.print(f"      fix:   {f.what_fixing_takes}")
 
 
 if __name__ == "__main__":

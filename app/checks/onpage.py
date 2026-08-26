@@ -415,7 +415,16 @@ def _primary_form(ctx: AuditContext):
             if form.looks_like_search or form.field_count < 2:
                 continue
             names = " ".join(f.name.lower() for f in form.visible_fields)
-            if any(hint in names for hint in _SEARCH_FIELD_HINTS):
+            kinds = {f.kind for f in form.visible_fields}
+            # Contact-ish by name, or by input type. Gravity Forms names its
+            # fields input_9, input_1.3: nothing readable in the name, but the
+            # email field is still type=email. Failing that, three or more
+            # fields with a free-text message box is a lead form shape.
+            if (
+                any(hint in names for hint in _SEARCH_FIELD_HINTS)
+                or kinds & {"email", "tel"}
+                or (form.field_count >= 3 and "textarea" in kinds)
+            ):
                 return form, page
     return None, None
 

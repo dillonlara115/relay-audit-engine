@@ -348,9 +348,10 @@ async def _render_homepage(crawl: SiteCrawl) -> RenderResult | None:
     if not target:
         return None
     try:
-        # A clipped full page rather than the fold: C9 asks about project
-        # photos, and those live below the hero on every roofing site.
-        return await render(target, screenshot="full", image_format="jpeg")
+        # A clipped full page rather than the fold: the vision read wants the
+        # whole story. form_health rides along in case the lead form is on
+        # the homepage itself.
+        return await render(target, screenshot="full", image_format="jpeg", form_health=True)
     except Exception as exc:  # noqa: BLE001 - a renderer fault skips its checks
         return RenderResult(ok=False, url=target, error=f"{type(exc).__name__}: {exc}")
 
@@ -375,6 +376,34 @@ async def _measure_speed(crawl: SiteCrawl) -> PsiResult | None:
     except Exception as exc:  # noqa: BLE001 - a provider fault skips its checks
         return PsiResult(ok=False, url=target, error=f"{type(exc).__name__}: {exc}")
 
+
+
+
+async def _render_form_page(crawl: SiteCrawl, site: "facts.SiteFacts") -> RenderResult | None:
+    """Render the page that actually carries the lead form, for B2.
+
+    The engine spec's render stage is "homepage and contact page". The form is
+    found from the crawl first so we render the right page, not a guessed one,
+    and skip the second render entirely when the form is on the homepage.
+    """
+    if not get_config().renderer_url or not crawl.reachable:
+        return None
+    from app.checks.base import AuditContext as _Ctx
+    from app.checks.onpage import _primary_form
+
+    form, page = _primary_form(_Ctx(place={}, site=site))
+    if form is None or page is None:
+        return None
+    homepage = normalize_url(crawl.homepage.final_url or crawl.base_url or "")
+    target = normalize_url(page.url)
+    if not target or target == homepage:
+        return None  # the homepage render already probed it
+    if any(target in blocked or page.url in blocked for blocked in crawl.robots_blocked):
+        return None
+    try:
+        return await render(target, screenshot="none", form_health=True)
+    except Exception as exc:  # noqa: BLE001
+        return RenderResult(ok=False, url=target, error=f"{type(exc).__name__}: {exc}")
 
 
 async def _read_homepage(rendered: RenderResult | None) -> VisionVerdict | None:
@@ -428,19 +457,27 @@ async def audit_one(
     # The inspector stages are independent and I/O bound, which is exactly why
     # the engine spec models them as a ParallelAgent. Sequentially this is a
     # nine second render followed by a thirty second Lighthouse run.
+    site_facts = facts.build(crawl)
+
     async def look() -> tuple[RenderResult | None, VisionVerdict | None]:
         rendered = await _render_homepage(crawl)
         return rendered, await _read_homepage(rendered)
 
-    (render_result, vision_result), psi_result = await asyncio.gather(
-        look(), _measure_speed(crawl)
+    (render_result, vision_result), psi_result, form_render = await asyncio.gather(
+        look(), _measure_speed(crawl), _render_form_page(crawl, site_facts)
     )
+
+    # B2 reads the render of whichever page carries the form. When the form is
+    # on the homepage, that is the homepage render itself.
+    if form_render is None and render_result is not None:
+        form_render = render_result
 
     ctx = AuditContext(
         place=dict(prospect),
-        site=facts.build(crawl),
+        site=site_facts,
         market=market,
         render=render_result,
+        form_render=form_render,
         psi=psi_result,
         vision=vision_result,
     )

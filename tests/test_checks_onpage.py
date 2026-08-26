@@ -429,10 +429,17 @@ def test_run_checks_marks_unimplemented_definitions_skipped():
     from app.checks.definitions import CHECK_DEFINITIONS
 
     results = run_checks(context(homepage_html=doc("<p>hi</p>")), CHECK_DEFINITIONS)
-    assert results["B1"].status == SKIPPED, "the Booked checks land on Friday"
-    assert results["B1"].note == "Not implemented yet."
     assert "F1" not in results, "disabled definitions never run"
     assert results["F3"].status == PASS
+
+    # As of Friday every enabled definition has an implementation. If this
+    # fails, a definition was enabled without code behind it and every audit
+    # is silently scoring it as skipped.
+    from app.checks.base import REGISTRY
+
+    enabled = {r["code"] for r in CHECK_DEFINITIONS if r["enabled"]}
+    unimplemented = enabled - set(REGISTRY)
+    assert not unimplemented, f"enabled with no implementation: {sorted(unimplemented)}"
 
 
 def test_render_checks_skip_when_there_is_no_render():
@@ -636,3 +643,24 @@ def test_normalize_url_drops_tracking_but_keeps_meaning(raw, expected):
     from app.tools.crawl import normalize_url
 
     assert normalize_url(raw) == expected
+
+
+def test_c8_recognises_a_gravity_forms_lead_form():
+    """Regression, found on a real site. Gravity Forms names its inputs
+    input_9, input_1.3: nothing contact-ish in any name, but the email field
+    still carries type=email. The name-only heuristic skipped B2 and C8 on 17
+    of 40 prospects in the first full batch."""
+    gravity = ('<form action="/roof-replacement/" method="post">'
+               '<input name="input_9" type="text"><input name="input_1.3" type="text">'
+               '<input name="input_2" type="email"><input name="input_3" type="tel">'
+               '<textarea name="input_8"></textarea></form>')
+    res = run("C8", context(homepage_html=doc(gravity)))
+    assert res.status == PASS
+    assert res.observed["field_count"] == 5
+
+
+def test_the_search_box_is_still_not_a_lead_form():
+    res = run("C8", context(homepage_html=doc(
+        '<form action="/search"><input name="s" type="search"></form>'
+    )))
+    assert res.status == FAIL, "no lead form found is a fail, the search box does not count"

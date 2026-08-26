@@ -115,7 +115,13 @@ _CHOSEN: list[dict[str, Any]] = [
     _check("C7", CHOSEN, "Form above fold", "Or one visible primary CTA", 2, "Render", "auto", 260),
     _check("C8", CHOSEN, "Form friction", "5 fields or fewer", 2, "Crawl", "auto", 270),
     _check("C9", CHOSEN, "Real project photos", "Own photos, not stock", 2, "Vision", "auto", 280,
-           note="Cut list item 2. Drop before C17, which demos better."),
+           enabled=False,
+           disabled_reason="Cut list item 2. The vision screenshot is clipped to 6000px and "
+                           "roofing homepages measured 12500 to 15500px, so the model sees "
+                           "roughly the top half and never reaches the project gallery.",
+           note="Measured 2026-08-26: failed 5 of 5 real sites, with reasons citing the hero "
+                "background. Re-enable behind a taller or two image screenshot, not before. "
+                "The vision component still records stock_photos as diagnostic evidence."),
     _check("C10", CHOSEN, "Reviews on page", "Testimonials on home", 2, "Crawl", "auto", 290),
     _check("C11", CHOSEN, "Licensed / insured", "Stated on site", 1, "Crawl", "auto", 300),
     _check("C12", CHOSEN, "Manufacturer credential", "GAF, Owens Corning, CertainTeed tier", 2, "Crawl", "auto", 310,
@@ -139,7 +145,16 @@ _BOOKED: list[dict[str, Any]] = [
            note="Cut list item 5."),
     _check("B5", BOOKED, "Response promise", "A stated response time anywhere on site", 4, "Crawl", "auto", 440,
            note="Cut list item 5."),
-    _check("B6", BOOKED, "Confirmation clarity", "Thank-you state tells him what happens next", 4, "Render", "auto", 450),
+    _check("B6", BOOKED, "Confirmation clarity", "Thank-you state tells him what happens next", 4, "Render", "auto", 450,
+           enabled=False,
+           disabled_reason="Unmeasurable without submitting the form, which is hard rule 1. "
+                           "Measured 2026-08-26 across a 40 prospect batch: skipped on 38, "
+                           "because confirmation states are almost always inline.",
+           note="A v1 relic: its Render source assumed the probe was still in the pipeline. "
+                "Its 4 unmeasured points pushed every prospect 10% toward the partial line, "
+                "which with any second skip crossed 20% and unsegmented 22 of 40 audits. "
+                "The implementation stays: sites exposing a /thank-you page still get the "
+                "diagnostic read if re-enabled."),
     _check("B7", BOOKED, "After-hours coverage", "Hours published and an after-hours path stated", 4, "Crawl + Places", "auto", 460),
 ]
 
