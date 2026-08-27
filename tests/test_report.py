@@ -119,7 +119,7 @@ def test_the_page_holds_the_required_structure():
     assert "lead-leakage-calculator" in page
     assert "reply to the message" in page.lower()
     assert "#16120E".lower() in page.lower() and "#F25C1F".lower() in page.lower()
-    assert "Staatliches" in page and "Barlow" in page
+    assert "Barlow Condensed" in page and "Work Sans" in page
 
 
 def test_untrusted_text_is_escaped():
@@ -209,13 +209,17 @@ def test_publish_blocks_a_suppressed_prospect(monkeypatch):
 
 @pytest.fixture()
 def dash_client(monkeypatch):
+    """The dashboard shares its gate with the console (app.console.auth), so
+    that is what has to be patched, not app.worker: patching the wrong module
+    silently leaves the real .env secret in force and every test still passes
+    by accident until the real secret does not match "dash-secret"."""
     from fastapi.testclient import TestClient
 
     from app.config import Config
     from app.worker import app as worker_app
 
-    monkeypatch.setattr("app.worker.get_config",
-                        lambda: Config(worker_shared_secret="dash-secret"))
+    monkeypatch.setattr("app.console.auth.get_config",
+                        lambda: Config(console_password="dash-secret"))
     return TestClient(worker_app, raise_server_exceptions=False)
 
 
@@ -229,7 +233,7 @@ def test_the_key_becomes_a_cookie_and_leaves_the_url(dash_client, monkeypatch):
     first = dash_client.get("/dashboard?key=dash-secret", follow_redirects=False)
     assert first.status_code == 303
     assert first.headers["location"] == "/dashboard"
-    assert "relay_dash" in first.cookies
+    assert "relay_console" in first.cookies  # shared with /console
 
     page = dash_client.get("/dashboard")  # cookie persisted by the client
     assert page.status_code == 200

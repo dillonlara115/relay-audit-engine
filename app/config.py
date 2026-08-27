@@ -115,6 +115,13 @@ class Config:
         default_factory=lambda: _str("PUBSUB_JOB_TOPIC", "run-job")
     )
     worker_shared_secret: str = field(default_factory=lambda: _str("WORKER_SHARED_SECRET"))
+    # Separate from the Pub/Sub push token on purpose. That one is a machine
+    # credential rotated without notice; this one is what a person types, so it
+    # should be a password the operator picked, not a generated 40 character
+    # token they have to look up in Secret Manager every time.
+    console_password: str = field(
+        default_factory=lambda: _str("CONSOLE_PASSWORD") or _str("WORKER_SHARED_SECRET")
+    )
 
     def require(self, *names: str) -> None:
         """Raise unless every named attribute is set. Call at entry points."""
@@ -142,6 +149,7 @@ _ENV_NAME = {
     "report_ip_salt": "REPORT_IP_SALT",
     "pubsub_audit_topic": "PUBSUB_AUDIT_TOPIC",
     "worker_shared_secret": "WORKER_SHARED_SECRET",
+    "console_password": "CONSOLE_PASSWORD",
 }
 
 

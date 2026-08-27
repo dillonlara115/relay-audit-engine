@@ -74,7 +74,13 @@ def test_malformed_envelopes_raise(bad, why):
 
 @pytest.fixture()
 def client(monkeypatch):
+    """Pins the worker's config instead of inheriting .env: the local .env now
+    carries a real WORKER_SHARED_SECRET, and these tests are about ack
+    semantics, not the token gate (which has its own tests below)."""
+    from app.config import Config
+
     monkeypatch.setattr("app.worker._defs", lambda: [])
+    monkeypatch.setattr("app.worker.get_config", lambda: Config(worker_shared_secret=""))
     from app.worker import app
 
     return TestClient(app, raise_server_exceptions=False)

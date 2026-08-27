@@ -24,7 +24,7 @@ _PAGE = """<!doctype html>
 <meta name="robots" content="noindex,nofollow">
 <title>{business_name}: what a homeowner finds</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Staatliches&family=Barlow:wght@400;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=Work+Sans:wght@400;600&display=swap" rel="stylesheet">
 <style>
   :root {{
     --asphalt: #16120E;
@@ -34,14 +34,14 @@ _PAGE = """<!doctype html>
   * {{ margin: 0; padding: 0; box-sizing: border-box; }}
   body {{
     background: var(--chalk); color: var(--asphalt);
-    font-family: 'Barlow', sans-serif; font-size: 16px; line-height: 1.55;
+    font-family: 'Work Sans', sans-serif; font-size: 16px; line-height: 1.55;
   }}
   main {{ max-width: 680px; margin: 0 auto; padding: 24px 20px 64px; }}
-  h1, h2 {{ font-family: 'Staatliches', sans-serif; letter-spacing: 0.02em; }}
+  h1, h2 {{ font-family: 'Barlow Condensed', sans-serif; letter-spacing: 0.02em; font-weight: 600; }}
   h1 {{ font-size: 2.1rem; line-height: 1.1; margin: 8px 0 4px; }}
   h2 {{ font-size: 1.35rem; margin: 40px 0 12px; color: var(--asphalt); }}
   .kicker {{
-    color: var(--orange); font-family: 'Staatliches', sans-serif;
+    color: var(--orange); font-family: 'Barlow Condensed', sans-serif;
     font-size: 1rem; letter-spacing: 0.08em; text-transform: uppercase;
   }}
   .city {{ font-size: 1rem; opacity: 0.75; margin-bottom: 28px; }}
@@ -56,7 +56,7 @@ _PAGE = """<!doctype html>
     border-radius: 6px; padding: 18px 18px 12px; margin: 0 0 18px;
   }}
   .finding h3 {{
-    font-family: 'Staatliches', sans-serif; font-size: 1.15rem; margin-bottom: 8px;
+    font-family: 'Barlow Condensed', sans-serif; font-size: 1.15rem; margin-bottom: 8px;
   }}
   .finding .fix {{ font-weight: 600; }}
   .limit {{ font-size: 0.95rem; opacity: 0.8; margin-top: 18px; }}

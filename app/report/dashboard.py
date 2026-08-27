@@ -35,17 +35,17 @@ _SHELL = """<!doctype html>
 <meta name="robots" content="noindex,nofollow">
 <title>{title}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Staatliches&family=Barlow:wght@400;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=Work+Sans:wght@400;600&display=swap" rel="stylesheet">
 <style>
   :root {{ --asphalt:#16120E; --chalk:#ECE6DC; --orange:#F25C1F; }}
   * {{ margin:0; padding:0; box-sizing:border-box; }}
   body {{ background:var(--chalk); color:var(--asphalt);
-         font-family:'Barlow',sans-serif; font-size:16px; line-height:1.5; }}
+         font-family:'Work Sans',sans-serif; font-size:16px; line-height:1.5; }}
   main {{ max-width:1080px; margin:0 auto; padding:24px 20px 64px; }}
-  h1,h2 {{ font-family:'Staatliches',sans-serif; letter-spacing:.02em; }}
+  h1,h2 {{ font-family:'Barlow Condensed',sans-serif; letter-spacing:.02em; font-weight:600; }}
   h1 {{ font-size:1.9rem; margin:4px 0 2px; }}
   h2 {{ font-size:1.25rem; margin:32px 0 10px; }}
-  .kicker {{ color:var(--orange); font-family:'Staatliches',sans-serif;
+  .kicker {{ color:var(--orange); font-family:'Barlow Condensed',sans-serif;
              letter-spacing:.08em; text-transform:uppercase; font-size:.95rem; }}
   .sub {{ opacity:.7; margin-bottom:22px; }}
   a {{ color:var(--orange); text-decoration:none; }}
@@ -54,12 +54,12 @@ _SHELL = """<!doctype html>
   .tiles {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr));
             gap:10px; margin:14px 0 6px; }}
   .tile {{ background:#fff; border-radius:6px; padding:12px 14px; }}
-  .tile .n {{ font-family:'Staatliches',sans-serif; font-size:1.7rem; line-height:1; }}
+  .tile .n {{ font-family:'Barlow Condensed',sans-serif; font-size:1.7rem; line-height:1; }}
   .tile .l {{ font-size:.8rem; opacity:.65; margin-top:2px; }}
 
   table {{ width:100%; border-collapse:collapse; background:#fff;
            border-radius:6px; overflow:hidden; }}
-  th {{ font-family:'Staatliches',sans-serif; font-weight:400; text-align:left;
+  th {{ font-family:'Barlow Condensed',sans-serif; font-weight:400; text-align:left;
         font-size:.9rem; letter-spacing:.05em; padding:10px 12px;
         background:var(--asphalt); color:var(--chalk); }}
   td {{ padding:9px 12px; border-top:1px solid #e2dbcf; vertical-align:top; }}
@@ -67,6 +67,7 @@ _SHELL = """<!doctype html>
   td.tel {{ white-space:nowrap; }}
   tr:hover td {{ background:#faf7f1; }}
 
+  abbr[title] {{ text-decoration:underline dotted; cursor:help; }}
   .chip {{ display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }}
   .chip i {{ width:10px; height:10px; border-radius:3px; display:inline-block; }}
   .tag {{ font-size:.78rem; padding:1px 7px; border-radius:10px;
@@ -80,7 +81,7 @@ _SHELL = """<!doctype html>
 </head>
 <body>
 <main>
-  <div class="kicker">Relay audit engine</div>
+  <a class="kicker" href="/console" style="display:inline-block;text-decoration:none">Relay audit engine</a>
   {body}
   <footer>Internal. Read only. Scores and segments on this page never appear in
   anything a contractor sees.</footer>
@@ -197,11 +198,16 @@ def render_batch(
         f'<div class="sub"><a href="/dashboard">&larr; all batches</a></div>'
         f"<h1>{_esc(batch_id)}</h1>"
         '<div class="sub">Ranked call order: segment priority first, emptiest '
-        "Booked bucket first within a segment.</div>"
+        "Booked bucket first within a segment. F is Found (findable at all, /30), "
+        "C is Chosen (looks like the safe choice, /30), B is Booked (catches the "
+        "lead, /40).</div>"
         + _tiles(tile_pairs or [("audits", len(rows))])
         + "<h2>Call list</h2><table>"
-        "<tr><th>#</th><th>Business</th><th>Segment</th><th>F</th><th>C</th>"
-        "<th>B</th><th>Total</th><th>Phone</th><th></th><th>Report</th></tr>"
+        '<tr><th>#</th><th>Business</th><th>Segment</th>'
+        '<th><abbr title="Found, out of 30. Can a homeowner find this company at all?">F</abbr></th>'
+        '<th><abbr title="Chosen, out of 30. Once found, do they look like the safe choice?">C</abbr></th>'
+        '<th><abbr title="Booked, out of 40. Is anything set up to catch a lead?">B</abbr></th>'
+        "<th>Total</th><th>Phone</th><th></th><th>Report</th></tr>"
         + "".join(table_rows or ["<tr><td colspan=10 class=muted>No audits in "
                                  "this batch yet.</td></tr>"])
         + "</table>"

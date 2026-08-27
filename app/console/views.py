@@ -17,10 +17,10 @@ _CSS = """
 :root { --asphalt:#16120E; --chalk:#ECE6DC; --orange:#F25C1F; --line:#e2dbcf; }
 * { margin:0; padding:0; box-sizing:border-box; }
 body { background:var(--chalk); color:var(--asphalt);
-       font-family:'Barlow',sans-serif; font-size:16px; line-height:1.5; }
+       font-family:'Work Sans',sans-serif; font-size:16px; line-height:1.5; }
 a { color:var(--orange); text-decoration:none; }
 a:hover { text-decoration:underline; }
-h1,h2,h3 { font-family:'Staatliches',sans-serif; letter-spacing:.02em; font-weight:400; }
+h1,h2,h3 { font-family:'Barlow Condensed',sans-serif; letter-spacing:.02em; font-weight:600; }
 h1 { font-size:1.9rem; margin:2px 0; }
 h2 { font-size:1.25rem; margin:30px 0 10px; }
 h3 { font-size:1.05rem; margin:0 0 6px; }
@@ -28,8 +28,10 @@ h3 { font-size:1.05rem; margin:0 0 6px; }
 header.top { background:var(--asphalt); color:var(--chalk); padding:12px 20px; }
 header.top .inner { max-width:1120px; margin:0 auto; display:flex;
                     align-items:center; gap:20px; flex-wrap:wrap; }
-header.top .brand { font-family:'Staatliches',sans-serif; letter-spacing:.08em;
-                    text-transform:uppercase; color:var(--orange); }
+header.top .brand { font-family:'Barlow Condensed',sans-serif; letter-spacing:.08em;
+                    text-transform:uppercase; color:var(--orange);
+                    text-decoration:none; }
+header.top .brand:hover { text-decoration:none; opacity:.85; }
 header.top nav a { color:var(--chalk); margin-right:16px; font-size:.95rem; }
 header.top nav a.on { color:var(--orange); }
 main { max-width:1120px; margin:0 auto; padding:22px 20px 72px; }
@@ -40,15 +42,15 @@ main { max-width:1120px; margin:0 auto; padding:22px 20px 72px; }
 .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr));
          gap:10px; margin:12px 0; }
 .tile { background:#fff; border-radius:6px; padding:12px 14px; }
-.tile .n { font-family:'Staatliches',sans-serif; font-size:1.6rem; line-height:1; }
+.tile .n { font-family:'Barlow Condensed',sans-serif; font-size:1.6rem; line-height:1; }
 .tile .l { font-size:.78rem; opacity:.65; margin-top:2px; }
 
 label { display:block; font-size:.85rem; opacity:.7; margin:10px 0 4px; }
 input[type=text], input[type=number], textarea, select {
   width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:6px;
-  font-family:'Barlow',sans-serif; font-size:16px; background:#fff; color:var(--asphalt); }
+  font-family:'Work Sans',sans-serif; font-size:16px; background:#fff; color:var(--asphalt); }
 textarea { min-height:84px; resize:vertical; }
-button { font-family:'Staatliches',sans-serif; letter-spacing:.04em; font-size:1rem;
+button { font-family:'Barlow Condensed',sans-serif; letter-spacing:.04em; font-size:1rem;
          background:var(--orange); color:#fff; border:0; border-radius:6px;
          padding:10px 18px; cursor:pointer; margin-top:12px; }
 button.ghost { background:transparent; color:var(--asphalt);
@@ -60,7 +62,7 @@ form.inline button { margin-top:0; padding:5px 11px; font-size:.85rem; }
 
 table { width:100%; border-collapse:collapse; background:#fff;
         border-radius:8px; overflow:hidden; }
-th { font-family:'Staatliches',sans-serif; font-weight:400; text-align:left;
+th { font-family:'Barlow Condensed',sans-serif; font-weight:400; text-align:left;
      font-size:.88rem; letter-spacing:.05em; padding:9px 11px;
      background:var(--asphalt); color:var(--chalk); }
 td { padding:8px 11px; border-top:1px solid var(--line); vertical-align:top;
@@ -82,7 +84,7 @@ tr:hover td { background:#faf7f1; }
 pre.log { background:var(--asphalt); color:#e8e2d6; border-radius:8px; padding:14px;
           font-size:.85rem; line-height:1.45; max-height:460px; overflow:auto;
           white-space:pre-wrap; word-break:break-word; }
-.status { display:inline-block; font-family:'Staatliches',sans-serif;
+.status { display:inline-block; font-family:'Barlow Condensed',sans-serif;
           letter-spacing:.05em; padding:2px 10px; border-radius:10px;
           background:var(--line); }
 .status.running { background:var(--orange); color:#fff; }
@@ -91,8 +93,18 @@ pre.log { background:var(--asphalt); color:#e8e2d6; border-radius:8px; padding:1
 
 .finding { border-left:5px solid var(--orange); background:#fff; padding:14px 16px;
            border-radius:6px; margin-bottom:12px; }
-.checkrow td:first-child { font-family:'Staatliches',sans-serif; }
+.checkrow td:first-child { font-family:'Barlow Condensed',sans-serif; }
 .pass { color:#2E7D4F; } .fail { color:#8d2f16; } .skip { opacity:.55; }
+abbr[title] { text-decoration:underline dotted; cursor:help; }
+details.legend { background:#fff; border-radius:8px; padding:0; margin:14px 0; }
+details.legend summary { cursor:pointer; padding:12px 16px;
+  font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:1.05rem;
+  letter-spacing:.03em; }
+details.legend .inner { padding:2px 16px 14px; }
+details.legend h4 { font-family:'Barlow Condensed',sans-serif; font-weight:600;
+  font-size:1rem; margin:10px 0 2px; }
+details.legend p { margin:0 0 4px; font-size:.92rem; }
+details.legend .seg { margin-top:4px; }
 .banner { background:#fff3e6; border-left:5px solid var(--orange);
           padding:12px 14px; border-radius:6px; margin-bottom:14px; font-size:.95rem; }
 footer { margin-top:36px; font-size:.84rem; opacity:.6; }
@@ -106,12 +118,12 @@ _SHELL = """<!doctype html>
 <meta name="robots" content="noindex,nofollow">
 <title>__TITLE__</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Staatliches&family=Barlow:wght@400;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=Work+Sans:wght@400;600&display=swap" rel="stylesheet">
 <style>__CSS__</style>
 </head>
 <body>
 <header class="top"><div class="inner">
-  <span class="brand">Relay audit engine</span>
+  <a class="brand" href="/console">Relay audit engine</a>
   <nav>__NAV__</nav>
 </div></header>
 <main>__BODY__</main>
@@ -162,6 +174,62 @@ def tiles(pairs: Sequence[tuple[str, Any]]) -> str:
     ) + "</div>"
 
 
+SCORE_TITLES = {
+    "F": "Found, out of 30. Can a homeowner with a leaking roof find this company at all?",
+    "C": "Chosen, out of 30. Once found, do they look like the safe choice?",
+    "B": "Booked, out of 40. If someone reaches out, is anything set up to catch the lead?",
+}
+
+
+def score_headers() -> str:
+    """The three compact column headers, each explained on hover."""
+    return "".join(
+        f'<th><abbr title="{esc(title)}">{key}</abbr></th>'
+        for key, title in SCORE_TITLES.items()
+    )
+
+
+def score_legend(open_by_default: bool = False) -> str:
+    """What Found, Chosen, Booked and the segments mean, in plain language.
+
+    Lives next to every table that shows the numbers, because a score nobody
+    can interpret is decoration.
+    """
+    return f"""<details class="legend"{' open' if open_by_default else ''}>
+  <summary>How to read these scores</summary>
+  <div class="inner">
+    <p>Every audited company is scored out of 100 across three questions a
+    homeowner answers in order:</p>
+    <h4>Found (F), out of 30</h4>
+    <p>Can a homeowner with a leaking roof find them at all? Google Business
+    Profile health, review count and recency, phone number consistency, and
+    whether their site shows up for their service area.</p>
+    <h4>Chosen (C), out of 30</h4>
+    <p>Once found, do they look like the safe choice? Mobile experience, page
+    speed, visible phone number, trust signals like licensing, warranties and
+    real customer reviews on the site.</p>
+    <h4>Booked (B), out of 40</h4>
+    <p>If someone raises a hand, is anything set up to catch it? Online
+    booking, a working contact form, missed-call text-back, chat, a stated
+    response time, an after-hours path. Weighted heaviest because it is the
+    section nobody else audits and the one that loses jobs invisibly.</p>
+    <h4>Segments</h4>
+    <p class="seg">{chip("Leaky Bucket")} Easy to find, but little catches the
+    lead. The best call on the list: demand already exists and the fix is
+    quick.</p>
+    <p class="seg">{chip("Invisible Pro")} Set up to convert, but nobody finds
+    them. A visibility sale.</p>
+    <p class="seg">{chip("Both Broken")} Weak on both sides. A full rebuild:
+    real money, slower close.</p>
+    <p class="seg">{chip("Dialed")} Strong on both. A referral partner, not a
+    prospect.</p>
+    <p class="seg">{chip("incomplete")} Booked could not be fully measured
+    (site unreachable, form in a popup, bot protection), so no segment is
+    claimed rather than guessing one.</p>
+  </div>
+</details>"""
+
+
 def status_pill(status: str) -> str:
     return f'<span class="status {esc(status)}">{esc(status)}</span>'
 
@@ -197,6 +265,26 @@ def render_run(*, csrf: str, markets: Sequence[str], active_jobs: Sequence[Mappi
 <h1>Run a sweep</h1>
 <div class="sub">Ingest a metro, screen it, audit the survivors. Every step is
 resumable and every long job survives the worker that started it.</div>
+
+<details class="legend">
+  <summary>How a sweep works</summary>
+  <div class="inner">
+    <p><strong>1. Sweep.</strong> Google Places is searched for roofing
+    contractors across the metro and its towns. Each one is screened by a fit
+    gate: residential work, 25 or more reviews, a real local address, not a
+    storm chaser.</p>
+    <p><strong>2. Batch.</strong> The survivors are dispatched as a batch: each
+    company's website is crawled politely, rendered on a simulated phone, speed
+    tested, and scored across roughly 30 checks. See "How to read these scores"
+    on any batch page for what the numbers mean.</p>
+    <p><strong>3. Rank.</strong> The batch becomes a call list ordered by
+    opportunity shape, not raw score: companies that are easy to find but lose
+    the leads they attract rank first.</p>
+    <p><strong>4. Findings and reports.</strong> A model drafts the three
+    problems costing each company the most booked jobs. A human reads, approves
+    and publishes a one-page report the contractor can be sent.</p>
+  </div>
+</details>
 
 <div class="grid2">
   <div class="card">
@@ -409,7 +497,8 @@ bucket first within a segment.</div>
 </div>
 
 <h2>Call list</h2>
-<table><tr><th>#</th><th>Business</th><th>Segment</th><th>F</th><th>C</th><th>B</th>
+{score_legend()}
+<table><tr><th>#</th><th>Business</th><th>Segment</th>{score_headers()}
 <th>Total</th><th>Phone</th><th></th><th>Action</th></tr>
 {"".join(table_rows) or '<tr><td colspan="10" class="muted">No audits yet.</td></tr>'}</table>
 """
@@ -452,6 +541,14 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
         if section in sections:
             sections[section].append((check, definition))
 
+    section_subs = {
+        "found": "Can a homeowner with a leaking roof find this company at all?",
+        "chosen": "Once found, do they look like the safe choice?",
+        "booked": "If someone raises a hand, is anything set up to catch it? "
+                  "Weighted heaviest: this is the section nobody else audits.",
+        "measurement": "Diagnostics only. Recorded for context, worth no points.",
+    }
+
     def section_table(name: str) -> str:
         rows = "".join(
             f'<tr class="checkrow"><td>{esc(c.get("code"))}</td>'
@@ -463,7 +560,9 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
         )
         if not rows:
             return ""
-        return (f"<h2>{name.title()}</h2><table><tr><th>Code</th><th>Check</th>"
+        return (f"<h2>{name.title()}</h2>"
+                f'<div class="sub">{section_subs.get(name, "")}</div>'
+                f"<table><tr><th>Code</th><th>Check</th>"
                 f"<th>Result</th><th>Points</th><th>What we saw</th></tr>{rows}</table>")
 
     findings_block = ""
@@ -511,6 +610,18 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
         for e in evidence
     )
 
+    warnings = ""
+    if audit.get("crawl_error"):
+        warnings += (f'<div class="banner"><strong>Crawl problem:</strong> '
+                    f'{esc(audit["crawl_error"])}</div>')
+    partial_sections = audit.get("partial_sections") or []
+    if partial_sections:
+        warnings += (f'<div class="banner"><strong>Partial:</strong> '
+                    f'{esc(", ".join(partial_sections))} '
+                    f'{"was" if len(partial_sections) == 1 else "were"} measured on '
+                    f'fewer than 80% of its enabled points. Segment is withheld '
+                    f'when Booked is the partial section.</div>')
+
     body = f"""
 <div class="sub"><a href="/console/batches/{esc(audit.get("batch_id"))}">&larr; batch</a></div>
 <h1>{esc(prospect.get("business_name"))}</h1>
@@ -521,6 +632,7 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
 {tiles([("found", scores.get("found", 0)), ("chosen", scores.get("chosen", 0)),
         ("booked", scores.get("booked", 0)), ("total", scores.get("total", 0)),
         ("band", audit.get("band") or ""), ("segment", audit.get("segment") or "incomplete")])}
+{warnings}
 
 <div class="card">
   <form class="inline" method="post" action="/console/audits/{esc(audit_id)}/reaudit">

@@ -292,7 +292,7 @@ Route: `/r/{slug}`, public, unauthenticated, unguessable 16-character slug.
   parameter name with the existing tool before building this.
 - Log a view. Hash the IP with a server-side salt. Never store a raw IP.
 - Mobile first, 16px minimum. Brand tokens: asphalt `#16120E`, chalk `#ECE6DC`,
-  safety orange `#F25C1F`. Staatliches display, Barlow body.
+  safety orange `#F25C1F`. Barlow Condensed display, Work Sans body.
 
 **Enforced in code:**
 - A test fails the build if any report component string contains an em-dash.

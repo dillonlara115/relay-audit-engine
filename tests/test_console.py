@@ -22,7 +22,7 @@ def client(monkeypatch):
     import app.console.auth as auth
     import app.console.routes as routes
 
-    monkeypatch.setattr(auth, "get_config", lambda: Config(worker_shared_secret=SECRET))
+    monkeypatch.setattr(auth, "get_config", lambda: Config(console_password=SECRET))
     monkeypatch.setattr(routes, "publish_job", lambda *a, **k: "msg-1")
     monkeypatch.setattr(routes.jobs, "active", lambda: [])
     monkeypatch.setattr(routes.jobs, "recent", lambda n=40: [])
@@ -71,7 +71,7 @@ def test_a_rotated_secret_invalidates_the_session(client, monkeypatch):
 
     import app.console.auth as auth
 
-    monkeypatch.setattr(auth, "get_config", lambda: Config(worker_shared_secret="rotated"))
+    monkeypatch.setattr(auth, "get_config", lambda: Config(console_password="rotated"))
     assert client.get("/console").status_code == 401
 
 

@@ -3,10 +3,15 @@
 The console can start crawls, spend model quota and publish a page to a real
 contractor, so it needs more than the read only dashboard's gate.
 
-Session: visit once with ?key=<WORKER_SHARED_SECRET>, receive an HttpOnly
-cookie holding a hash of the secret, and get redirected to a clean URL so the
-secret never sits in the address bar. A rotated secret invalidates every
+Session: visit once with ?key=<CONSOLE_PASSWORD>, receive an HttpOnly
+cookie holding a hash of the password, and get redirected to a clean URL so it
+never sits in the address bar. Changing the password invalidates every
 existing cookie because the hash no longer matches.
+
+CONSOLE_PASSWORD is deliberately separate from WORKER_SHARED_SECRET. The
+latter authenticates Pub/Sub's server to server pushes and is a generated
+token nobody types; this one is what a person enters, so it can be a password
+the operator picked and remembers.
 
 CSRF: a random token in a second HttpOnly cookie, echoed into every mutating
 form by the server. An attacker's page can submit a form to us but cannot read
@@ -31,7 +36,7 @@ SESSION_HOURS = 12
 
 
 def session_token() -> str:
-    secret = get_config().worker_shared_secret
+    secret = get_config().console_password
     return hashlib.sha256(f"console:{secret}".encode()).hexdigest() if secret else ""
 
 
@@ -56,7 +61,7 @@ def authorize(request: Request) -> Response | None:
 
     key = request.query_params.get("key")
     if key is not None:
-        if hmac.compare_digest(key, get_config().worker_shared_secret):
+        if hmac.compare_digest(key, get_config().console_password):
             response = RedirectResponse(url=request.url.path, status_code=303)
             _set_cookies(response, request, secrets.token_urlsafe(24))
             return response
@@ -73,7 +78,7 @@ def csrf_token(request: Request) -> str:
 
 def check_csrf(request: Request, submitted: str | None) -> bool:
     """Double submit: the form field must match the cookie."""
-    if not get_config().worker_shared_secret:
+    if not get_config().console_password:
         return True
     cookie = request.cookies.get(CSRF_COOKIE) or ""
     return bool(cookie) and bool(submitted) and hmac.compare_digest(cookie, submitted)

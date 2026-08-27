@@ -49,7 +49,7 @@ async def console_gate(request: Request, call_next):
     unauthenticated POST got a 422 listing the fields it should have sent.
     Here it also covers routes added later without anyone remembering to.
     """
-    if request.url.path.startswith("/console"):
+    if request.url.path.startswith(("/console", "/dashboard")):
         gate = _console_authorize(request)
         if gate is not None:
             return gate
@@ -78,43 +78,9 @@ def health() -> dict:
 
 # ── operator dashboard ────────────────────────────────────────────────────────
 #
-# Read only and internal. The gate: visit once with ?key=<WORKER_SHARED_SECRET>,
-# get a cookie holding the secret's hash, get redirected to a clean URL. The
-# secret itself never sits in a URL after that first hop, and the cookie cannot
-# be replayed against a rotated secret.
-
-import hashlib
-
-from fastapi.responses import RedirectResponse
-
-_DASH_COOKIE = "relay_dash"
-
-
-def _dash_token() -> str:
-    secret = get_config().worker_shared_secret
-    return hashlib.sha256(f"dash:{secret}".encode()).hexdigest() if secret else ""
-
-
-def _dash_authorized(request: Request) -> Response | None:
-    """None when authorized, otherwise the response to send instead."""
-    token = _dash_token()
-    if not token:
-        return None  # no secret configured: local dev, IAM is the only gate
-    key = request.query_params.get("key")
-    if key is not None:
-        if key == get_config().worker_shared_secret:
-            # Secure follows the real scheme: Cloud Run terminates TLS and
-            # forwards http, so the header is the truth, and a local test
-            # client speaks plain http where a Secure cookie would vanish.
-            https = (request.headers.get("x-forwarded-proto") or request.url.scheme) == "https"
-            response = RedirectResponse(url=request.url.path, status_code=303)
-            response.set_cookie(_DASH_COOKIE, token, httponly=True, secure=https,
-                                max_age=12 * 3600, samesite="lax")
-            return response
-        return Response(status_code=401)
-    if request.cookies.get(_DASH_COOKIE) == token:
-        return None
-    return Response(status_code=401)
+# Read only and internal. Same gate, same session cookie, same CONSOLE_PASSWORD
+# as /console: this and the console are one operator surface split across two
+# files, and signing into either signs into both.
 
 
 def _batch_overview() -> list:
@@ -154,9 +120,10 @@ def _batch_overview() -> list:
 async def dashboard(request: Request) -> Response:
     import asyncio
 
+    from app.console.auth import authorize
     from app.report.dashboard import render_overview
 
-    gate = _dash_authorized(request)
+    gate = authorize(request)
     if gate is not None:
         return gate
     batches = await asyncio.to_thread(_batch_overview)
@@ -170,10 +137,11 @@ async def dashboard(request: Request) -> Response:
 async def dashboard_batch(batch_id: str, request: Request) -> Response:
     import asyncio
 
+    from app.console.auth import authorize
     from app.ranker import rank
     from app.report.dashboard import render_batch
 
-    gate = _dash_authorized(request)
+    gate = authorize(request)
     if gate is not None:
         return gate
 

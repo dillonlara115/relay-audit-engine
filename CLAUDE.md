@@ -100,7 +100,7 @@ touches Firestore or Vertex.
 - Booked findings must state the limit honestly: we can see whether the tools exist,
   not how fast his team moves.
 - Brand tokens: asphalt `#16120E`, chalk `#ECE6DC`, safety orange `#F25C1F`.
-  Staatliches display, Barlow body. 16px minimum, mobile first.
+  Barlow Condensed display, Work Sans body. 16px minimum, mobile first.
 - Public reports expose no scores, bands, or segments.
 
 ## Working style
