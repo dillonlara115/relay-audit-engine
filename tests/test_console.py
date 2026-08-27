@@ -338,3 +338,16 @@ def test_assemble_batch_attaches_per_audit_check_statuses(monkeypatch):
     rows, segments, check_defs = routes._assemble_batch("b1")
     assert rows[0]["checks"] == {"C16": "fail", "B1": "pass"}
     assert [d["code"] for d in check_defs] == ["C16"], "disabled checks are excluded"
+
+
+def test_the_prospects_website_opens_in_a_new_tab():
+    """An operator working the call list should not lose their place in the
+    console every time they check a prospect's actual site."""
+    page = views.render_audit(
+        audit={"audit_id": "a1", "scores": {}, "batch_id": "b1"},
+        prospect={"business_name": "Peak", "website_url": "https://peakroofing.com/",
+                 "domain": "peakroofing.com"},
+        checks=[], definitions={}, findings=None, evidence=[], csrf="t",
+    )
+    assert ('href="https://peakroofing.com/" target="_blank" '
+            'rel="noopener noreferrer"') in page

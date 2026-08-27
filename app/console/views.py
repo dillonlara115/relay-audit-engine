@@ -779,7 +779,7 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
 <h1>{esc(prospect.get("business_name"))}</h1>
 <div class="sub">{esc(prospect.get("city") or "")} &middot;
 {esc(prospect.get("gbp_phone") or "")} &middot;
-<a href="{esc(prospect.get("website_url") or "#")}">{esc(prospect.get("domain") or "no website")}</a></div>
+<a href="{esc(prospect.get("website_url") or "#")}" target="_blank" rel="noopener noreferrer">{esc(prospect.get("domain") or "no website")}</a></div>
 
 {tiles([("found", scores.get("found", 0)), ("chosen", scores.get("chosen", 0)),
         ("booked", scores.get("booked", 0)), ("total", scores.get("total", 0)),
