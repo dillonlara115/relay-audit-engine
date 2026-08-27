@@ -224,3 +224,117 @@ def test_business_names_are_escaped():
     }], {"Leaky Bucket": 1}, csrf="t")
     assert "<script>alert" not in page
     assert "&lt;script&gt;" in page
+
+
+# ── Batch filters and sorting ────────────────────────────────────────────────
+#
+# The batch page filters client side over data already on the page, so what
+# matters server side is that the right data lands in the right attributes:
+# per-row check statuses, sortable score values, and a filter dropdown built
+# from the check definitions.
+
+
+def _defs(*rows):
+    base = {"points": 1, "enabled": True, "sort_order": 0}
+    return [dict(base, **r) for r in rows]
+
+
+def test_check_filter_options_are_grouped_by_section():
+    defs = _defs(
+        {"code": "C16", "title": "Footer copyright", "section": "chosen", "sort_order": 350},
+        {"code": "B1", "title": "Self-serve booking", "section": "booked", "sort_order": 400},
+    )
+    page = views.render_batch("b1", [], {}, defs, csrf="t")
+    assert '<optgroup label="Chosen">' in page
+    assert '<optgroup label="Booked">' in page
+    assert "C16: Footer copyright" in page
+    assert "B1: Self-serve booking" in page
+
+
+def test_the_copyright_example_is_findable_by_a_new_operator():
+    """The concrete ask: find businesses with an old copyright year. C16 is
+    the check that measures it, so the help text has to name it."""
+    defs = _defs({"code": "C16", "title": "Footer copyright", "section": "chosen"})
+    page = views.render_batch("b1", [], {}, defs, csrf="t")
+    assert "old copyright year" in page
+    assert "C16" in page
+
+
+def test_each_row_carries_its_check_statuses_as_data():
+    row = {"rank": 1, "audit_id": "a1", "business_name": "Peak Roofing", "city": "COS",
+           "segment": "Leaky Bucket", "scores": {"found": 15, "chosen": 18, "booked": 0, "total": 44},
+           "phone": "x", "partial": False, "checks": {"C16": "fail", "B1": "pass"}}
+    page = views.render_batch("b1", [row], {"Leaky Bucket": 1}, [], csrf="t")
+    assert ('data-checks="{&quot;C16&quot;:&quot;fail&quot;,'
+            '&quot;B1&quot;:&quot;pass&quot;}"') in page
+
+
+def test_rows_carry_numeric_sort_attributes_matching_their_scores():
+    row = {"rank": 3, "audit_id": "a1", "business_name": "Peak", "city": "COS",
+           "segment": "Dialed", "scores": {"found": 20, "chosen": 25, "booked": 30, "total": 75},
+           "phone": "", "partial": False, "checks": {}}
+    page = views.render_batch("b1", [row], {"Dialed": 1}, [], csrf="t")
+    assert 'data-sort_found="20"' in page
+    assert 'data-sort_chosen="25"' in page
+    assert 'data-sort_booked="30"' in page
+    assert 'data-sort_total="75"' in page
+    assert 'data-sort_business="peak"' in page
+
+
+def test_rows_without_a_score_sort_before_scored_rows_not_after():
+    """A missing score must not sort as the biggest number by accident."""
+    row = {"rank": 1, "audit_id": "a1", "business_name": "X", "city": "",
+           "segment": None, "scores": {}, "phone": "", "partial": True, "checks": {}}
+    page = views.render_batch("b1", [row], {}, [], csrf="t")
+    assert 'data-sort_total="-1"' in page
+
+
+def test_the_search_needle_combines_business_and_city_lowercased():
+    row = {"rank": 1, "audit_id": "a1", "business_name": "Peak ROOFING", "city": "Colorado Springs",
+           "segment": "Dialed", "scores": {}, "phone": "", "partial": False, "checks": {}}
+    page = views.render_batch("b1", [row], {}, [], csrf="t")
+    assert 'data-business="peak roofing colorado springs"' in page
+
+
+def test_score_headers_are_sortable_and_explained():
+    headers = views.score_headers()
+    assert 'data-sort="found"' in headers
+    assert 'data-sort="chosen"' in headers
+    assert 'data-sort="booked"' in headers
+    assert "abbr title=" in headers
+
+
+def test_batch_page_has_no_forbidden_dash_with_filters_present():
+    from app.copy_rules import contains_forbidden_dash
+
+    defs = _defs({"code": "C16", "title": "Footer copyright", "section": "chosen"})
+    row = {"rank": 1, "audit_id": "a1", "business_name": "Peak", "city": "COS",
+           "segment": "Leaky Bucket", "scores": {"found": 1, "chosen": 2, "booked": 3, "total": 6},
+           "phone": "", "partial": False, "checks": {"C16": "fail"}}
+    page = views.render_batch("b1", [row], {"Leaky Bucket": 1}, defs, csrf="t")
+    assert not contains_forbidden_dash(page)
+
+
+# ── _assemble_batch wires check statuses onto each row ───────────────────────
+
+
+def test_assemble_batch_attaches_per_audit_check_statuses(monkeypatch):
+    import app.console.routes as routes
+
+    audits = [{"audit_id": "a1", "prospect_id": "p1", "segment": "Leaky Bucket",
+              "scores": {"found": 1, "chosen": 2, "booked": 3, "total": 6}}]
+    monkeypatch.setattr(routes.store, "audits_for_batch", lambda b: audits)
+    monkeypatch.setattr(routes.store, "get_prospect", lambda p: {"business_name": "Peak"})
+    monkeypatch.setattr(routes.store, "get_draft_findings", lambda a: None)
+    monkeypatch.setattr(routes.store, "audit_checks",
+                        lambda a: [{"code": "C16", "status": "fail"}, {"code": "B1", "status": "pass"}])
+    monkeypatch.setattr(routes.store, "all_check_defs", lambda: [
+        {"code": "C16", "title": "Footer copyright", "section": "chosen",
+         "enabled": True, "sort_order": 1},
+        {"code": "F1", "title": "Off this week", "section": "found",
+         "enabled": False, "sort_order": 2},
+    ])
+
+    rows, segments, check_defs = routes._assemble_batch("b1")
+    assert rows[0]["checks"] == {"C16": "fail", "B1": "pass"}
+    assert [d["code"] for d in check_defs] == ["C16"], "disabled checks are excluded"

@@ -91,6 +91,13 @@ pre.log { background:var(--asphalt); color:#e8e2d6; border-radius:8px; padding:1
 .status.done { background:#2E7D4F; color:#fff; }
 .status.failed { background:#8d2f16; color:#fff; }
 
+.filterbar { margin-bottom:14px; }
+.filterrow { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+             gap:12px; align-items:end; }
+.filterrow label { margin:0 0 4px; }
+th[data-sort] { user-select:none; }
+th[data-sort]:hover { color:var(--orange); }
+
 .finding { border-left:5px solid var(--orange); background:#fff; padding:14px 16px;
            border-radius:6px; margin-bottom:12px; }
 .checkrow td:first-child { font-family:'Barlow Condensed',sans-serif; }
@@ -181,10 +188,14 @@ SCORE_TITLES = {
 }
 
 
+SCORE_SORT_KEYS = {"F": "found", "C": "chosen", "B": "booked"}
+
+
 def score_headers() -> str:
-    """The three compact column headers, each explained on hover."""
+    """The three compact column headers, each explained on hover and clickable
+    to sort the call list by that section's score."""
     return "".join(
-        f'<th><abbr title="{esc(title)}">{key}</abbr></th>'
+        f'<th data-sort="{SCORE_SORT_KEYS[key]}"><abbr title="{esc(title)}">{key}</abbr></th>'
         for key, title in SCORE_TITLES.items()
     )
 
@@ -423,9 +434,94 @@ def render_jobs(jobs_list: Sequence[Mapping[str, Any]]) -> str:
 # ── Batch screen, with actions ────────────────────────────────────────────────
 
 
+# Vanilla JS, no build step: a search box, a segment filter, a check/status
+# filter, and click-to-sort headers. Everything runs over the rows already in
+# the page, so switching filters costs nothing server side.
+_BATCH_FILTER_SCRIPT = """<script>
+(function () {
+  var table = document.getElementById('call-list');
+  if (!table) return;
+  var tbody = table.tBodies[0];
+  var rows = Array.prototype.slice.call(tbody.rows);
+  var q = document.getElementById('f-q');
+  var segSel = document.getElementById('f-segment');
+  var checkSel = document.getElementById('f-check');
+  var statusSel = document.getElementById('f-status');
+  var countEl = document.getElementById('f-count');
+
+  function apply() {
+    var needle = (q.value || '').trim().toLowerCase();
+    var seg = segSel.value;
+    var code = checkSel.value;
+    var status = statusSel.value;
+    var shown = 0;
+    rows.forEach(function (row) {
+      var visible = true;
+      if (needle && row.dataset.business.indexOf(needle) === -1) visible = false;
+      if (visible && seg && row.dataset.segment !== seg) visible = false;
+      if (visible && code) {
+        var checks = JSON.parse(row.dataset.checks || '{}');
+        var have = checks[code];
+        if (status) {
+          if (have !== status) visible = false;
+        } else if (have === undefined) {
+          visible = false;
+        }
+      }
+      row.style.display = visible ? '' : 'none';
+      if (visible) shown++;
+    });
+    if (countEl) countEl.textContent = shown + ' of ' + rows.length + ' shown';
+  }
+
+  [q, segSel, checkSel, statusSel].forEach(function (el) {
+    el.addEventListener('input', apply);
+    el.addEventListener('change', apply);
+  });
+
+  var sortState = {key: null, dir: 1};
+  table.querySelectorAll('th[data-sort]').forEach(function (th) {
+    th.style.cursor = 'pointer';
+    th.addEventListener('click', function () {
+      var key = th.dataset.sort;
+      sortState.dir = sortState.key === key ? -sortState.dir : 1;
+      sortState.key = key;
+      table.querySelectorAll('th[data-sort]').forEach(function (h) {
+        h.textContent = h.textContent.replace(/ [\u25B2\u25BC]$/, '');
+      });
+      th.textContent += sortState.dir === 1 ? ' \u25B2' : ' \u25BC';
+      rows.sort(function (a, b) {
+        var av = a.dataset['sort_' + key], bv = b.dataset['sort_' + key];
+        var an = parseFloat(av), bn = parseFloat(bv);
+        var cmp = (!isNaN(an) && !isNaN(bn)) ? (an - bn) : String(av).localeCompare(String(bv));
+        return cmp * sortState.dir;
+      });
+      rows.forEach(function (row) { tbody.appendChild(row); });
+    });
+  });
+
+  apply();
+})();
+</script>"""
+
+
+def _check_filter_options(check_defs: Sequence[Mapping[str, Any]]) -> str:
+    groups: dict[str, list[str]] = {}
+    for d in check_defs:
+        section = str(d.get("section") or "").title() or "Other"
+        code, title = d.get("code"), d.get("title")
+        groups.setdefault(section, []).append(
+            f'<option value="{esc(code)}">{esc(code)}: {esc(title)}</option>'
+        )
+    return "".join(
+        f'<optgroup label="{esc(section)}">{"".join(options)}</optgroup>'
+        for section, options in groups.items()
+    )
+
+
 def render_batch(batch_id: str, rows: Sequence[Mapping[str, Any]],
-                 segments: Mapping[str, int], *, csrf: str,
-                 progress: Mapping[str, Any] | None = None) -> str:
+                 segments: Mapping[str, int], check_defs: Sequence[Mapping[str, Any]] = (),
+                 *, csrf: str, progress: Mapping[str, Any] | None = None) -> str:
     tile_pairs = [(name, segments.get(name, 0)) for name in
                   ("Leaky Bucket", "Invisible Pro", "Both Broken", "Dialed", "incomplete")
                   if segments.get(name)]
@@ -451,8 +547,19 @@ def render_batch(batch_id: str, rows: Sequence[Mapping[str, Any]],
         else:
             action = f'<a href="/console/audits/{esc(r["audit_id"])}">open</a>'
 
+        business_needle = esc(f'{r.get("business_name") or ""} {r.get("city") or ""}'.lower())
+        checks_json = esc(json.dumps(r.get("checks") or {}, separators=(",", ":")))
+        segment_value = esc(r.get("segment") or "incomplete")
+
         table_rows.append(
-            "<tr>"
+            f'<tr data-business="{business_needle}" data-segment="{segment_value}" '
+            f'data-checks="{checks_json}" '
+            f'data-sort_rank="{esc(r.get("rank"))}" '
+            f'data-sort_business="{esc((r.get("business_name") or "").lower())}" '
+            f'data-sort_found="{scores.get("found", -1)}" '
+            f'data-sort_chosen="{scores.get("chosen", -1)}" '
+            f'data-sort_booked="{scores.get("booked", -1)}" '
+            f'data-sort_total="{scores.get("total", -1)}">'
             f'<td class="num">{esc(r.get("rank"))}</td>'
             f'<td><a href="/console/audits/{esc(r.get("audit_id"))}">'
             f'{esc(r.get("business_name"))}</a><br>'
@@ -498,9 +605,54 @@ bucket first within a segment.</div>
 
 <h2>Call list</h2>
 {score_legend()}
-<table><tr><th>#</th><th>Business</th><th>Segment</th>{score_headers()}
-<th>Total</th><th>Phone</th><th></th><th>Action</th></tr>
-{"".join(table_rows) or '<tr><td colspan="10" class="muted">No audits yet.</td></tr>'}</table>
+
+<div class="card filterbar">
+  <div class="filterrow">
+    <div>
+      <label for="f-q">Search</label>
+      <input id="f-q" type="text" placeholder="Business or city">
+    </div>
+    <div>
+      <label for="f-segment">Segment</label>
+      <select id="f-segment">
+        <option value="">Any segment</option>
+        <option value="Leaky Bucket">Leaky Bucket</option>
+        <option value="Invisible Pro">Invisible Pro</option>
+        <option value="Both Broken">Both Broken</option>
+        <option value="Dialed">Dialed</option>
+        <option value="incomplete">incomplete</option>
+      </select>
+    </div>
+    <div>
+      <label for="f-check">Check</label>
+      <select id="f-check">
+        <option value="">Any check</option>
+        {_check_filter_options(check_defs)}
+      </select>
+    </div>
+    <div>
+      <label for="f-status">Result</label>
+      <select id="f-status">
+        <option value="">Any result</option>
+        <option value="fail">Failed</option>
+        <option value="pass">Passed</option>
+        <option value="skipped">Skipped</option>
+      </select>
+    </div>
+  </div>
+  <p class="muted" id="f-count" style="margin-top:8px"></p>
+  <p class="muted" style="margin-top:2px">Example: pick "C16: Footer copyright" and
+  "Failed" to find businesses whose site still shows an old copyright year.
+  Click a column header to sort by it.</p>
+</div>
+
+<table id="call-list"><thead><tr>
+<th data-sort="rank">#</th><th data-sort="business">Business</th><th>Segment</th>{score_headers()}
+<th data-sort="total">Total</th><th>Phone</th><th></th><th>Action</th></tr></thead>
+<tbody>
+{"".join(table_rows) or '<tr><td colspan="10" class="muted">No audits yet.</td></tr>'}
+</tbody></table>
+{_BATCH_FILTER_SCRIPT}
 """
     return shell(f"Batch {batch_id}", body, active="batches")
 

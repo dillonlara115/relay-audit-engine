@@ -141,7 +141,9 @@ async def job_screen(job_id: str, request: Request) -> Response:
 # ── Batches ───────────────────────────────────────────────────────────────────
 
 
-def _assemble_batch(batch_id: str) -> tuple[list[dict[str, Any]], dict[str, int]]:
+def _assemble_batch(
+    batch_id: str,
+) -> tuple[list[dict[str, Any]], dict[str, int], list[dict[str, Any]]]:
     from app.ranker import rank
 
     audits = list(store.audits_for_batch(batch_id))
@@ -151,6 +153,25 @@ def _assemble_batch(batch_id: str) -> tuple[list[dict[str, Any]], dict[str, int]
         if pid and pid not in prospects:
             prospects[pid] = store.get_prospect(pid) or {}
     slugs = {a.get("audit_id"): a.get("report_slug") for a in audits}
+
+    # Every check's status per audit, so the batch page can filter by them
+    # client side ("show only businesses failing C16, footer copyright") without
+    # a round trip per filter change. One extra Firestore read per audit, same
+    # cost class as the findings lookup already done here.
+    checks_by_audit = {
+        a.get("audit_id"): {
+            c.get("code"): c.get("status")
+            for c in store.audit_checks(a.get("audit_id"))
+            if c.get("code")
+        }
+        for a in audits
+    }
+
+    check_defs = sorted(
+        (d for d in store.all_check_defs() if d.get("enabled")),
+        key=lambda d: d.get("sort_order", 0),
+    )
+
     rows, segments = [], {}
     for r in rank(audits, prospects):
         segments[r.segment or "incomplete"] = segments.get(r.segment or "incomplete", 0) + 1
@@ -162,8 +183,9 @@ def _assemble_batch(batch_id: str) -> tuple[list[dict[str, Any]], dict[str, int]
             "incumbent_agency": r.incumbent_agency,
             "report_slug": slugs.get(r.audit_id),
             "findings_status": (findings or {}).get("status"),
+            "checks": checks_by_audit.get(r.audit_id) or {},
         })
-    return rows, segments
+    return rows, segments, check_defs
 
 
 @router.get("/batches")
@@ -173,10 +195,10 @@ async def batches_screen(request: Request) -> Response:
 
 @router.get("/batches/{batch_id}")
 async def batch_screen(batch_id: str, request: Request) -> Response:
-    rows, segments = await asyncio.to_thread(_assemble_batch, batch_id)
+    rows, segments, check_defs = await asyncio.to_thread(_assemble_batch, batch_id)
     overview = await asyncio.to_thread(store.batch_overview)
     progress = next((b for b in overview if b["batch_id"] == batch_id), None)
-    return _page(views.render_batch(batch_id, rows, segments,
+    return _page(views.render_batch(batch_id, rows, segments, check_defs,
                                     csrf=csrf_token(request), progress=progress))
 
 
