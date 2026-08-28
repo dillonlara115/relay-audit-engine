@@ -252,11 +252,15 @@ def test_c6_header_tel_passes():
 def test_c6_tel_outside_the_header_still_passes_but_says_so():
     res = run("C6", context(homepage_html=doc('<footer><a href="tel:+17195550142">Call</a></footer>')))
     assert res.status == PASS
-    assert "not from the page header" in res.note
+    assert "not from the top of the page" in res.note
 
 
-def test_c6_plain_text_number_fails():
-    assert run("C6", context(homepage_html=doc("<p>(719) 555-0142</p>"))).status == FAIL
+def test_c6_plain_text_number_without_a_render_is_inconclusive():
+    """Changed deliberately. A number in plain text with no tel: anchor used to
+    fail on the spot, but source alone cannot tell that apart from a site that
+    adds its tap to call links on load, which is what a real prospect did. With
+    a render present and empty it still fails; see the JavaScript tests below."""
+    assert run("C6", context(homepage_html=doc("<p>(719) 555-0142</p>"))).status == SKIPPED
 
 
 SHORT_FORM = ('<form action="/send" method="post">'
@@ -680,3 +684,65 @@ def test_locality_queries_cover_the_enumerated_metro():
 
     # an unmapped market gets the metro variants alone
     assert len(queries_for_market(resolve_market("Boise"))) == 5
+
+
+# ── C6 must not judge a JavaScript rendered page on its source ───────────────
+#
+# Found on a real prospect (Stars & Bars Water Restoration). The served HTML
+# had no tel: anchor whatsoever; its only two "tel:" strings sat inside a
+# Google Ads tracking script. A real browser showed six tap to call links,
+# three above the fold. C6 read the source and confidently reported the
+# opposite of what a homeowner experiences.
+
+
+class _FakeRender:
+    def __init__(self, tel_links=(), usable=True):
+        self.tel_links = list(tel_links)
+        self.usable = usable
+
+
+def _ctx_with_render(html, render):
+    ctx = context(homepage_html=html)
+    ctx.render = render
+    return ctx
+
+
+def test_c6_passes_on_javascript_injected_tel_links():
+    """The exact regression: nothing in source, three above the fold live."""
+    ctx = _ctx_with_render(doc("<p>Call 719-676-2456</p>"), _FakeRender([
+        {"text": "Call 719-676-2456", "above_fold": True},
+        {"text": "719-676-2456", "above_fold": False},
+    ]))
+    res = run("C6", ctx)
+    assert res.status == PASS
+    assert "top of the page" in res.note
+    assert res.observed["source"] == "rendered"
+
+
+def test_c6_below_fold_rendered_links_still_pass_with_the_softer_note():
+    ctx = _ctx_with_render(doc("<p>719-676-2456</p>"), _FakeRender([
+        {"text": "719-676-2456", "above_fold": False},
+    ]))
+    res = run("C6", ctx)
+    assert res.status == PASS
+    assert "not from the top" in res.note
+
+
+def test_c6_still_fails_when_the_browser_also_finds_nothing():
+    ctx = _ctx_with_render(doc("<p>Call us at 719-676-2456</p>"), _FakeRender([]))
+    res = run("C6", ctx)
+    assert res.status == FAIL
+
+
+def test_c6_skips_rather_than_accuses_when_there_is_no_render():
+    """Source alone cannot tell 'no link' from 'link added on load'."""
+    res = run("C6", context(homepage_html=doc("<p>Call us at 719-676-2456</p>")))
+    assert res.status == SKIPPED
+    assert "added on load" in res.note
+
+
+def test_c6_still_passes_on_plain_html_without_any_render():
+    """The common case must not start depending on the renderer."""
+    res = run("C6", context(homepage_html=doc('<header><a href="tel:+17196762456">Call</a></header>')))
+    assert res.status == PASS
+    assert res.observed["source"] == "html"

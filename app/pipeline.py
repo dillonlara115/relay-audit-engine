@@ -544,6 +544,10 @@ async def audit_one(
     if form_render is None and render_result is not None:
         form_render = render_result
 
+    # A JavaScript built site serves almost no text. Fold the rendered homepage
+    # into the facts so the text based checks read what a homeowner reads.
+    site_facts = facts.with_rendered_homepage(site_facts, render_result)
+
     ctx = AuditContext(
         place=dict(prospect),
         site=site_facts,

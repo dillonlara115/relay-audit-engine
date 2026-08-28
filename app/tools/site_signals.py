@@ -222,8 +222,15 @@ def extract_signals(crawl: SiteCrawl, *, now: datetime | None = None) -> SiteSig
             break
 
     copyright_years = [int(m.group(1)) for m in _COPYRIGHT_YEAR.finditer(corpus)]
-    if copyright_years:
-        signals.copyright_year = max(y for y in copyright_years if 1990 <= y <= now.year + 1)
+    # Regression: the regex matches any 19xx/20xx year after "copyright" or
+    # "(c)", so a site whose only match is an old founding year or a typo
+    # (say a stray (c) 1985) left `copyright_years` non-empty while every
+    # value fell outside the plausible range, and max() on the empty filtered
+    # generator crashed the whole sweep. Filter first, check the filtered
+    # list, exactly like founded_year and years_in_business already do above.
+    plausible_copyright = [y for y in copyright_years if 1990 <= y <= now.year + 1]
+    if plausible_copyright:
+        signals.copyright_year = max(plausible_copyright)
 
     return signals
 

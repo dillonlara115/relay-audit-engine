@@ -351,3 +351,140 @@ def test_the_prospects_website_opens_in_a_new_tab():
     )
     assert ('href="https://peakroofing.com/" target="_blank" '
             'rel="noopener noreferrer"') in page
+
+
+# ── Google Business Profile link ─────────────────────────────────────────────
+
+
+def test_the_audit_page_links_to_the_google_business_profile():
+    """Places gives us googleMapsUri on every prospect. It opens the public
+    profile, which is where an operator checks reviews and hours, and is what
+    a searching homeowner would land on."""
+    page = views.render_audit(
+        audit={"audit_id": "a1", "scores": {}, "batch_id": "b1"},
+        prospect={"business_name": "Peak", "maps_uri": "https://maps.google.com/?cid=1",
+                 "website_url": "https://peakroofing.com/", "domain": "peakroofing.com"},
+        checks=[], definitions={}, findings=None, evidence=[], csrf="t",
+    )
+    assert ('href="https://maps.google.com/?cid=1" target="_blank" '
+            'rel="noopener noreferrer">Google Business Profile</a>') in page
+
+
+def test_no_profile_link_is_rendered_when_we_have_no_uri():
+    """A prospect ingested before we stored maps_uri must not get a dead link."""
+    page = views.render_audit(
+        audit={"audit_id": "a1", "scores": {}}, prospect={"business_name": "Peak"},
+        checks=[], definitions={}, findings=None, evidence=[], csrf="t",
+    )
+    assert "Google Business Profile" not in page
+
+
+# ── Sweeping an arbitrary city ───────────────────────────────────────────────
+
+
+def test_the_market_field_accepts_any_city_and_suggests_the_mapped_metros():
+    page = views.render_run(csrf="t", markets=["Colorado Springs", "Pueblo"],
+                            active_jobs=[], recent_batches=[])
+    assert '<select id="market"' not in page, "a dropdown would block unmapped cities"
+    assert 'list="known-markets"' in page and "<datalist" in page
+    assert 'value="Colorado Springs, CO"' in page
+    assert 'value="Pueblo, CO"' in page
+
+
+def test_the_market_field_explains_what_an_unmapped_city_changes():
+    """resolve_market returns boundaries_known=False for anywhere unmapped, so
+    the local-operator check reports unknown rather than failing. An operator
+    seeing more prospects reach review deserves to know why."""
+    page = views.render_run(csrf="t", markets=["Denver"], active_jobs=[], recent_batches=[])
+    assert "unknown" in page and "review" in page
+
+
+def test_an_arbitrary_city_resolves_without_being_a_known_metro():
+    from app.markets import resolve_market
+
+    spec = resolve_market("Pueblo West, CO")
+    assert spec.state == "CO"
+    assert spec.boundaries_known is False
+    assert spec.in_metro("Anywhere", "CO") is None, "advisory, never a blocking fail"
+
+
+# ── The coordinator card explains itself ─────────────────────────────────────
+
+
+def test_the_coordinator_card_says_when_to_use_it_and_when_not_to():
+    page = views.render_run(csrf="t", markets=["X"], active_jobs=[], recent_batches=[])
+    assert "Use it when" in page
+    assert "Use the buttons instead" in page
+    assert "cannot send anything" in page, "rule 4 stated where an operator reads it"
+
+
+# ── Evidence is shown, not just named ────────────────────────────────────────
+
+
+def test_a_screenshot_renders_inline_and_links_to_full_size():
+    """The bucket blocks public access, so a stored screenshot is only viewable
+    through a signed URL minted per page load. Printing the storage path, which
+    is what this page used to do, shows the operator nothing."""
+    evidence = [{"kind": "screenshot", "gcs_path": "evidence/p/a/homepage.jpg",
+                "size_bytes": 614923, "url": "https://storage.googleapis.com/signed?sig=abc"}]
+    page = views.render_audit(
+        audit={"audit_id": "a1", "scores": {}}, prospect={"business_name": "Peak"},
+        checks=[], definitions={}, findings=None, evidence=evidence, csrf="t",
+    )
+    assert 'class="evidence-shot"' in page
+    assert 'src="https://storage.googleapis.com/signed?sig=abc"' in page
+    assert 'target="_blank"' in page, "click through to full size"
+    assert "601 KB" in page
+
+
+def test_evidence_that_could_not_be_signed_still_lists_itself():
+    """A signing failure must not blank the section: the operator should still
+    see what was captured, and why they cannot view it."""
+    evidence = [{"kind": "screenshot", "gcs_path": "evidence/p/a/homepage.jpg",
+                "size_bytes": 2048, "url_error": "RefreshError: token expired"}]
+    page = views.render_audit(
+        audit={"audit_id": "a1", "scores": {}}, prospect={"business_name": "Peak"},
+        checks=[], definitions={}, findings=None, evidence=evidence, csrf="t",
+    )
+    assert "could not sign a link" in page
+    assert "RefreshError" in page
+    assert 'class="evidence-shot"' not in page
+
+
+def test_an_audit_with_no_evidence_says_so():
+    page = views.render_audit(
+        audit={"audit_id": "a1", "scores": {}}, prospect={"business_name": "Peak"},
+        checks=[], definitions={}, findings=None, evidence=[], csrf="t",
+    )
+    assert "No evidence stored" in page
+
+
+def test_evidence_urls_are_minted_per_row(monkeypatch):
+    import app.console.routes as routes
+
+    class FakeStore:
+        def audit_evidence(self, audit_id):
+            return [{"kind": "screenshot", "gcs_path": "p/1.jpg", "size_bytes": 10},
+                    {"kind": "screenshot", "gcs_path": "p/2.jpg", "size_bytes": 20}]
+
+        def signed_url(self, path):
+            return f"https://signed.example/{path}"
+
+    rows = routes._evidence_with_urls(FakeStore(), "a1")
+    assert [r["url"] for r in rows] == ["https://signed.example/p/1.jpg",
+                                        "https://signed.example/p/2.jpg"]
+
+
+def test_a_signing_failure_is_captured_per_row_not_raised(monkeypatch):
+    import app.console.routes as routes
+
+    class BrokenStore:
+        def audit_evidence(self, audit_id):
+            return [{"kind": "screenshot", "gcs_path": "p/1.jpg", "size_bytes": 10}]
+
+        def signed_url(self, path):
+            raise RuntimeError("no signing credentials")
+
+    rows = routes._evidence_with_urls(BrokenStore(), "a1")
+    assert "url" not in rows[0]
+    assert "no signing credentials" in rows[0]["url_error"]

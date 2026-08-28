@@ -297,7 +297,20 @@ function collectMetrics() {
     ctas.push({ text: label.slice(0, 60), href: el.getAttribute("href"), rect: rect(el), above_fold: inFold(el) });
   }
 
+  // The rendered DOM's visible text and markup. A site that builds its page
+  // with JavaScript serves almost nothing in its HTML: measured on a real
+  // prospect, 4 characters of source text against 4478 rendered. Every text
+  // based check was reading the empty version and failing by default.
+  var renderedText = "";
+  var renderedHtml = "";
+  try {
+    renderedText = (document.body && document.body.innerText || "").slice(0, 200000);
+    renderedHtml = (document.documentElement.outerHTML || "").slice(0, 300000);
+  } catch (e) { /* a hostile page is not worth failing the whole render for */ }
+
   return {
+    text: renderedText,
+    html: renderedHtml,
     viewport: { width: vw, height: vh },
     document: {
       scroll_width: Math.round(scrollWidth),

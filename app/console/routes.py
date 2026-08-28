@@ -205,6 +205,27 @@ async def batch_screen(batch_id: str, request: Request) -> Response:
 # ── One audit, and the human decisions ────────────────────────────────────────
 
 
+def _evidence_with_urls(evidence_store: Any, audit_id: str) -> list[dict[str, Any]]:
+    """Evidence rows with a viewable URL attached.
+
+    The bucket has public access prevention on, so a stored screenshot is only
+    reachable through a signed URL minted per page load. Same approach the
+    published report uses. A failure to sign is not fatal: the row still lists
+    what was captured, it just cannot be shown inline.
+    """
+    rows = []
+    for row in evidence_store.audit_evidence(audit_id):
+        row = dict(row)
+        path = row.get("gcs_path")
+        if path:
+            try:
+                row["url"] = evidence_store.signed_url(path)
+            except Exception as exc:  # noqa: BLE001 - show the row, not a crash
+                row["url_error"] = f"{type(exc).__name__}: {exc}"[:120]
+        rows.append(row)
+    return rows
+
+
 @router.get("/audits/{audit_id}")
 async def audit_screen(audit_id: str, request: Request) -> Response:
 
@@ -221,7 +242,7 @@ async def audit_screen(audit_id: str, request: Request) -> Response:
             store.audit_checks(audit_id),
             {d["code"]: d for d in store.all_check_defs()},
             store.get_draft_findings(audit_id),
-            evidence_store.audit_evidence(audit_id),
+            _evidence_with_urls(evidence_store, audit_id),
         )
 
     loaded = await asyncio.to_thread(load)

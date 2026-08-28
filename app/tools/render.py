@@ -65,6 +65,8 @@ class RenderResult:
     status: int | None = None
     elapsed_ms: int | None = None
     title: str = ""
+    text: str = ""          # visible text after JavaScript has run
+    html: str = ""          # rendered markup, for script fingerprints
     horizontal_scroll: bool | None = None
     document: Mapping[str, Any] = field(default_factory=dict)
     overflowing_elements: Sequence[Mapping[str, Any]] = ()
@@ -174,6 +176,8 @@ def _from_payload(payload: Mapping[str, Any], url: str) -> RenderResult:
         status=payload.get("status"),
         elapsed_ms=payload.get("elapsed_ms"),
         title=payload.get("title") or "",
+        text=payload.get("text") or "",
+        html=payload.get("html") or "",
         horizontal_scroll=payload.get("horizontal_scroll"),
         document=payload.get("document") or {},
         overflowing_elements=payload.get("overflowing_elements") or (),

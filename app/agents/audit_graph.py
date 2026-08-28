@@ -171,9 +171,13 @@ class ScoreAgent(BaseAgent):
     async def _run_async_impl(self, ctx: InvocationContext) -> AsyncGenerator[Event, None]:
         state = ctx.session.state
         form_render = state.get("form_render") or state.get("render")
+        site_facts = facts.with_rendered_homepage(
+            state["site_facts"], state.get("render")
+        )
+        state["site_facts"] = site_facts
         audit_ctx = AuditContext(
             place=dict(state.get("prospect") or {}),
-            site=state["site_facts"],
+            site=site_facts,
             market=state.get("market"),
             render=state.get("render"),
             form_render=form_render,

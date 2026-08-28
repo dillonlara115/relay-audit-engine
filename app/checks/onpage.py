@@ -379,23 +379,53 @@ def c1_site_loads(ctx: AuditContext) -> CheckResult:
 
 @check("C6")
 def c6_click_to_call(ctx: AuditContext) -> CheckResult:
+    """Can the phone number be tapped to call?
+
+    Read from the rendered page as well as the source. Measured on a real
+    prospect: the served HTML contained no tel: anchor at all (its only two
+    "tel:" strings were inside a Google Ads tracking script), while a real
+    browser showed six tap-to-call links, three of them above the fold. The
+    site injects them with JavaScript, which is ordinary, and judging it on
+    source alone produced a confident false accusation.
+
+    A pass may come from either source. A failure needs the browser, because
+    source alone cannot distinguish "no link" from "link added on load".
+    """
     blocked = _unreachable(ctx, "C6")
     if blocked:
         return blocked
 
     page = ctx.site.homepage
-    header = list(page.header_tel_hrefs) if page else []
-    anywhere = list(page.tel_hrefs) if page else []
+    crawl_header = list(page.header_tel_hrefs) if page else []
+    crawl_any = list(page.tel_hrefs) if page else []
 
-    if header:
-        return result("C6", True, "The phone number at the top of the page can be tapped to call.",
-                      header_tel=header[:3])
-    if anywhere:
+    render = ctx.render
+    rendered = bool(render is not None and getattr(render, "usable", False))
+    rendered_links = list(getattr(render, "tel_links", ()) or []) if rendered else []
+    rendered_fold = [t for t in rendered_links if t.get("above_fold")]
+
+    observed = {
+        "header_tel": crawl_header[:3] or None,
+        "tel_hrefs": crawl_any[:3] or None,
+        "rendered_tel": [t.get("text") for t in rendered_links][:3] or None,
+        "source": "rendered" if rendered_links and not crawl_any else "html",
+    }
+
+    if crawl_header or rendered_fold:
         return result("C6", True,
-                      "The phone number can be tapped to call, though not from the page header.",
-                      tel_hrefs=anywhere[:3])
+                      "The phone number at the top of the page can be tapped to call.",
+                      **observed)
+    if crawl_any or rendered_links:
+        return result("C6", True,
+                      "The phone number can be tapped to call, though not from the "
+                      "top of the page.", **observed)
+    if not rendered:
+        return skip("C6", "The page could not be opened in a browser, and tap to call "
+                          "links are often added on load, so this was not checked.",
+                    **observed)
     return result("C6", False,
-                  "The phone number on the homepage cannot be tapped to call on a phone.")
+                  "The phone number on the homepage cannot be tapped to call on a phone.",
+                  **observed)
 
 
 def _primary_form(ctx: AuditContext):

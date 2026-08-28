@@ -91,6 +91,10 @@ pre.log { background:var(--asphalt); color:#e8e2d6; border-radius:8px; padding:1
 .status.done { background:#2E7D4F; color:#fff; }
 .status.failed { background:#8d2f16; color:#fff; }
 
+.evidence-shot { max-width:340px; width:100%; border:2px solid var(--asphalt);
+                 border-radius:6px; display:block; }
+.evidence-cap { margin-top:6px; font-size:.85rem; }
+
 .filterbar { margin-bottom:14px; }
 .filterrow { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
              gap:12px; align-items:end; }
@@ -250,7 +254,11 @@ def status_pill(status: str) -> str:
 
 def render_run(*, csrf: str, markets: Sequence[str], active_jobs: Sequence[Mapping[str, Any]],
                recent_batches: Sequence[Mapping[str, Any]]) -> str:
-    options = "".join(f'<option value="{esc(m)}">{esc(m)}</option>' for m in markets)
+    # A datalist rather than a select: the four mapped metros are suggestions,
+    # not a limit. resolve_market already understands "City, ST" for anywhere
+    # else, so restricting the UI to a dropdown was the only thing stopping an
+    # operator sweeping a market we have not enumerated yet.
+    options = "".join(f'<option value="{esc(m)}, CO">' for m in markets)
 
     running = ""
     if active_jobs:
@@ -303,8 +311,16 @@ resumable and every long job survives the worker that started it.</div>
     <p class="muted">Places search, then the fit gate. Nothing is crawled deeply yet.</p>
     <form method="post" action="/console/sweep">
       {csrf_field(csrf)}
-      <label for="market">Metro</label>
-      <select id="market" name="market">{options}</select>
+      <label for="market">Metro or city</label>
+      <input id="market" name="market" type="text" list="known-markets"
+             value="Colorado Springs, CO" autocomplete="off"
+             placeholder="Colorado Springs, CO">
+      <datalist id="known-markets">{options}</datalist>
+      <p class="muted" style="margin:6px 0 0;font-size:.85rem">Any city works.
+      The four suggested metros have their surrounding towns mapped, so the fit
+      gate can rule out an operator based two counties away. Anywhere else is
+      swept the same way, but that one check reports "unknown" instead of
+      failing, so expect a few more prospects to reach review.</p>
       <label for="limit">Maximum prospects</label>
       <input id="limit" type="number" name="limit" value="100" min="1" max="300">
       <button type="submit">Start sweep</button>
@@ -313,8 +329,17 @@ resumable and every long job survives the worker that started it.</div>
 
   <div class="card">
     <h3>Ask the coordinator</h3>
-    <p class="muted">An agent with the pipeline as its tools. It can sweep,
-    dispatch, poll, resume and rank. It cannot invent a number.</p>
+    <p class="muted">The same pipeline, driven by an agent instead of by you.
+    Describe a whole job in a sentence and it runs the steps in order, waiting
+    on each one: sweep, dispatch, poll until the batch finishes, resume
+    anything that stalled, then rank.</p>
+    <p class="muted"><strong>Use it when</strong> a job spans several steps and
+    you would rather not sit clicking through them, or when a batch needs
+    watching and nudging over an hour. <strong>Use the buttons instead</strong>
+    when you know exactly the one thing you want done.</p>
+    <p class="muted">It has no access to anything but those tools, so every
+    number it reports came back from the pipeline. It cannot invent one, and it
+    cannot send anything to anybody.</p>
     <form method="post" action="/console/agent">
       {csrf_field(csrf)}
       <label for="prompt">What should it do</label>
@@ -756,11 +781,35 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
 <form method="post" action="/console/audits/{esc(audit_id)}/draft">{csrf_field(csrf)}
 <button type="submit">Draft three findings</button></form></div>""")
 
-    shots = "".join(
-        f'<p class="muted">{esc(e.get("kind"))}: {esc(e.get("gcs_path"))} '
-        f'({esc(e.get("size_bytes"))} bytes)</p>'
-        for e in evidence
-    )
+    def evidence_item(e: Mapping[str, Any]) -> str:
+        url = e.get("url")
+        kb = round((e.get("size_bytes") or 0) / 1024)
+        caption = (f'<p class="muted evidence-cap">{esc(e.get("kind"))} '
+                   f'&middot; {kb} KB captured during the audit</p>')
+        if url and e.get("kind") == "screenshot":
+            # The homepage exactly as the audit saw it, which is what the
+            # Chosen and vision checks were reading. Click through for full size.
+            return (f'<a href="{esc(url)}" target="_blank" rel="noopener noreferrer">'
+                    f'<img class="evidence-shot" src="{esc(url)}" '
+                    f'alt="Homepage as captured during the audit"></a>{caption}')
+        if url:
+            return (f'<p><a href="{esc(url)}" target="_blank" rel="noopener noreferrer">'
+                    f'{esc(e.get("kind"))}</a>{caption}')
+        problem = e.get("url_error")
+        return (f'<p class="muted">{esc(e.get("kind"))}: {esc(e.get("gcs_path"))} '
+                f'({kb} KB)' + (f' &middot; could not sign a link: {esc(problem)}'
+                                if problem else "") + "</p>")
+
+    shots = "".join(evidence_item(e) for e in evidence)
+
+    # Google Business Profile. Places gives us googleMapsUri on every prospect,
+    # which opens the public profile: the same thing a homeowner searching for
+    # a roofer would land on, and where an operator checks reviews and hours.
+    maps_uri = prospect.get("maps_uri")
+    gbp_link = (
+        f' &middot; <a href="{esc(maps_uri)}" target="_blank" rel="noopener noreferrer">'
+        "Google Business Profile</a>"
+    ) if maps_uri else ""
 
     warnings = ""
     if audit.get("crawl_error"):
@@ -779,7 +828,7 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
 <h1>{esc(prospect.get("business_name"))}</h1>
 <div class="sub">{esc(prospect.get("city") or "")} &middot;
 {esc(prospect.get("gbp_phone") or "")} &middot;
-<a href="{esc(prospect.get("website_url") or "#")}" target="_blank" rel="noopener noreferrer">{esc(prospect.get("domain") or "no website")}</a></div>
+<a href="{esc(prospect.get("website_url") or "#")}" target="_blank" rel="noopener noreferrer">{esc(prospect.get("domain") or "no website")}</a>{gbp_link}</div>
 
 {tiles([("found", scores.get("found", 0)), ("chosen", scores.get("chosen", 0)),
         ("booked", scores.get("booked", 0)), ("total", scores.get("total", 0)),

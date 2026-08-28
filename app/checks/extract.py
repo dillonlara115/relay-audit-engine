@@ -105,6 +105,7 @@ class PageFacts:
     tel_hrefs: tuple[str, ...] = ()
     header_tel_hrefs: tuple[str, ...] = ()
     dates: tuple[datetime, ...] = ()
+    rendered: bool = False   # True when this came from the browser, not the source
 
 
 @dataclass
@@ -316,6 +317,52 @@ def build(crawl: SiteCrawl) -> SiteFacts:
         sitemap_lastmod=dict(crawl.sitemap_lastmod),
         reachable=crawl.reachable,
         robots_blocked=tuple(crawl.robots_blocked),
+    )
+
+
+
+# A site can serve a shell and build the page with JavaScript. Measured on a
+# real prospect: 4 characters of visible text in the source across five pages,
+# against 4478 in the browser. Below this, the source is not worth trusting on
+# its own and the rendered homepage is folded in beside it.
+THIN_SOURCE_CHARS = 600
+
+
+def with_rendered_homepage(site: SiteFacts, render: Any) -> SiteFacts:
+    """Add the rendered homepage to the fact set when the source is thin.
+
+    The crawl still covers up to 25 pages and the render only covers the
+    homepage, so this adds rather than replaces: a JavaScript built site gets
+    text its checks would otherwise never see, and an ordinary site is left
+    exactly as it was.
+    """
+    if render is None or not getattr(render, "usable", False):
+        return site
+    rendered_text = (getattr(render, "text", "") or "").strip()
+    if not rendered_text:
+        return site
+    if len(site.text.strip()) >= THIN_SOURCE_CHARS:
+        return site
+    if len(rendered_text) <= len(site.text.strip()):
+        return site
+
+    home_path = site.homepage.path if site.homepage else "/"
+    rendered_page = PageFacts(
+        url=getattr(render, "final_url", None) or getattr(render, "url", "") or "",
+        path=home_path,
+        title=getattr(render, "title", "") or "",
+        text=re.sub(r"\s+", " ", rendered_text).strip().lower(),
+        html=(getattr(render, "html", "") or "").lower(),
+        rendered=True,
+    )
+    pages = (*site.pages, rendered_page)
+    return SiteFacts(
+        homepage=site.homepage or rendered_page,
+        pages=pages,
+        sitemap_paths=site.sitemap_paths,
+        sitemap_lastmod=site.sitemap_lastmod,
+        reachable=site.reachable,
+        robots_blocked=site.robots_blocked,
     )
 
 
