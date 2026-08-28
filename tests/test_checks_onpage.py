@@ -746,3 +746,64 @@ def test_c6_still_passes_on_plain_html_without_any_render():
     res = run("C6", context(homepage_html=doc('<header><a href="tel:+17196762456">Call</a></header>')))
     assert res.status == PASS
     assert res.observed["source"] == "html"
+
+
+# ── C10 must find testimonials that do not announce themselves ───────────────
+#
+# Found on a real prospect (guaranteedseamlessgutters.net). Four genuine
+# customer quotes sat under a heading that read "Satisfaction Guaranteed", so
+# not one of the announcing phrases appeared and phrase matching reported a
+# site with no reviews at all.
+
+_QUOTE = ("Best gutters, siding, and roofing in soco!! Fast friendly and "
+          "courteous staff! Highly recommend this guys to get the job done!!!")
+
+
+def test_c10_finds_quoted_customers_with_no_announcing_phrase():
+    html = doc(f"<h2>Satisfaction Guaranteed</h2>"
+               f"<blockquote>{_QUOTE}</blockquote>"
+               f"<blockquote>Great service and professional installation of roof "
+               f"and gutters. Highly recommend them to anyone.</blockquote>")
+    res = run("C10", context(homepage_html=html))
+    assert res.status == PASS
+    assert "quoted customers" in res.note
+
+
+def test_c10_accepts_one_quote_when_it_is_signed():
+    html = doc(f"<blockquote>{_QUOTE}</blockquote><p>— Johnathon B.</p>")
+    res = run("C10", context(homepage_html=html))
+    assert res.status == PASS
+
+
+def test_c10_accepts_signed_quotations_without_blockquote_markup():
+    html = doc("<p>Fast friendly and courteous staff, highly recommended.</p>"
+               "<p>— Johnathon B.</p>"
+               "<p>Awesome, reasonable prices and outstanding work.</p>"
+               "<p>— Rick D.</p>")
+    res = run("C10", context(homepage_html=html))
+    assert res.status == PASS
+    assert "signed quotations" in res.note
+
+
+def test_c10_ignores_a_single_decorative_pull_quote():
+    """One unsigned quotation is a design flourish, not a testimonial."""
+    html = doc("<blockquote>Roofing done right, the first time, every time.</blockquote>")
+    assert run("C10", context(homepage_html=html)).status == FAIL
+
+
+def test_c10_ignores_a_tiny_blockquote():
+    html = doc("<blockquote>Nice!</blockquote><blockquote>Great</blockquote>")
+    assert run("C10", context(homepage_html=html)).status == FAIL
+
+
+def test_c10_does_not_treat_an_ordinary_hyphen_as_an_attribution():
+    """A plain hyphen appears throughout normal copy. Only em and en dashes
+    signal a signed quotation."""
+    html = doc("<p>We are a family-owned, full-service roofing company - "
+               "serving Pueblo since 2005 - with same-day estimates.</p>")
+    assert run("C10", context(homepage_html=html)).status == FAIL
+
+
+def test_c10_still_passes_on_the_original_signals():
+    assert run("C10", context(homepage_html=doc("<h2>What our customers say</h2>"))).status == PASS
+    assert run("C10", context(homepage_html=doc('<div class="birdeye-widget"></div>'))).status == PASS

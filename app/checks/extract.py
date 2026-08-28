@@ -32,6 +32,10 @@ _HONEYPOT_HINTS = ("honeypot", "hp_", "_hp", "nonce", "csrf", "token", "captcha"
 
 _HEADER_SELECTORS = "header, nav, [class*=header], [id*=header], [class*=topbar], [class*=top-bar]"
 
+# Short enough to catch a one line review, long enough to skip a pull quote of
+# two words or a decorative empty element.
+MIN_QUOTE_CHARS = 40
+
 _DATE_META = (
     'meta[property="article:modified_time"]',
     'meta[property="article:published_time"]',
@@ -105,6 +109,7 @@ class PageFacts:
     tel_hrefs: tuple[str, ...] = ()
     header_tel_hrefs: tuple[str, ...] = ()
     dates: tuple[datetime, ...] = ()
+    blockquotes: tuple[str, ...] = ()
     rendered: bool = False   # True when this came from the browser, not the source
 
 
@@ -252,6 +257,22 @@ def _tel_hrefs(tree: HTMLParser) -> tuple[tuple[str, ...], tuple[str, ...]]:
     return every, tuple(dict.fromkeys(header))
 
 
+def _blockquotes(tree: HTMLParser) -> tuple[str, ...]:
+    """Substantial quotations on the page.
+
+    A testimonial section is often headed something like "Satisfaction
+    Guaranteed" and never uses the word testimonial or review at all, so
+    phrase matching misses it entirely. The markup is the reliable signal: a
+    blockquote is literally the element for a quotation.
+    """
+    out: list[str] = []
+    for node in tree.css("blockquote"):
+        text = re.sub(r"\s+", " ", node.text() or "").strip()
+        if len(text) >= MIN_QUOTE_CHARS:
+            out.append(text[:400])
+    return tuple(out)
+
+
 def _dates(tree: HTMLParser, jsonld: tuple[Any, ...]) -> tuple[datetime, ...]:
     """Published and modified timestamps a page declares about itself."""
     found: list[datetime] = []
@@ -301,6 +322,7 @@ def parse_page(result: FetchResult) -> PageFacts | None:
         tel_hrefs=every_tel,
         header_tel_hrefs=header_tel,
         dates=_dates(tree, jsonld),
+        blockquotes=_blockquotes(tree),
     )
 
 
@@ -347,12 +369,14 @@ def with_rendered_homepage(site: SiteFacts, render: Any) -> SiteFacts:
         return site
 
     home_path = site.homepage.path if site.homepage else "/"
+    rendered_html = getattr(render, "html", "") or ""
     rendered_page = PageFacts(
         url=getattr(render, "final_url", None) or getattr(render, "url", "") or "",
         path=home_path,
         title=getattr(render, "title", "") or "",
         text=re.sub(r"\s+", " ", rendered_text).strip().lower(),
-        html=(getattr(render, "html", "") or "").lower(),
+        html=rendered_html.lower(),
+        blockquotes=_blockquotes(HTMLParser(rendered_html)) if rendered_html else (),
         rendered=True,
     )
     pages = (*site.pages, rendered_page)

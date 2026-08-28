@@ -93,6 +93,10 @@ LOCAL_BUSINESS_TYPES = frozenset({
 })
 REVIEW_SCHEMA_TYPES = frozenset({"review", "aggregaterating"})
 
+# "— Johnathon B." under a quote. Em or en dash only: a plain hyphen appears
+# in far too much ordinary copy to mean anything on its own.
+_QUOTE_ATTRIBUTION = re.compile(r"[\u2014\u2013]\s*[a-z][a-z.\-\']{1,20}(?:\s+[a-z][a-z.\-\']{0,20}){0,2}")
+
 _COPYRIGHT_YEAR = re.compile(r"(?:©|&copy;|copyright)\s*(?:\d{4}\s*[-–]\s*)?((?:19|20)\d{2})", re.I)
 _SEARCH_FIELD_HINTS = ("email", "phone", "tel", "name", "message", "zip", "address")
 
@@ -496,14 +500,34 @@ def c10_reviews_on_page(ctx: AuditContext) -> CheckResult:
     phrase = _any_in(page.text, TESTIMONIAL_TERMS)
     widget = _any_in(page.html, REVIEW_WIDGETS)
 
-    ok = bool(schema or phrase or widget)
-    evidence = "review markup" if schema else (f"the phrase {phrase!r}" if phrase else
-                                               (f"a {widget} review widget" if widget else None))
+    # Structure, not vocabulary. Measured on a real prospect: four genuine
+    # customer quotes under a heading that read "Satisfaction Guaranteed", so
+    # no announcing phrase appeared anywhere and phrase matching called it a
+    # site with no reviews. A blockquote is the element for a quotation, and a
+    # quote signed with a name is a testimonial whatever the heading says.
+    quotes = list(page.blockquotes)
+    attributions = len(set(_QUOTE_ATTRIBUTION.findall(page.text)))
+    quoted = len(quotes) >= 2 or (len(quotes) >= 1 and attributions >= 1) or attributions >= 2
+
+    ok = bool(schema or phrase or widget or quoted)
+    if schema:
+        evidence = "review markup"
+    elif widget:
+        evidence = f"a {widget} review widget"
+    elif phrase:
+        evidence = f"the phrase {phrase!r}"
+    elif quoted:
+        evidence = (f"{len(quotes)} quoted customers" if quotes
+                    else f"{attributions} signed quotations")
+    else:
+        evidence = None
+
     return result(
         "C10", ok,
         f"Customer reviews appear on the homepage, shown by {evidence}." if ok
         else "No customer reviews appear on the homepage.",
         schema=schema or None, phrase=phrase, widget=widget,
+        quotes=quotes[:3] or None, attributions=attributions or None,
     )
 
 
