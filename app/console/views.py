@@ -14,111 +14,120 @@ from typing import Any, Mapping, Sequence
 from app.report.dashboard import SEGMENT_COLORS
 
 _CSS = """
-:root { --asphalt:#16120E; --chalk:#ECE6DC; --orange:#F25C1F; --line:#e2dbcf; }
+:root { --asphalt:#16120E; --chalk:#ECE6DC; --orange:#F25C1F; --line:#e4ded3;
+        --ink2:#5d564d; --panel:#fff; }
 * { margin:0; padding:0; box-sizing:border-box; }
 body { background:var(--chalk); color:var(--asphalt);
-       font-family:'Work Sans',sans-serif; font-size:16px; line-height:1.5; }
+       font-family:'Work Sans',sans-serif; font-size:16px; line-height:1.55; }
 a { color:var(--orange); text-decoration:none; }
 a:hover { text-decoration:underline; }
-h1,h2,h3 { font-family:'Barlow Condensed',sans-serif; letter-spacing:.02em; font-weight:600; }
-h1 { font-size:1.9rem; margin:2px 0; }
-h2 { font-size:1.25rem; margin:30px 0 10px; }
-h3 { font-size:1.05rem; margin:0 0 6px; }
+h1,h2,h3,h4 { font-family:'Barlow Condensed',sans-serif; letter-spacing:.01em; font-weight:600; }
+h1 { font-size:2rem; line-height:1.15; }
+h2 { font-size:1.35rem; margin:34px 0 4px; }
+h3 { font-size:1.1rem; margin:0 0 6px; }
+.lede { color:var(--ink2); margin-bottom:20px; max-width:70ch; }
+.muted { color:var(--ink2); }
 
-header.top { background:var(--asphalt); color:var(--chalk); padding:12px 20px; }
-header.top .inner { max-width:1120px; margin:0 auto; display:flex;
-                    align-items:center; gap:20px; flex-wrap:wrap; }
-header.top .brand { font-family:'Barlow Condensed',sans-serif; letter-spacing:.08em;
-                    text-transform:uppercase; color:var(--orange);
-                    text-decoration:none; }
-header.top .brand:hover { text-decoration:none; opacity:.85; }
-header.top nav a { color:var(--chalk); margin-right:16px; font-size:.95rem; }
-header.top nav a.on { color:var(--orange); }
-main { max-width:1120px; margin:0 auto; padding:22px 20px 72px; }
-.sub { opacity:.7; margin-bottom:18px; }
+/* shell */
+.layout { display:flex; min-height:100vh; }
+.side { width:232px; flex:0 0 232px; background:var(--asphalt); color:var(--chalk);
+        padding:22px 16px; position:sticky; top:0; height:100vh; }
+.side .brand { display:block; font-family:'Barlow Condensed',sans-serif; font-weight:600;
+               font-size:1.35rem; letter-spacing:.04em; color:var(--orange);
+               text-transform:uppercase; line-height:1.1; margin-bottom:4px; }
+.side .brand:hover { text-decoration:none; opacity:.9; }
+.side .tag { font-size:.78rem; color:#9a9186; margin-bottom:22px; display:block; }
+.side nav a { display:block; padding:9px 12px; border-radius:7px; color:var(--chalk);
+              font-size:.95rem; margin-bottom:3px; }
+.side nav a:hover { background:#2a241d; text-decoration:none; }
+.side nav a.on { background:var(--orange); color:#fff; font-weight:600; }
+.side .foot { position:absolute; bottom:20px; left:16px; right:16px;
+              font-size:.76rem; color:#8d857a; line-height:1.4; }
+.main { flex:1; min-width:0; padding:26px 30px 70px; }
+.topbar { display:flex; justify-content:space-between; align-items:baseline;
+          gap:16px; margin-bottom:6px; flex-wrap:wrap; }
 
-.card { background:#fff; border-radius:8px; padding:18px; margin-bottom:14px; }
-.grid2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:14px; }
-.tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr));
-         gap:10px; margin:12px 0; }
-.tile { background:#fff; border-radius:6px; padding:12px 14px; }
-.tile .n { font-family:'Barlow Condensed',sans-serif; font-size:1.6rem; line-height:1; }
-.tile .l { font-size:.78rem; opacity:.65; margin-top:2px; }
+/* pieces */
+.card { background:var(--panel); border-radius:10px; padding:18px 20px; margin-bottom:14px; }
+.grid2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(330px,1fr)); gap:14px; }
+.tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+         gap:10px; margin:14px 0; }
+.tile { background:var(--panel); border-radius:9px; padding:13px 15px; }
+.tile .n { font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:1.75rem;
+           line-height:1; }
+.tile .l { font-size:.79rem; color:var(--ink2); margin-top:3px; }
 
-label { display:block; font-size:.85rem; opacity:.7; margin:10px 0 4px; }
+label { display:block; font-size:.85rem; color:var(--ink2); margin:12px 0 4px; font-weight:600; }
 input[type=text], input[type=number], textarea, select {
-  width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:6px;
+  width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:7px;
   font-family:'Work Sans',sans-serif; font-size:16px; background:#fff; color:var(--asphalt); }
-textarea { min-height:84px; resize:vertical; }
-button { font-family:'Barlow Condensed',sans-serif; letter-spacing:.04em; font-size:1rem;
-         background:var(--orange); color:#fff; border:0; border-radius:6px;
-         padding:10px 18px; cursor:pointer; margin-top:12px; }
-button.ghost { background:transparent; color:var(--asphalt);
-               border:1px solid var(--line); }
+textarea { min-height:86px; resize:vertical; }
+button { font-family:'Barlow Condensed',sans-serif; font-weight:600; letter-spacing:.03em;
+         font-size:1.02rem; background:var(--orange); color:#fff; border:0; border-radius:7px;
+         padding:10px 20px; cursor:pointer; margin-top:14px; }
+button.ghost { background:transparent; color:var(--asphalt); border:1px solid var(--line); }
 button.danger { background:#8d2f16; }
-button:disabled { opacity:.5; cursor:not-allowed; }
 form.inline { display:inline; }
-form.inline button { margin-top:0; padding:5px 11px; font-size:.85rem; }
+form.inline button { margin-top:0; padding:5px 12px; font-size:.85rem; }
+.hint { font-size:.83rem; color:var(--ink2); margin-top:6px; }
 
-table { width:100%; border-collapse:collapse; background:#fff;
-        border-radius:8px; overflow:hidden; }
-th { font-family:'Barlow Condensed',sans-serif; font-weight:400; text-align:left;
-     font-size:.88rem; letter-spacing:.05em; padding:9px 11px;
+table { width:100%; border-collapse:collapse; background:var(--panel);
+        border-radius:10px; overflow:hidden; }
+th { font-family:'Barlow Condensed',sans-serif; font-weight:600; text-align:left;
+     font-size:.9rem; letter-spacing:.03em; padding:10px 12px;
      background:var(--asphalt); color:var(--chalk); }
-td { padding:8px 11px; border-top:1px solid var(--line); vertical-align:top;
-     font-size:.95rem; }
+th .sub { display:block; font-family:'Work Sans',sans-serif; font-weight:400;
+          font-size:.71rem; color:#b6ada1; letter-spacing:0; margin-top:1px; }
+td { padding:9px 12px; border-top:1px solid var(--line); vertical-align:top; font-size:.95rem; }
 td.num { text-align:right; font-variant-numeric:tabular-nums; }
 td.tel { white-space:nowrap; }
-tr:hover td { background:#faf7f1; }
+tr:hover td { background:#faf7f2; }
+th[data-sort] { cursor:pointer; user-select:none; }
+th[data-sort]:hover { color:var(--orange); }
 
 .chip { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
 .chip i { width:10px; height:10px; border-radius:3px; display:inline-block; }
-.tag { font-size:.75rem; padding:1px 7px; border-radius:10px;
+.tag { font-size:.75rem; padding:1px 8px; border-radius:10px;
        background:var(--asphalt); color:var(--chalk); white-space:nowrap; }
 .tag.warn { background:#8a5a00; }
-.tag.ok { background:#2E7D4F; }
-.muted { opacity:.6; }
 .bar { height:8px; border-radius:4px; background:var(--line); overflow:hidden; min-width:80px; }
 .bar i { display:block; height:100%; background:var(--orange); }
 
-pre.log { background:var(--asphalt); color:#e8e2d6; border-radius:8px; padding:14px;
-          font-size:.85rem; line-height:1.45; max-height:460px; overflow:auto;
+pre.log { background:var(--asphalt); color:#e8e2d6; border-radius:9px; padding:15px;
+          font-size:.85rem; line-height:1.5; max-height:440px; overflow:auto;
           white-space:pre-wrap; word-break:break-word; }
-.status { display:inline-block; font-family:'Barlow Condensed',sans-serif;
-          letter-spacing:.05em; padding:2px 10px; border-radius:10px;
-          background:var(--line); }
+.status { display:inline-block; font-family:'Barlow Condensed',sans-serif; font-weight:600;
+          letter-spacing:.03em; padding:2px 11px; border-radius:11px; background:var(--line); }
 .status.running { background:var(--orange); color:#fff; }
 .status.done { background:#2E7D4F; color:#fff; }
 .status.failed { background:#8d2f16; color:#fff; }
 
+.finding { border-left:5px solid var(--orange); background:var(--panel); padding:15px 17px;
+           border-radius:8px; margin-bottom:12px; }
+.pass { color:#2E7D4F; font-weight:600; } .fail { color:#8d2f16; font-weight:600; }
+.skip { color:var(--ink2); }
+.banner { background:#fff3e6; border-left:5px solid var(--orange);
+          padding:13px 15px; border-radius:8px; margin-bottom:14px; font-size:.95rem; }
 .evidence-shot { max-width:340px; width:100%; border:2px solid var(--asphalt);
-                 border-radius:6px; display:block; }
+                 border-radius:7px; display:block; }
 .evidence-cap { margin-top:6px; font-size:.85rem; }
-
+abbr[title] { text-decoration:underline dotted; cursor:help; }
+details.legend { background:var(--panel); border-radius:9px; margin:14px 0; }
+details.legend summary { cursor:pointer; padding:13px 17px;
+  font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:1.05rem; }
+details.legend .inner { padding:2px 17px 15px; }
+details.legend h4 { font-size:1rem; margin:12px 0 2px; }
+details.legend p { margin:0 0 5px; font-size:.93rem; }
 .filterbar { margin-bottom:14px; }
-.filterrow { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+.filterrow { display:grid; grid-template-columns:repeat(auto-fit,minmax(165px,1fr));
              gap:12px; align-items:end; }
 .filterrow label { margin:0 0 4px; }
-th[data-sort] { user-select:none; }
-th[data-sort]:hover { color:var(--orange); }
-
-.finding { border-left:5px solid var(--orange); background:#fff; padding:14px 16px;
-           border-radius:6px; margin-bottom:12px; }
-.checkrow td:first-child { font-family:'Barlow Condensed',sans-serif; }
-.pass { color:#2E7D4F; } .fail { color:#8d2f16; } .skip { opacity:.55; }
-abbr[title] { text-decoration:underline dotted; cursor:help; }
-details.legend { background:#fff; border-radius:8px; padding:0; margin:14px 0; }
-details.legend summary { cursor:pointer; padding:12px 16px;
-  font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:1.05rem;
-  letter-spacing:.03em; }
-details.legend .inner { padding:2px 16px 14px; }
-details.legend h4 { font-family:'Barlow Condensed',sans-serif; font-weight:600;
-  font-size:1rem; margin:10px 0 2px; }
-details.legend p { margin:0 0 4px; font-size:.92rem; }
-details.legend .seg { margin-top:4px; }
-.banner { background:#fff3e6; border-left:5px solid var(--orange);
-          padding:12px 14px; border-radius:6px; margin-bottom:14px; font-size:.95rem; }
-footer { margin-top:36px; font-size:.84rem; opacity:.6; }
+@media (max-width:860px) {
+  .layout { display:block; }
+  .side { width:auto; height:auto; position:static; }
+  .side .foot { position:static; margin-top:16px; }
+  .main { padding:20px 16px 60px; }
+}
 """
 
 _SHELL = """<!doctype html>
@@ -133,13 +142,16 @@ _SHELL = """<!doctype html>
 <style>__CSS__</style>
 </head>
 <body>
-<header class="top"><div class="inner">
-  <a class="brand" href="/console">Relay audit engine</a>
-  <nav>__NAV__</nav>
-</div></header>
-<main>__BODY__</main>
-<footer>Internal console. Findings are drafted by a model and approved by a
-human before any report exists. Nothing here sends a message.</footer>
+<div class="layout">
+  <aside class="side">
+    <a class="brand" href="/console">Relay<br>Audit Engine</a>
+    <span class="tag">Find roofers worth calling</span>
+    <nav>__NAV__</nav>
+    <div class="foot">Everything here is internal. Reports are written by a
+    model, checked by you, and never sent automatically.</div>
+  </aside>
+  <main class="main">__BODY__</main>
+</div>
 __SCRIPT__
 </body>
 </html>"""
@@ -150,12 +162,15 @@ def esc(value: Any) -> str:
 
 
 def _nav(active: str) -> str:
-    items = [("/console", "Run"), ("/console/batches", "Batches"),
-             ("/console/jobs", "Jobs"), ("/dashboard", "Dashboard")]
+    """Plain labels. "Batches" and "Jobs" meant nothing to anyone who had not
+    read the source, so the nav says what each screen is for."""
+    items = [("/console", "console", "Start a scan"),
+             ("/console/batches", "batches", "Results"),
+             ("/console/jobs", "jobs", "Activity"),
+             ("/dashboard", "dashboard", "Overview")]
     return "".join(
         f'<a href="{href}" class="{"on" if key == active else ""}">{label}</a>'
-        for href, label in items
-        for key in [href.rsplit("/", 1)[-1] or "console"]
+        for href, key, label in items
     )
 
 
@@ -186,61 +201,59 @@ def tiles(pairs: Sequence[tuple[str, Any]]) -> str:
 
 
 SCORE_TITLES = {
-    "F": "Found, out of 30. Can a homeowner with a leaking roof find this company at all?",
-    "C": "Chosen, out of 30. Once found, do they look like the safe choice?",
-    "B": "Booked, out of 40. If someone reaches out, is anything set up to catch the lead?",
+    "F": "Found: can a homeowner searching for a roofer find this company at all? Scored out of 30.",
+    "C": "Chosen: once they find it, does the company look like a safe choice? Scored out of 30.",
+    "B": "Booked: if someone wants to hire them, can they actually get through? Scored out of 40.",
 }
 
+SCORE_SUBS = {"F": "can they be found", "C": "do they look safe", "B": "can leads get through"}
 
 SCORE_SORT_KEYS = {"F": "found", "C": "chosen", "B": "booked"}
 
 
 def score_headers() -> str:
-    """The three compact column headers, each explained on hover and clickable
-    to sort the call list by that section's score."""
+    """Three compact columns, each with a plain sub-label and a fuller
+    explanation on hover. Click to sort."""
     return "".join(
-        f'<th data-sort="{SCORE_SORT_KEYS[key]}"><abbr title="{esc(title)}">{key}</abbr></th>'
+        f'<th data-sort="{SCORE_SORT_KEYS[key]}"><abbr title="{esc(title)}">{key}</abbr>'
+        f'<span class="sub">{esc(SCORE_SUBS[key])}</span></th>'
         for key, title in SCORE_TITLES.items()
     )
 
 
 def score_legend(open_by_default: bool = False) -> str:
-    """What Found, Chosen, Booked and the segments mean, in plain language.
-
-    Lives next to every table that shows the numbers, because a score nobody
-    can interpret is decoration.
-    """
+    """What the three numbers mean, written for someone who has never read the
+    spec. Sits next to every table that shows them."""
     return f"""<details class="legend"{' open' if open_by_default else ''}>
-  <summary>How to read these scores</summary>
+  <summary>What do these numbers mean?</summary>
   <div class="inner">
-    <p>Every audited company is scored out of 100 across three questions a
-    homeowner answers in order:</p>
-    <h4>Found (F), out of 30</h4>
-    <p>Can a homeowner with a leaking roof find them at all? Google Business
-    Profile health, review count and recency, phone number consistency, and
-    whether their site shows up for their service area.</p>
-    <h4>Chosen (C), out of 30</h4>
-    <p>Once found, do they look like the safe choice? Mobile experience, page
-    speed, visible phone number, trust signals like licensing, warranties and
-    real customer reviews on the site.</p>
-    <h4>Booked (B), out of 40</h4>
-    <p>If someone raises a hand, is anything set up to catch it? Online
-    booking, a working contact form, missed-call text-back, chat, a stated
-    response time, an after-hours path. Weighted heaviest because it is the
-    section nobody else audits and the one that loses jobs invisibly.</p>
-    <h4>Segments</h4>
-    <p class="seg">{chip("Leaky Bucket")} Easy to find, but little catches the
-    lead. The best call on the list: demand already exists and the fix is
-    quick.</p>
-    <p class="seg">{chip("Invisible Pro")} Set up to convert, but nobody finds
-    them. A visibility sale.</p>
-    <p class="seg">{chip("Both Broken")} Weak on both sides. A full rebuild:
-    real money, slower close.</p>
-    <p class="seg">{chip("Dialed")} Strong on both. A referral partner, not a
-    prospect.</p>
-    <p class="seg">{chip("incomplete")} Booked could not be fully measured
-    (site unreachable, form in a popup, bot protection), so no segment is
-    claimed rather than guessing one.</p>
+    <p>Think of a homeowner whose roof is leaking. They go through three steps,
+    and each company is scored out of 100 on how well it handles them.</p>
+    <h4>Found, out of 30: can they be found at all?</h4>
+    <p>Do they show up on Google with a healthy profile and recent reviews? Is
+    the phone number on their site the same one on Google? Do they have pages
+    for the towns they serve?</p>
+    <h4>Chosen, out of 30: do they look like a safe choice?</h4>
+    <p>Does the site work properly on a phone? Does it load quickly? Is the
+    phone number easy to find and tap? Do they show real reviews, a warranty,
+    proof they are licensed and insured?</p>
+    <h4>Booked, out of 40: can a customer actually get through?</h4>
+    <p>Can someone book a time online, or do they have to wait for a call back?
+    Does the contact form actually work? If a call is missed, does anything
+    follow up? This is worth the most because it is where jobs quietly go
+    missing, and it is the part nobody else checks.</p>
+    <h4>Opportunity types</h4>
+    <p>{chip("Leaky Bucket")} Easy to find, but leads slip away. The best call
+    on the list: they already have customers trying to reach them, and the fix
+    is quick.</p>
+    <p>{chip("Invisible Pro")} Ready to take work, but nobody finds them. Sell
+    them visibility.</p>
+    <p>{chip("Both Broken")} Weak on both sides. A bigger project, slower to
+    close.</p>
+    <p>{chip("Dialed")} Doing well already. Not a prospect, but worth asking who
+    else they know.</p>
+    <p>{chip("incomplete")} We could not finish checking them, usually because
+    the site blocked us or a form only opens in a popup. We do not guess.</p>
   </div>
 </details>"""
 
@@ -268,8 +281,8 @@ def render_run(*, csrf: str, markets: Sequence[str], active_jobs: Sequence[Mappi
             f'<td class="muted">{esc((j.get("log") or [{}])[-1].get("line", ""))}</td></tr>'
             for j in active_jobs
         )
-        running = ("<h2>Running now</h2><table><tr><th>Job</th><th>Status</th>"
-                   f"<th>Latest</th></tr>{rows}</table>")
+        running = ("<h2>Happening right now</h2><table><tr><th>Job</th><th>Status</th>"
+                   f"<th>Latest update</th></tr>{rows}</table>")
 
     batch_rows = "".join(
         f'<tr><td><a href="/console/batches/{esc(b["batch_id"])}">{esc(b["batch_id"])}</a></td>'
@@ -281,69 +294,71 @@ def render_run(*, csrf: str, markets: Sequence[str], active_jobs: Sequence[Mappi
     )
 
     body = f"""
-<h1>Run a sweep</h1>
-<div class="sub">Ingest a metro, screen it, audit the survivors. Every step is
-resumable and every long job survives the worker that started it.</div>
+<div class="topbar"><h1>Start a scan</h1></div>
+<p class="lede">Pick a city and we will find the roofing companies there, screen
+out the ones that are not a fit, then check each survivor's website the way a
+customer would. Nothing is sent to anyone: this only looks.</p>
 
 <details class="legend">
-  <summary>How a sweep works</summary>
+  <summary>What happens when I run this?</summary>
   <div class="inner">
-    <p><strong>1. Sweep.</strong> Google Places is searched for roofing
-    contractors across the metro and its towns. Each one is screened by a fit
-    gate: residential work, 25 or more reviews, a real local address, not a
-    storm chaser.</p>
-    <p><strong>2. Batch.</strong> The survivors are dispatched as a batch: each
-    company's website is crawled politely, rendered on a simulated phone, speed
-    tested, and scored across roughly 30 checks. See "How to read these scores"
-    on any batch page for what the numbers mean.</p>
-    <p><strong>3. Rank.</strong> The batch becomes a call list ordered by
-    opportunity shape, not raw score: companies that are easy to find but lose
-    the leads they attract rank first.</p>
-    <p><strong>4. Findings and reports.</strong> A model drafts the three
-    problems costing each company the most booked jobs. A human reads, approves
-    and publishes a one-page report the contractor can be sent.</p>
+    <p><strong>1. We find the companies.</strong> We search Google for roofing
+    companies in the city you name, then screen each one out if they are not
+    worth your time: commercial only, too few reviews, no real local address,
+    or a storm chaser passing through.</p>
+    <p><strong>2. We check their websites.</strong> Each company that survives
+    gets its site opened on a simulated phone, timed for speed, and checked
+    against about 30 things a customer would notice. We visit slowly and
+    politely, and we never fill in or send anything.</p>
+    <p><strong>3. We put them in call order.</strong> Not by score. The best
+    call is a company that customers already find but whose leads slip away,
+    because the problem is real and the fix is quick.</p>
+    <p><strong>4. You get talking points.</strong> For the companies you choose,
+    we draft the three problems costing them the most work, in plain language.
+    You read and approve them before anything becomes a report you could send.</p>
   </div>
 </details>
 
 <div class="grid2">
   <div class="card">
-    <h3>Sweep and gate a metro</h3>
-    <p class="muted">Places search, then the fit gate. Nothing is crawled deeply yet.</p>
+    <h3>Find companies in a city</h3>
+    <p class="muted">This step only looks them up and screens them. Websites are
+    checked in the next step, so this is quick and cheap.</p>
     <form method="post" action="/console/sweep">
       {csrf_field(csrf)}
-      <label for="market">Metro or city</label>
+      <label for="market">Which city?</label>
       <input id="market" name="market" type="text" list="known-markets"
              value="Colorado Springs, CO" autocomplete="off"
              placeholder="Colorado Springs, CO">
       <datalist id="known-markets">{options}</datalist>
-      <p class="muted" style="margin:6px 0 0;font-size:.85rem">Any city works.
-      The four suggested metros have their surrounding towns mapped, so the fit
-      gate can rule out an operator based two counties away. Anywhere else is
-      swept the same way, but that one check reports "unknown" instead of
-      failing, so expect a few more prospects to reach review.</p>
-      <label for="limit">Maximum prospects</label>
+      <p class="hint">Type any city. The four suggestions have their surrounding
+      towns mapped, so we can rule out a company based two counties away.
+      Anywhere else works the same, except that one check says "not sure"
+      instead of ruling someone out, so expect a few extra companies to come
+      through.</p>
+      <label for="limit">How many companies at most?</label>
       <input id="limit" type="number" name="limit" value="100" min="1" max="300">
-      <button type="submit">Start sweep</button>
+      <button type="submit">Find companies</button>
     </form>
   </div>
 
   <div class="card">
-    <h3>Ask the coordinator</h3>
-    <p class="muted">The same pipeline, driven by an agent instead of by you.
-    Describe a whole job in a sentence and it runs the steps in order, waiting
-    on each one: sweep, dispatch, poll until the batch finishes, resume
-    anything that stalled, then rank.</p>
-    <p class="muted"><strong>Use it when</strong> a job spans several steps and
-    you would rather not sit clicking through them, or when a batch needs
-    watching and nudging over an hour. <strong>Use the buttons instead</strong>
-    when you know exactly the one thing you want done.</p>
-    <p class="muted">It has no access to anything but those tools, so every
-    number it reports came back from the pipeline. It cannot invent one, and it
-    cannot send anything to anybody.</p>
+    <h3>Or just describe what you want</h3>
+    <p class="muted">Same work, but you describe the whole job in a sentence
+    instead of clicking each step. It finds the companies, checks their
+    websites, waits for that to finish, retries anything that got stuck, and
+    hands back the call list.</p>
+    <p class="muted"><strong>Worth using when</strong> the job takes several
+    steps and you would rather not sit and watch it, especially a large city
+    that runs for an hour. <strong>Use the buttons on the left instead</strong>
+    when you know the one thing you want.</p>
+    <p class="muted">It can only use the same steps you can. Every number it
+    tells you came from an actual check, it cannot make one up, and it cannot
+    contact anybody.</p>
     <form method="post" action="/console/agent">
       {csrf_field(csrf)}
-      <label for="prompt">What should it do</label>
-      <textarea id="prompt" name="prompt">Sweep Colorado Springs, dispatch the top 20 for audit, wait for the batch to finish, then give me the ranked call list.</textarea>
+      <label for="prompt">Describe the job in a sentence</label>
+      <textarea id="prompt" name="prompt">Find roofing companies in Colorado Springs, check the websites of the 20 best ones, and show me who to call first.</textarea>
       <button type="submit">Run the coordinator</button>
     </form>
   </div>
@@ -351,9 +366,9 @@ resumable and every long job survives the worker that started it.</div>
 
 {running}
 
-<h2>Recent batches</h2>
-<table><tr><th>Batch</th><th>Tasks</th><th>Done</th><th>Progress</th><th>Last activity</th></tr>
-{batch_rows or '<tr><td colspan="5" class="muted">No batches yet.</td></tr>'}</table>
+<h2>Recent scans</h2>
+<table><tr><th>Scan</th><th>Companies</th><th>Checked</th><th>Progress</th><th>Last activity</th></tr>
+{batch_rows or '<tr><td colspan="5" class="muted">No scans yet. Start one above.</td></tr>'}</table>
 """
     return shell("Relay console", body, active="console")
 
@@ -452,8 +467,8 @@ def render_jobs(jobs_list: Sequence[Mapping[str, Any]]) -> str:
     )
     body = ("<h1>Jobs</h1><div class='sub'>Every long running operation, newest "
             "first.</div><table><tr><th>Job</th><th>Status</th><th>Params</th>"
-            f"<th>Started</th></tr>{rows or '<tr><td colspan=4 class=muted>Nothing yet.</td></tr>'}</table>")
-    return shell("Jobs", body, active="jobs")
+            f"<th>Started</th></tr>{rows or '<tr><td colspan=4 class=muted>Nothing has run yet.</td></tr>'}</table>")
+    return shell("Activity", body, active="jobs")
 
 
 # ── Batch screen, with actions ────────────────────────────────────────────────
@@ -604,14 +619,16 @@ def render_batch(batch_id: str, rows: Sequence[Mapping[str, Any]],
     if progress and progress.get("total"):
         pct = int((progress.get("done", 0) / progress["total"]) * 100)
         live = (f'<div class="banner">{progress.get("done", 0)} of {progress["total"]} '
-                f'audits complete. <div class="bar" style="margin-top:6px">'
+                f'websites checked. <div class="bar" style="margin-top:6px">'
                 f'<i style="width:{pct}%"></i></div></div>')
 
     body = f"""
-<div class="sub"><a href="/console/batches">&larr; batches</a></div>
-<h1>{esc(batch_id)}</h1>
-<div class="sub">Ranked call order: segment priority first, emptiest Booked
-bucket first within a segment.</div>
+<div class="lede"><a href="/console/batches">&larr; all scans</a></div>
+<div class="topbar"><h1>Who to call, in order</h1></div>
+<p class="lede">The best call is first. We rank by the kind of problem a company
+has, not by score: a company customers already find, whose leads slip away, is a
+faster and easier conversation than one that needs everything rebuilt.
+<span class="muted">Scan {esc(batch_id)}.</span></p>
 {live}
 {tiles(tile_pairs or [("audits", len(rows))])}
 
@@ -622,9 +639,9 @@ bucket first within a segment.</div>
   <form method="post" action="/console/draft">
     {csrf_field(csrf)}
     <input type="hidden" name="batch_id" value="{esc(batch_id)}">
-    <label for="top">How many prospects</label>
+    <label for="top">How many companies?</label>
     <input id="top" type="number" name="top" value="10" min="1" max="40">
-    <button type="submit">Draft findings</button>
+    <button type="submit">Write talking points</button>
   </form>
 </div>
 
@@ -634,13 +651,13 @@ bucket first within a segment.</div>
 <div class="card filterbar">
   <div class="filterrow">
     <div>
-      <label for="f-q">Search</label>
-      <input id="f-q" type="text" placeholder="Business or city">
+      <label for="f-q">Search by name</label>
+      <input id="f-q" type="text" placeholder="Company or city">
     </div>
     <div>
-      <label for="f-segment">Segment</label>
+      <label for="f-segment">Opportunity type</label>
       <select id="f-segment">
-        <option value="">Any segment</option>
+        <option value="">Any type</option>
         <option value="Leaky Bucket">Leaky Bucket</option>
         <option value="Invisible Pro">Invisible Pro</option>
         <option value="Both Broken">Both Broken</option>
@@ -649,37 +666,38 @@ bucket first within a segment.</div>
       </select>
     </div>
     <div>
-      <label for="f-check">Check</label>
+      <label for="f-check">Show companies where</label>
       <select id="f-check">
-        <option value="">Any check</option>
+        <option value="">Anything</option>
         {_check_filter_options(check_defs)}
       </select>
     </div>
     <div>
-      <label for="f-status">Result</label>
+      <label for="f-status">is</label>
       <select id="f-status">
         <option value="">Any result</option>
-        <option value="fail">Failed</option>
-        <option value="pass">Passed</option>
-        <option value="skipped">Skipped</option>
+        <option value="fail">a problem</option>
+        <option value="pass">fine</option>
+        <option value="skipped">not checked</option>
       </select>
     </div>
   </div>
   <p class="muted" id="f-count" style="margin-top:8px"></p>
-  <p class="muted" style="margin-top:2px">Example: pick "C16: Footer copyright" and
-  "Failed" to find businesses whose site still shows an old copyright year.
-  Click a column header to sort by it.</p>
+  <p class="hint">For example, choose "C16: Footer copyright" and "a problem"
+  to list every company whose website still shows an old copyright year. Click
+  any column heading to sort by it.</p>
 </div>
 
 <table id="call-list"><thead><tr>
-<th data-sort="rank">#</th><th data-sort="business">Business</th><th>Segment</th>{score_headers()}
-<th data-sort="total">Total</th><th>Phone</th><th></th><th>Action</th></tr></thead>
+<th data-sort="rank">#</th><th data-sort="business">Company</th>
+<th>Opportunity<span class="sub">what kind of problem</span></th>{score_headers()}
+<th data-sort="total">Total<span class="sub">out of 100</span></th><th>Phone</th><th></th><th>Next step</th></tr></thead>
 <tbody>
-{"".join(table_rows) or '<tr><td colspan="10" class="muted">No audits yet.</td></tr>'}
+{"".join(table_rows) or '<tr><td colspan="10" class="muted">No websites checked yet.</td></tr>'}
 </tbody></table>
 {_BATCH_FILTER_SCRIPT}
 """
-    return shell(f"Batch {batch_id}", body, active="batches")
+    return shell(f"Call list {batch_id}", body, active="batches")
 
 
 def render_batches(batches: Sequence[Mapping[str, Any]]) -> str:
@@ -692,11 +710,13 @@ def render_batches(batches: Sequence[Mapping[str, Any]]) -> str:
         f'<td class="muted">{esc(b.get("latest") or "")}</td></tr>'
         for b in batches
     )
-    body = ("<h1>Batches</h1><div class='sub'>Every audit fan-out from the last "
-            "two weeks.</div><table><tr><th>Batch</th><th>Tasks</th><th>Done</th>"
-            "<th>Running</th><th>Pending</th><th>Progress</th><th>Last activity</th></tr>"
-            f"{rows or '<tr><td colspan=7 class=muted>No batches yet.</td></tr>'}</table>")
-    return shell("Batches", body, active="batches")
+    body = ('<div class="topbar"><h1>Results</h1></div>'
+            '<p class="lede">Every scan from the last two weeks. Open one to see '
+            'who to call.</p>'
+            "<table><tr><th>Scan</th><th>Companies</th><th>Checked</th>"
+            "<th>Running</th><th>Waiting</th><th>Progress</th><th>Last activity</th></tr>"
+            f"{rows or '<tr><td colspan=7 class=muted>No scans yet.</td></tr>'}</table>")
+    return shell("Results", body, active="batches")
 
 
 # ── Audit detail, where approval happens ──────────────────────────────────────
@@ -719,11 +739,11 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
             sections[section].append((check, definition))
 
     section_subs = {
-        "found": "Can a homeowner with a leaking roof find this company at all?",
-        "chosen": "Once found, do they look like the safe choice?",
-        "booked": "If someone raises a hand, is anything set up to catch it? "
-                  "Weighted heaviest: this is the section nobody else audits.",
-        "measurement": "Diagnostics only. Recorded for context, worth no points.",
+        "found": "Can a homeowner searching for a roofer find them at all?",
+        "chosen": "Once found, do they look like a safe choice?",
+        "booked": "If someone wants to hire them, can they actually get through? "
+                  "Worth the most, because this is where jobs quietly go missing.",
+        "measurement": "Background information only. Not scored.",
     }
 
     def section_table(name: str) -> str:
@@ -739,8 +759,8 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
             return ""
         return (f"<h2>{name.title()}</h2>"
                 f'<div class="sub">{section_subs.get(name, "")}</div>'
-                f"<table><tr><th>Code</th><th>Check</th>"
-                f"<th>Result</th><th>Points</th><th>What we saw</th></tr>{rows}</table>")
+                f"<table><tr><th>Code</th><th>What we looked at</th>"
+                f"<th>Result</th><th>Points</th><th>What we found</th></tr>{rows}</table>")
 
     findings_block = ""
     if findings:
@@ -756,30 +776,33 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
         )
         warn = ""
         if findings.get("needs_review"):
-            warn = ('<div class="banner">The model flagged wording that may name a '
-                    'mechanism. Read it before approving: a contractor should never see '
-                    'how we detected anything.</div>')
+            warn = ('<div class="banner">Read this before approving. Some wording may '
+                    'describe how we found the problem rather than what the owner would '
+                    'notice. He should hear what a customer experiences, never how we '
+                    'measured it.</div>')
         if state == "draft":
             action = (f'<form method="post" action="/console/audits/{esc(audit_id)}/approve">'
-                      f'{csrf_field(csrf)}<button type="submit">Approve these three</button>'
+                      f'{csrf_field(csrf)}<button type="submit">These look right</button>'
                       "</form>"
-                      '<p class="muted" style="margin-top:8px">Approving is the human '
-                      "selection the rules require. Nothing is published by approving.</p>")
+                      '<p class="hint">A person has to agree these are the right three '
+                      "before a report can exist. Approving does not send or publish "
+                      "anything.</p>")
         elif state == "approved" and not audit.get("report_slug"):
             action = (f'<form method="post" action="/console/audits/{esc(audit_id)}/publish">'
-                      f'{csrf_field(csrf)}<button type="submit">Publish the report</button></form>')
+                      f'{csrf_field(csrf)}<button type="submit">Create the shareable report</button></form>')
         elif audit.get("report_slug"):
-            action = (f'<p><a href="/r/{esc(audit["report_slug"])}">View the published '
-                      f'report</a></p>')
+            action = (f'<p><a href="/r/{esc(audit["report_slug"])}" target="_blank" '
+                      f'rel="noopener noreferrer">Open the report you can share</a></p>')
         else:
             action = ""
-        findings_block = (f"<h2>Findings <span class='tag'>{esc(state)}</span></h2>"
+        findings_block = (f"<h2>Talking points <span class='tag'>{esc(state)}</span></h2>"
                           f"{warn}{cards}{action}")
     else:
-        findings_block = (f"""<h2>Findings</h2><div class="card">
-<p class="muted">No findings drafted yet.</p>
+        findings_block = (f"""<h2>Talking points</h2><div class="card">
+<p class="muted">Nothing written yet. We will pick the three problems costing this
+company the most work and explain each in plain language.</p>
 <form method="post" action="/console/audits/{esc(audit_id)}/draft">{csrf_field(csrf)}
-<button type="submit">Draft three findings</button></form></div>""")
+<button type="submit">Write talking points</button></form></div>""")
 
     def evidence_item(e: Mapping[str, Any]) -> str:
         url = e.get("url")
@@ -813,20 +836,20 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
 
     warnings = ""
     if audit.get("crawl_error"):
-        warnings += (f'<div class="banner"><strong>Crawl problem:</strong> '
-                    f'{esc(audit["crawl_error"])}</div>')
+        warnings += (f'<div class="banner"><strong>We had trouble reading this '
+                    f'site.</strong> {esc(audit["crawl_error"])}. Some checks below '
+                    f'may say "not checked" as a result.</div>')
     partial_sections = audit.get("partial_sections") or []
     if partial_sections:
-        warnings += (f'<div class="banner"><strong>Partial:</strong> '
-                    f'{esc(", ".join(partial_sections))} '
-                    f'{"was" if len(partial_sections) == 1 else "were"} measured on '
-                    f'fewer than 80% of its enabled points. Segment is withheld '
-                    f'when Booked is the partial section.</div>')
+        warnings += (f'<div class="banner"><strong>Incomplete check.</strong> We '
+                    f'could not finish enough of the {esc(", ".join(partial_sections))} '
+                    f'section to score it fairly. When that section is Booked we do '
+                    f'not label the opportunity type at all, rather than guess.</div>')
 
     body = f"""
-<div class="sub"><a href="/console/batches/{esc(audit.get("batch_id"))}">&larr; batch</a></div>
+<div class="lede"><a href="/console/batches/{esc(audit.get("batch_id"))}">&larr; back to the call list</a></div>
 <h1>{esc(prospect.get("business_name"))}</h1>
-<div class="sub">{esc(prospect.get("city") or "")} &middot;
+<div class="lede">{esc(prospect.get("city") or "")} &middot;
 {esc(prospect.get("gbp_phone") or "")} &middot;
 <a href="{esc(prospect.get("website_url") or "#")}" target="_blank" rel="noopener noreferrer">{esc(prospect.get("domain") or "no website")}</a>{gbp_link}</div>
 
@@ -840,12 +863,12 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
     {csrf_field(csrf)}<button class="ghost" type="submit">Re-audit now</button>
   </form>
   <form class="inline" method="post" action="/console/suppress"
-        onsubmit="return confirm('Suppress this prospect permanently? This cannot be undone from here.');">
+        onsubmit="return confirm('Never contact this company again? This cannot be undone here.');">
     {csrf_field(csrf)}
     <input type="hidden" name="value" value="{esc(audit.get("prospect_id"))}">
     <input type="hidden" name="match_type" value="place_id">
     <input type="hidden" name="reason" value="requested">
-    <button class="danger" type="submit">Suppress permanently</button>
+    <button class="danger" type="submit">Never contact</button>
   </form>
 </div>
 
@@ -855,7 +878,7 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
 {section_table("booked")}
 {section_table("measurement")}
 
-<h2>Evidence</h2>
-<div class="card">{shots or '<p class="muted">No evidence stored for this audit.</p>'}</div>
+<h2>What we saw</h2>
+<div class="card">{shots or '<p class="muted">No screenshot was saved for this check.</p>'}</div>
 """
     return shell(prospect.get("business_name") or "Audit", body, active="batches")

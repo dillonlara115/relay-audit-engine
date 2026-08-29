@@ -162,8 +162,8 @@ def test_no_console_template_offers_to_send_anything():
     page = views.render_run(csrf="t", markets=["Colorado Springs"],
                             active_jobs=[], recent_batches=[])
     flat = re.sub(r"\s+", " ", page.lower())
-    assert "drafted by a model and approved by a human" in flat
-    assert "nothing here sends a message" in flat
+    assert "written by a model, checked by you" in flat
+    assert "never sent automatically" in flat
 
 
 def test_approving_is_presented_as_the_human_act():
@@ -174,9 +174,9 @@ def test_approving_is_presented_as_the_human_act():
     page = views.render_audit(audit=audit, prospect={"business_name": "Peak"},
                               checks=[], definitions={}, findings=findings,
                               evidence=[], csrf="t")
-    assert "Approve these three" in page
-    assert "human selection the rules require" in page
-    assert "Nothing is published by approving" in page
+    assert "These look right" in page
+    assert "A person has to agree these are the right three" in page
+    assert "does not send or publish" in page
 
 
 def test_a_flagged_draft_warns_before_approval():
@@ -184,7 +184,8 @@ def test_a_flagged_draft_warns_before_approval():
     page = views.render_audit(audit={"audit_id": "a1", "scores": {}}, prospect={},
                               checks=[], definitions={}, findings=findings,
                               evidence=[], csrf="t")
-    assert "may name a" in page and "mechanism" in page
+    assert "Read this before approving" in page
+    assert "never how we measured it" in page
 
 
 def test_suppression_asks_before_it_acts():
@@ -396,7 +397,8 @@ def test_the_market_field_explains_what_an_unmapped_city_changes():
     the local-operator check reports unknown rather than failing. An operator
     seeing more prospects reach review deserves to know why."""
     page = views.render_run(csrf="t", markets=["Denver"], active_jobs=[], recent_batches=[])
-    assert "unknown" in page and "review" in page
+    assert "not sure" in page, "an unmapped city must say the check is inconclusive"
+    assert "extra companies" in page
 
 
 def test_an_arbitrary_city_resolves_without_being_a_known_metro():
@@ -412,10 +414,14 @@ def test_an_arbitrary_city_resolves_without_being_a_known_metro():
 
 
 def test_the_coordinator_card_says_when_to_use_it_and_when_not_to():
+    import re
+
     page = views.render_run(csrf="t", markets=["X"], active_jobs=[], recent_batches=[])
-    assert "Use it when" in page
-    assert "Use the buttons instead" in page
-    assert "cannot send anything" in page, "rule 4 stated where an operator reads it"
+    # The copy wraps across source lines, so compare on normalized whitespace.
+    flat = re.sub(r"\s+", " ", page)
+    assert "Worth using when" in flat
+    assert "Use the buttons on the left instead" in flat
+    assert "cannot contact anybody" in flat, "rule 4 stated where an operator reads it"
 
 
 # ── Evidence is shown, not just named ────────────────────────────────────────
@@ -456,7 +462,7 @@ def test_an_audit_with_no_evidence_says_so():
         audit={"audit_id": "a1", "scores": {}}, prospect={"business_name": "Peak"},
         checks=[], definitions={}, findings=None, evidence=[], csrf="t",
     )
-    assert "No evidence stored" in page
+    assert "No screenshot was saved" in page
 
 
 def test_evidence_urls_are_minted_per_row(monkeypatch):
