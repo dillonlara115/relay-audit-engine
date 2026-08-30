@@ -238,7 +238,8 @@ def test_the_key_becomes_a_cookie_and_leaves_the_url(dash_client, monkeypatch):
     page = dash_client.get("/dashboard")  # cookie persisted by the client
     assert page.status_code == 200
     assert "dash-secret" not in page.text, "the secret never appears in a page"
-    assert "Batches" in page.text
+    assert "Overview" in page.text
+    assert 'class="side"' in page.text, "the dashboard shares the console sidebar"
 
 
 def test_the_dashboard_never_renders_the_secret(dash_client, monkeypatch):
@@ -271,3 +272,23 @@ def test_dashboard_templates_carry_no_forbidden_dash():
     assert not contains_forbidden_dash(batch)
     assert "<script>" not in batch, "names are escaped"
     assert "&lt;script&gt;" in batch
+
+
+def test_the_dashboard_and_console_share_one_shell():
+    """They drifted apart once already: the dashboard kept its own copy of the
+    shell and the session gate, so it stayed on the old centred layout and a
+    different cookie for two days. One layout, defined in one place."""
+    from app.console.views import SEGMENT_COLORS as console_palette
+    from app.report import dashboard
+
+    assert dashboard.SEGMENT_COLORS is console_palette
+
+    overview = dashboard.render_overview([])
+    batch = dashboard.render_batch("b1", [], {})
+    for page in (overview, batch):
+        assert 'class="side"' in page, "sidebar present"
+        assert "Start a scan" in page, "nav links back to the console"
+    # read only: the dashboard renders no way to change anything
+    for page in (overview, batch):
+        assert "<form" not in page
+        assert "<button" not in page

@@ -11,7 +11,17 @@ import html as html_escape
 import json
 from typing import Any, Mapping, Sequence
 
-from app.report.dashboard import SEGMENT_COLORS
+
+# Segment chips, validated against the chalk surface with the palette
+# validator: worst adjacent pair CVD delta E 12.8, normal vision 15.4. Identity
+# is never colour alone, every chip carries its label.
+SEGMENT_COLORS = {
+    "Leaky Bucket": "#F25C1F",
+    "Invisible Pro": "#1F6BF2",
+    "Both Broken": "#6B4FA0",
+    "Dialed": "#2E7D4F",
+    "incomplete": "#7A746C",
+}
 
 _CSS = """
 :root { --asphalt:#16120E; --chalk:#ECE6DC; --orange:#F25C1F; --line:#e4ded3;
