@@ -345,7 +345,12 @@ class Crawler:
         try:
             async with self._governor(parsed.netloc, crawl_delay):
                 resp = await self._client.get(normalized)
-        except httpx.HTTPError as exc:
+        # ValueError and InvalidURL cover hosts that only exist in broken
+        # markup, like a literal template placeholder in an href. Seen once in
+        # the wild as "'cta' does not appear to be an IPv4 or IPv6 address"
+        # taking down a whole audit. A URL we cannot request is a fact about
+        # that URL, not a reason to stop crawling the other 24 pages.
+        except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:
             return FetchResult(
                 url=normalized,
                 error=f"{type(exc).__name__}: {exc}",

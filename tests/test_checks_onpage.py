@@ -807,3 +807,69 @@ def test_c10_does_not_treat_an_ordinary_hyphen_as_an_attribution():
 def test_c10_still_passes_on_the_original_signals():
     assert run("C10", context(homepage_html=doc("<h2>What our customers say</h2>"))).status == PASS
     assert run("C10", context(homepage_html=doc('<div class="birdeye-widget"></div>'))).status == PASS
+
+
+# ── F14/F15 must tell the truth about what schema exists ─────────────────────
+#
+# Found on a real prospect (fdrestoration.net). A Trustindex widget showed 173
+# Google reviews to visitors while the site published no Review or
+# AggregateRating schema anywhere, source or rendered. And its Rank Math
+# Organization block, a business listing a search engine plainly can read, was
+# reported as "no business listing" because Organization was not on the
+# accepted type list.
+
+
+def test_f14_names_the_gap_when_reviews_are_visible_but_not_readable():
+    html = doc('<div class="ti-widget" data-src="https://cdn.trustindex.io/x.js"></div>'
+               '<script src="https://cdn.trustindex.io/loader.js"></script>')
+    res = run("F14", context(homepage_html=html))
+    assert res.status == FAIL, "the verdict stands: no schema is no schema"
+    assert "shown to visitors" in res.note
+    assert "search engines read" in res.note
+
+
+def test_f14_finds_schema_injected_only_in_the_rendered_dom():
+    """Same class of bug as C6: a script can add the schema on load."""
+    class _Render:
+        usable = True
+        html = '<script type="application/ld+json">{"@type":"AggregateRating","ratingValue":"4.9"}</script>'
+
+    ctx = context(homepage_html=doc("<p>plain page</p>"))
+    ctx.render = _Render()
+    res = run("F14", ctx)
+    assert res.status == PASS
+    assert res.observed["schema_format"] == "rendered"
+
+
+def test_f14_plain_note_when_nothing_is_visible_either():
+    res = run("F14", context(homepage_html=doc("<p>We fix roofs.</p>")))
+    assert res.status == FAIL
+    assert "No reviews are published" in res.note
+
+
+ORG_ONLY = ld('{"@type":"Organization","name":"Flood Damage Restoration",'
+              '"url":"https://x.com","logo":{"@type":"ImageObject","url":"https://x.com/l.png"}}')
+
+
+def test_f15_an_organization_block_is_a_listing_and_the_note_names_the_gaps():
+    res = run("F15", context(homepage_html=doc("", head=ORG_ONLY)))
+    assert res.status == FAIL
+    assert "no business listing" not in res.note, "it publishes one, saying otherwise is false"
+    assert "an address and a phone number" in res.note
+    assert res.observed["missing"] == ["an address", "a phone number"]
+
+
+def test_f15_a_complete_organization_block_passes():
+    complete = ld('{"@type":"Organization","name":"Peak Roofing",'
+                  '"address":{"@type":"PostalAddress","streetAddress":"1 Main St"},'
+                  '"telephone":"(719) 555-0142"}')
+    res = run("F15", context(homepage_html=doc("", head=complete)))
+    assert res.status == PASS
+
+
+def test_f15_reports_the_most_complete_candidate_when_several_fall_short():
+    two = (ld('{"@type":"Organization","name":"Peak"}')
+           + ld('{"@type":"LocalBusiness","name":"Peak","telephone":"(719) 555-0142"}'))
+    res = run("F15", context(homepage_html=doc("", head=two)))
+    assert res.status == FAIL
+    assert res.observed["missing"] == ["an address"]

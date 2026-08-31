@@ -24,8 +24,10 @@ SEGMENT_COLORS = {
 }
 
 _CSS = """
-:root { --asphalt:#16120E; --chalk:#ECE6DC; --orange:#F25C1F; --line:#e4ded3;
-        --ink2:#5d564d; --panel:#fff; }
+:root { --asphalt:#16120E; --chalk:#ECE6DC; --orange:#F25C1F; --line:#dcd5c8;
+        --ink2:#5d564d; --panel:#fff;
+        --shadow: 0 1px 2px rgba(22,18,14,.05), 0 6px 18px rgba(22,18,14,.06);
+        --shadow-soft: 0 1px 2px rgba(22,18,14,.04), 0 3px 10px rgba(22,18,14,.05); }
 * { margin:0; padding:0; box-sizing:border-box; }
 body { background:var(--chalk); color:var(--asphalt);
        font-family:'Work Sans',sans-serif; font-size:16px; line-height:1.55; }
@@ -58,31 +60,41 @@ h3 { font-size:1.1rem; margin:0 0 6px; }
           gap:16px; margin-bottom:6px; flex-wrap:wrap; }
 
 /* pieces */
-.card { background:var(--panel); border-radius:10px; padding:18px 20px; margin-bottom:14px; }
+.card { background:var(--panel); border:1px solid var(--line); border-radius:12px;
+        padding:18px 20px; margin-bottom:14px; box-shadow:var(--shadow); }
 .grid2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(330px,1fr)); gap:14px; }
 .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
          gap:10px; margin:14px 0; }
-.tile { background:var(--panel); border-radius:9px; padding:13px 15px; }
+.tile { background:var(--panel); border:1px solid var(--line); border-radius:11px;
+        padding:13px 15px; box-shadow:var(--shadow-soft); }
 .tile .n { font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:1.75rem;
            line-height:1; }
 .tile .l { font-size:.79rem; color:var(--ink2); margin-top:3px; }
 
 label { display:block; font-size:.85rem; color:var(--ink2); margin:12px 0 4px; font-weight:600; }
 input[type=text], input[type=number], textarea, select {
-  width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:7px;
-  font-family:'Work Sans',sans-serif; font-size:16px; background:#fff; color:var(--asphalt); }
+  width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:9px;
+  font-family:'Work Sans',sans-serif; font-size:16px; background:#fff;
+  color:var(--asphalt); box-shadow:inset 0 1px 2px rgba(22,18,14,.04); }
+input:focus, textarea:focus, select:focus {
+  outline:none; border-color:var(--orange);
+  box-shadow:0 0 0 3px rgba(242,92,31,.18); }
 textarea { min-height:86px; resize:vertical; }
 button { font-family:'Barlow Condensed',sans-serif; font-weight:600; letter-spacing:.03em;
-         font-size:1.02rem; background:var(--orange); color:#fff; border:0; border-radius:7px;
-         padding:10px 20px; cursor:pointer; margin-top:14px; }
+         font-size:1.02rem; background:var(--orange); color:#fff; border:0; border-radius:9px;
+         padding:10px 20px; cursor:pointer; margin-top:14px;
+         box-shadow:0 1px 2px rgba(22,18,14,.12), 0 4px 10px rgba(242,92,31,.25); }
+button:hover { filter:brightness(1.05); }
+button.ghost, form.inline button { box-shadow:var(--shadow-soft); }
 button.ghost { background:transparent; color:var(--asphalt); border:1px solid var(--line); }
 button.danger { background:#8d2f16; }
 form.inline { display:inline; }
 form.inline button { margin-top:0; padding:5px 12px; font-size:.85rem; }
 .hint { font-size:.83rem; color:var(--ink2); margin-top:6px; }
 
-table { width:100%; border-collapse:collapse; background:var(--panel);
-        border-radius:10px; overflow:hidden; }
+table { width:100%; border-collapse:separate; border-spacing:0;
+        background:var(--panel); border:1px solid var(--line);
+        border-radius:12px; overflow:hidden; box-shadow:var(--shadow); }
 th { font-family:'Barlow Condensed',sans-serif; font-weight:600; text-align:left;
      font-size:.9rem; letter-spacing:.03em; padding:10px 12px;
      background:var(--asphalt); color:var(--chalk); }
@@ -103,7 +115,8 @@ th[data-sort]:hover { color:var(--orange); }
 .bar { height:8px; border-radius:4px; background:var(--line); overflow:hidden; min-width:80px; }
 .bar i { display:block; height:100%; background:var(--orange); }
 
-pre.log { background:var(--asphalt); color:#e8e2d6; border-radius:9px; padding:15px;
+pre.log { background:var(--asphalt); color:#e8e2d6; border-radius:12px; padding:15px;
+          box-shadow:var(--shadow);
           font-size:.85rem; line-height:1.5; max-height:440px; overflow:auto;
           white-space:pre-wrap; word-break:break-word; }
 .status { display:inline-block; font-family:'Barlow Condensed',sans-serif; font-weight:600;
@@ -112,17 +125,20 @@ pre.log { background:var(--asphalt); color:#e8e2d6; border-radius:9px; padding:1
 .status.done { background:#2E7D4F; color:#fff; }
 .status.failed { background:#8d2f16; color:#fff; }
 
-.finding { border-left:5px solid var(--orange); background:var(--panel); padding:15px 17px;
-           border-radius:8px; margin-bottom:12px; }
+.finding { border:1px solid var(--line); border-left:5px solid var(--orange);
+           background:var(--panel); padding:15px 17px;
+           border-radius:10px; margin-bottom:12px; box-shadow:var(--shadow-soft); }
 .pass { color:#2E7D4F; font-weight:600; } .fail { color:#8d2f16; font-weight:600; }
 .skip { color:var(--ink2); }
-.banner { background:#fff3e6; border-left:5px solid var(--orange);
-          padding:13px 15px; border-radius:8px; margin-bottom:14px; font-size:.95rem; }
-.evidence-shot { max-width:340px; width:100%; border:2px solid var(--asphalt);
-                 border-radius:7px; display:block; }
+.banner { background:#fff3e6; border:1px solid #f2ddc4; border-left:5px solid var(--orange);
+          padding:13px 15px; border-radius:10px; margin-bottom:14px; font-size:.95rem;
+          box-shadow:var(--shadow-soft); }
+.evidence-shot { max-width:340px; width:100%; border:1px solid var(--line);
+                 border-radius:10px; display:block; box-shadow:var(--shadow); }
 .evidence-cap { margin-top:6px; font-size:.85rem; }
 abbr[title] { text-decoration:underline dotted; cursor:help; }
-details.legend { background:var(--panel); border-radius:9px; margin:14px 0; }
+details.legend { background:var(--panel); border:1px solid var(--line);
+  border-radius:12px; margin:14px 0; box-shadow:var(--shadow-soft); }
 details.legend summary { cursor:pointer; padding:13px 17px;
   font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:1.05rem; }
 details.legend .inner { padding:2px 17px 15px; }
@@ -536,10 +552,14 @@ _BATCH_FILTER_SCRIPT = """<script>
       var key = th.dataset.sort;
       sortState.dir = sortState.key === key ? -sortState.dir : 1;
       sortState.key = key;
-      table.querySelectorAll('th[data-sort]').forEach(function (h) {
-        h.textContent = h.textContent.replace(/ [\u25B2\u25BC]$/, '');
-      });
-      th.textContent += sortState.dir === 1 ? ' \u25B2' : ' \u25BC';
+      // The arrow lives in its own element. The first version rewrote the
+      // header's textContent, which flattened the <abbr> tooltips and the
+      // sub-labels out of existence on the first click.
+      table.querySelectorAll('th[data-sort] .arrow').forEach(function (a) { a.remove(); });
+      var arrow = document.createElement('span');
+      arrow.className = 'arrow';
+      arrow.textContent = sortState.dir === 1 ? ' \u25B2' : ' \u25BC';
+      th.appendChild(arrow);
       rows.sort(function (a, b) {
         var av = a.dataset['sort_' + key], bv = b.dataset['sort_' + key];
         var an = parseFloat(av), bn = parseFloat(bv);
@@ -851,10 +871,11 @@ company the most work and explain each in plain language.</p>
                     f'may say "not checked" as a result.</div>')
     partial_sections = audit.get("partial_sections") or []
     if partial_sections:
+        noun = "section" if len(partial_sections) == 1 else "sections"
         warnings += (f'<div class="banner"><strong>Incomplete check.</strong> We '
                     f'could not finish enough of the {esc(", ".join(partial_sections))} '
-                    f'section to score it fairly. When that section is Booked we do '
-                    f'not label the opportunity type at all, rather than guess.</div>')
+                    f'{noun} to score fairly. When Booked is affected we do not '
+                    f'label the opportunity type at all, rather than guess.</div>')
 
     body = f"""
 <div class="lede"><a href="/console/batches/{esc(audit.get("batch_id"))}">&larr; back to the call list</a></div>
@@ -870,7 +891,7 @@ company the most work and explain each in plain language.</p>
 
 <div class="card">
   <form class="inline" method="post" action="/console/audits/{esc(audit_id)}/reaudit">
-    {csrf_field(csrf)}<button class="ghost" type="submit">Re-audit now</button>
+    {csrf_field(csrf)}<button class="ghost" type="submit">Check this site again</button>
   </form>
   <form class="inline" method="post" action="/console/suppress"
         onsubmit="return confirm('Never contact this company again? This cannot be undone here.');">

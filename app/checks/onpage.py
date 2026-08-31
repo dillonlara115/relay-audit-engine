@@ -310,7 +310,15 @@ def f11_content_freshness(ctx: AuditContext) -> CheckResult:
 
 @check("F14")
 def f14_review_schema(ctx: AuditContext) -> CheckResult:
-    """Close to nine in ten carry none of their reviews in machine-readable form."""
+    """Close to nine in ten carry none of their reviews in machine-readable form.
+
+    Two lessons from real prospects live here. A review widget can display
+    dozens of reviews to a visitor while publishing no Review or
+    AggregateRating schema at all, which is precisely the invisible gap this
+    check exists to find, so the note has to say "shown but not readable"
+    rather than the flatly confusing "no reviews". And schema can be injected
+    by scripts, so the rendered DOM is consulted before a fail, same as C6.
+    """
     blocked = _unreachable(ctx, "F14")
     if blocked:
         return blocked
@@ -318,17 +326,37 @@ def f14_review_schema(ctx: AuditContext) -> CheckResult:
     found = sorted({
         t for block in ctx.site.jsonld for t in jsonld_types(block) if t in REVIEW_SCHEMA_TYPES
     })
-    if not found:
-        # Microdata is rarer but still valid and still machine readable.
-        if "itemtype" in ctx.site.html and _any_in(ctx.site.html, ("schema.org/review", "schema.org/aggregaterating")):
+    if found:
+        return result("F14", True, "Reviews are published in a machine-readable form.",
+                      schema_types=found)
+
+    # Microdata is rarer but still valid and still machine readable.
+    if "itemtype" in ctx.site.html and _any_in(ctx.site.html, ("schema.org/review", "schema.org/aggregaterating")):
+        return result("F14", True, "Reviews are published in a machine-readable form.",
+                      schema_format="microdata")
+
+    # Some widgets add their schema with a script, invisible to a source read.
+    render = ctx.render
+    if render is not None and getattr(render, "usable", False):
+        rendered = (getattr(render, "html", "") or "").replace(" ", "").lower()
+        if "aggregaterating" in rendered or '"@type":"review"' in rendered:
             return result("F14", True, "Reviews are published in a machine-readable form.",
-                          schema_format="microdata")
-    return result(
-        "F14", bool(found),
-        "Reviews are published in a machine-readable form." if found
-        else "No reviews are published on the site in a machine-readable form.",
-        schema_types=found or None,
-    )
+                          schema_format="rendered")
+
+    # Visible reviews with no schema is the sharper finding, and the honest note.
+    widget = _any_in(ctx.site.html, REVIEW_WIDGETS)
+    page = ctx.site.homepage
+    has_quotes = bool(page and len(page.blockquotes) >= 2)
+    if widget or has_quotes:
+        return result(
+            "F14", False,
+            "Reviews are shown to visitors, but not in the machine-readable form "
+            "search engines read, so none of them count toward how this business "
+            "appears in search.",
+            widget=widget, visible_reviews=True,
+        )
+    return result("F14", False,
+                  "No reviews are published on the site in a machine-readable form.")
 
 
 @check("F15")
@@ -337,16 +365,28 @@ def f15_business_schema(ctx: AuditContext) -> CheckResult:
     if blocked:
         return blocked
 
-    candidates = [b for b in ctx.site.jsonld if jsonld_types(b) & LOCAL_BUSINESS_TYPES]
+    # A plain Organization block counts as a listing. Found on a real prospect:
+    # its site published Organization schema with a name and logo, and this
+    # check reported "no business listing a search engine can read", which was
+    # simply false. What that listing lacked was an address and phone, and the
+    # note now says exactly that.
+    candidates = [b for b in ctx.site.jsonld
+                  if jsonld_types(b) & (LOCAL_BUSINESS_TYPES | {"organization"})]
     if not candidates:
         return result("F15", False, "The site publishes no business listing a search engine can read.")
 
     gbp = parse_phone(ctx.field("gbp_phone"))
+    best_missing: list[str] | None = None
     for block in candidates:
         name = block.get("name")
         address = block.get("address")
         telephone = block.get("telephone")
-        if not (name and address and telephone):
+        missing = [label for label, value in
+                   (("an address", address), ("a phone number", telephone),
+                    ("a name", name)) if not value]
+        if missing:
+            if best_missing is None or len(missing) < len(best_missing):
+                best_missing = missing
             continue
         if gbp and not same_number(str(telephone), gbp.e164):
             return result(
@@ -358,8 +398,13 @@ def f15_business_schema(ctx: AuditContext) -> CheckResult:
         return result("F15", True, "The site publishes a complete business listing.",
                       schema_name=str(name), schema_phone=str(telephone))
 
-    return result("F15", False,
-                  "The site's business listing is missing a name, address, or phone number.")
+    missing_text = " and ".join(best_missing or ["contact details"])
+    return result(
+        "F15", False,
+        f"The site's business listing is missing {missing_text}, so search "
+        "engines cannot connect it to the real business.",
+        missing=best_missing,
+    )
 
 
 # ── CHOSEN ────────────────────────────────────────────────────────────────────
