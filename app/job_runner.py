@@ -143,6 +143,7 @@ async def run_draft_job(job_id: str, params: Mapping[str, Any]) -> dict[str, Any
 
     batch_id = str(params.get("batch_id") or "")
     top = int(params.get("top") or 10)
+    only_audit_id = params.get("only_audit_id")
 
     audits = await asyncio.to_thread(lambda: list(store.audits_for_batch(batch_id)))
     prospects = {}
@@ -150,7 +151,11 @@ async def run_draft_job(job_id: str, params: Mapping[str, Any]) -> dict[str, Any
         pid = audit.get("prospect_id")
         if pid and pid not in prospects:
             prospects[pid] = await asyncio.to_thread(store.get_prospect, pid) or {}
-    rows = rank(audits, prospects)[:top]
+    rows = rank(audits, prospects)
+    # "Write talking points" on a single audit page passes only_audit_id, and
+    # must draft for that one company alone. Without this the button silently
+    # drafted the whole batch's top 40, which is a lot more than it promised.
+    rows = [r for r in rows if r.audit_id == only_audit_id] if only_audit_id else rows[:top]
 
     suppressions = await asyncio.to_thread(store.load_suppressions)
     definitions = {d["code"]: d for d in await asyncio.to_thread(store.all_check_defs)}
