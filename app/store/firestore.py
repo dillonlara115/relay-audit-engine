@@ -214,14 +214,32 @@ def prospects_for_batch(batch_id: str) -> Iterator[dict[str, Any]]:
 # ── Audits ────────────────────────────────────────────────────────────────────
 
 
+def audit_doc_id(prospect_id: str, batch_id: str) -> str:
+    """One audit per prospect per batch. A re-audit overwrites its prior
+    attempt in place instead of piling up a second row for the same company
+    on the same call list."""
+    return hashlib.sha1(f"{batch_id}:{prospect_id}".encode()).hexdigest()
+
+
 def create_audit(prospect_id: str, batch_id: str) -> str:
-    doc = get_client().collection(AUDITS).document()
+    doc = get_client().collection(AUDITS).document(audit_doc_id(prospect_id, batch_id))
+    # A re-crawl resets scoring, but a published report is a human-facing
+    # artifact someone may already have in hand: carry its slug forward so
+    # /r/<slug> keeps resolving instead of 404ing the moment the site is
+    # re-checked.
+    prior = doc.get().to_dict() or {}
+    carry_forward = {
+        field: prior[field]
+        for field in ("report_slug", "published_at")
+        if prior.get(field) is not None
+    }
     doc.set(
         {
             "prospect_id": prospect_id,
             "batch_id": batch_id,
             "status": "queued",
             "started_at": utcnow(),
+            **carry_forward,
         }
     )
     get_client().collection(PROSPECTS).document(prospect_id).set(
