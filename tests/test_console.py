@@ -494,3 +494,254 @@ def test_a_signing_failure_is_captured_per_row_not_raised(monkeypatch):
     rows = routes._evidence_with_urls(BrokenStore(), "a1")
     assert "url" not in rows[0]
     assert "no signing credentials" in rows[0]["url_error"]
+
+
+# ── P0: accessible color system ───────────────────────────────────────────────
+#
+# Computed with the WCAG relative-luminance formula, not eyeballed. The brand
+# orange (#F25C1F) is 2.67:1 on chalk and 3.32:1 on white as text, both below
+# the 4.5:1 AA floor. It stays as a fill color; a darker step on the same hue
+# (--ember) carries text and links instead.
+
+
+def _luminance(hex_color: str) -> float:
+    r, g, b = (int(hex_color[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    lin = lambda c: c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+
+
+def _contrast(fg: str, bg: str) -> float:
+    la, lb = _luminance(fg), _luminance(bg)
+    hi, lo = max(la, lb), min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def test_the_brand_orange_still_fails_as_text_this_is_the_documented_reason_it_moved():
+    assert _contrast("#F25C1F", "#ECE6DC") < 4.5
+    assert _contrast("#F25C1F", "#ffffff") < 4.5
+
+
+def test_ember_the_replacement_text_color_passes_everywhere_it_is_used():
+    ember = "#B0400E"
+    assert _contrast(ember, "#ECE6DC") >= 4.5, "ember on chalk"
+    assert _contrast(ember, "#ffffff") >= 4.5, "ember on a white card"
+
+
+def test_button_text_passes_against_the_orange_fill():
+    """Buttons keep the orange fill; the text on it is asphalt, not white."""
+    assert _contrast("#16120E", "#F25C1F") >= 4.5
+
+
+def test_links_render_in_ember_not_the_brand_fill_orange():
+    page = views.render_run(csrf="t", markets=["X"], active_jobs=[], recent_batches=[])
+    assert "color:var(--ember)" in page
+    assert "a { color:var(--orange)" not in page
+
+
+def test_the_active_nav_pill_and_running_status_use_readable_text():
+    """Both are white-on-orange at a size below the WCAG large-text threshold,
+    which measures 3.32:1. Both must use asphalt text instead."""
+    page = views.render_run(csrf="t", markets=["X"], active_jobs=[], recent_batches=[])
+    assert ".side nav a.on { background:var(--orange); color:var(--asphalt)" in page
+    assert ".status.running { background:var(--orange); color:var(--asphalt)" in page
+
+
+# ── P1.1: double submit guard ─────────────────────────────────────────────────
+
+
+def test_every_console_page_carries_the_submit_guard():
+    """A slow redirect must not let a second click start a second identical
+    job and spend real Places or Vertex quota twice."""
+    for page in (
+        views.render_run(csrf="t", markets=["X"], active_jobs=[], recent_batches=[]),
+        views.render_batch("b1", [], {}, [], csrf="t"),
+        views.render_jobs([]),
+    ):
+        assert "button.disabled = true" in page
+
+
+# ── P1.3: keyboard access ─────────────────────────────────────────────────────
+
+
+def test_focus_visible_styles_exist_for_links_and_buttons():
+    page = views.render_run(csrf="t", markets=["X"], active_jobs=[], recent_batches=[])
+    assert "a:focus-visible" in page
+    assert "button:focus-visible" in page
+
+
+def test_sortable_headers_are_reachable_and_operable_by_keyboard():
+    """A header a mouse can click but Tab cannot reach, and Enter cannot
+    activate, does not exist for someone who does not use a mouse."""
+    page = views.render_batch("b1", [], {}, [], csrf="t")
+    assert "setAttribute('tabindex', '0')" in page
+    assert "setAttribute('role', 'button')" in page
+    assert "e.key === 'Enter'" in page and "e.key === ' '" in page
+
+
+# ── P1.4: mobile table containment ────────────────────────────────────────────
+
+
+def test_tables_are_wrapped_so_only_the_table_scrolls_on_a_narrow_screen():
+    for page in (
+        views.render_batch("b1", [], {}, [], csrf="t"),
+        views.render_jobs([]),
+        views.render_run(csrf="t", markets=["X"], active_jobs=[], recent_batches=[]),
+    ):
+        assert '<div class="table-wrap"><table' in page
+
+
+def test_the_dashboard_tables_are_wrapped_too():
+    """Applied once in shell(), so both console and dashboard inherit it."""
+    from app.report import dashboard
+
+    assert '<div class="table-wrap"><table' in dashboard.render_overview([])
+    assert '<div class="table-wrap"><table' in dashboard.render_batch("b1", [], {})
+
+
+# ── P2: empty states, progress color, scan labels, sidebar texture ───────────
+
+
+def test_render_jobs_content_matches_its_intent_not_just_its_title():
+    """Regression: an earlier pass changed the page <title> to "Activity" and
+    the nav label, but never touched the actual <h1> or lede inside the
+    function, and a weak "Activity" in page assertion missed it because the
+    title alone satisfied it. Pin the real content this time."""
+    page = views.render_jobs([])
+    assert "<h1>Activity</h1>" in page
+    assert "<h1>Jobs</h1>" not in page
+    assert "Params" not in page, "raw JSON must not be a column a person reads"
+
+
+def test_every_empty_state_offers_the_next_step():
+    results = views.render_batches([])
+    assert "Start one" in results and 'href="/console"' in results
+
+    activity = views.render_jobs([])
+    assert "shows up here" in activity
+
+    call_list = views.render_batch("b1", [], {}, [], csrf="t")
+    assert "finishes on its own" in call_list
+    assert 'href="/console/jobs"' in call_list
+
+
+def test_progress_bar_turns_green_only_when_actually_complete():
+    assert 'class="bar done"' in views.progress_bar(40, 40)
+    assert 'class="bar done"' not in views.progress_bar(39, 40)
+    assert 'class="bar done"' not in views.progress_bar(0, 0), "no work is not done work"
+
+
+def test_scan_label_prefers_market_and_date_over_the_raw_id():
+    from datetime import datetime, timezone
+
+    labeled = views.scan_label({"batch_id": "xY9z", "market": "Colorado Springs",
+                                "started_at": datetime(2026, 8, 26, tzinfo=timezone.utc)})
+    assert "Colorado Springs" in labeled and "Aug 26" in labeled
+
+    market_only = views.scan_label({"batch_id": "xY9z", "market": "Pueblo"})
+    assert market_only == "Pueblo"
+
+    # A batch built without a sweep behind it (CLI, a smoke test) has neither
+    # on record. The raw id must still be there, not a blank cell.
+    fallback = views.scan_label({"batch_id": "smoke-074927"})
+    assert fallback == "smoke-074927"
+
+
+def test_scan_label_escapes_the_market_name():
+    labeled = views.scan_label({"batch_id": "b1", "market": "<script>alert(1)</script>"})
+    assert "<script>" not in labeled
+    assert "&lt;script&gt;" in labeled
+
+
+def test_the_sidebar_carries_a_subtle_texture_not_a_flat_fill():
+    page = views.render_run(csrf="t", markets=["X"], active_jobs=[], recent_batches=[])
+    assert "repeating-linear-gradient" in page
+
+
+def test_batch_overview_enriches_rows_with_market_and_start_date(monkeypatch):
+    from datetime import datetime, timezone
+
+    import app.store.firestore as store
+
+    tasks = [{"batch_id": "b1", "status": "done", "updated_at": store.utcnow()}]
+
+    class FakeSnap:
+        def __init__(self, data):
+            self._data = data
+            self.exists = data is not None
+
+        def to_dict(self):
+            return self._data
+
+    class FakeQuery:
+        def where(self, **kw):
+            return self
+
+        def stream(self):
+            return [FakeSnap(t) for t in tasks]
+
+    class FakeCollection:
+        def __init__(self, name):
+            self.name = name
+
+        def where(self, **kw):
+            return FakeQuery()
+
+        def document(self, doc_id):
+            return self
+
+        def get(self):
+            if self.name == "batches":
+                return FakeSnap({"market_id": "colorado-springs",
+                                 "created_at": datetime(2026, 8, 26, tzinfo=timezone.utc)})
+            if self.name == "markets":
+                return FakeSnap({"name": "Colorado Springs"})
+            return FakeSnap(None)
+
+    class FakeClient:
+        def collection(self, name):
+            return FakeCollection(name)
+
+    monkeypatch.setattr(store, "get_client", lambda: FakeClient())
+    rows = store.batch_overview()
+    assert rows[0]["market"] == "Colorado Springs"
+    assert rows[0]["started_at"].year == 2026
+
+
+def test_batch_overview_falls_back_gracefully_with_no_batch_document(monkeypatch):
+    """A batch the CLI or a smoke test built by hand has no batches/{id}
+    document at all. The overview must not raise, just omit the label data."""
+    import app.store.firestore as store
+
+    tasks = [{"batch_id": "smoke-1", "status": "done", "updated_at": store.utcnow()}]
+
+    class FakeSnap:
+        exists = False
+
+        def to_dict(self):
+            return None
+
+    class FakeQuery:
+        def where(self, **kw):
+            return self
+
+        def stream(self):
+            return [type("S", (), {"to_dict": lambda self=None, t=t: t})() for t in tasks]
+
+    class FakeCollection:
+        def where(self, **kw):
+            return FakeQuery()
+
+        def document(self, doc_id):
+            return self
+
+        def get(self):
+            return FakeSnap()
+
+    class FakeClient:
+        def collection(self, name):
+            return FakeCollection()
+
+    monkeypatch.setattr(store, "get_client", lambda: FakeClient())
+    rows = store.batch_overview()
+    assert rows[0]["market"] is None
+    assert rows[0]["started_at"] is None

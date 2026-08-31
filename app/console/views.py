@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import html as html_escape
 import json
+import re
 from typing import Any, Mapping, Sequence
 
 
@@ -26,13 +27,20 @@ SEGMENT_COLORS = {
 _CSS = """
 :root { --asphalt:#16120E; --chalk:#ECE6DC; --orange:#F25C1F; --line:#dcd5c8;
         --ink2:#5d564d; --panel:#fff;
+        /* --orange is the brand fill: buttons, bars, chips, the active nav
+           pill. At 2.67:1 on chalk and 3.32:1 on white it fails WCAG AA as
+           text, so every link and every other text-orange use --ember
+           instead, a darker step on the same hue: 4.72:1 on chalk, 5.86:1 on
+           white. Two roles for one brand color, not one color doing both. */
+        --ember:#B0400E;
         --shadow: 0 1px 2px rgba(22,18,14,.05), 0 6px 18px rgba(22,18,14,.06);
-        --shadow-soft: 0 1px 2px rgba(22,18,14,.04), 0 3px 10px rgba(22,18,14,.05); }
+        --shadow-soft: 0 1px 2px rgba(22,18,14,.04), 0 3px 10px rgba(22,18,14,.05);
+        --focus-ring: 0 0 0 3px rgba(176,64,14,.35); }
 * { margin:0; padding:0; box-sizing:border-box; }
 body { background:var(--chalk); color:var(--asphalt);
        font-family:'Work Sans',sans-serif; font-size:16px; line-height:1.55; }
-a { color:var(--orange); text-decoration:none; }
-a:hover { text-decoration:underline; }
+a { color:var(--ember); text-decoration:none; }
+a:hover { text-decoration:underline; color:var(--orange); }
 h1,h2,h3,h4 { font-family:'Barlow Condensed',sans-serif; letter-spacing:.01em; font-weight:600; }
 h1 { font-size:2rem; line-height:1.15; }
 h2 { font-size:1.35rem; margin:34px 0 4px; }
@@ -43,7 +51,11 @@ h3 { font-size:1.1rem; margin:0 0 6px; }
 /* shell */
 .layout { display:flex; min-height:100vh; }
 .side { width:232px; flex:0 0 232px; background:var(--asphalt); color:var(--chalk);
-        padding:22px 16px; position:sticky; top:0; height:100vh; }
+        padding:22px 16px; position:sticky; top:0; height:100vh;
+        background-image:
+          repeating-linear-gradient(0deg, rgba(236,230,220,.05) 0, rgba(236,230,220,.05) 1px, transparent 1px, transparent 24px),
+          repeating-linear-gradient(90deg, rgba(236,230,220,.05) 0, rgba(236,230,220,.05) 1px, transparent 1px, transparent 24px); }
+.side > * { position:relative; }  /* content sits above the grid, not blended into it */
 .side .brand { display:block; font-family:'Barlow Condensed',sans-serif; font-weight:600;
                font-size:1.35rem; letter-spacing:.04em; color:var(--orange);
                text-transform:uppercase; line-height:1.1; margin-bottom:4px; }
@@ -52,7 +64,7 @@ h3 { font-size:1.1rem; margin:0 0 6px; }
 .side nav a { display:block; padding:9px 12px; border-radius:7px; color:var(--chalk);
               font-size:.95rem; margin-bottom:3px; }
 .side nav a:hover { background:#2a241d; text-decoration:none; }
-.side nav a.on { background:var(--orange); color:#fff; font-weight:600; }
+.side nav a.on { background:var(--orange); color:var(--asphalt); font-weight:600; }  /* asphalt on orange: 5.61:1. White on orange at this size is 3.32:1, below AA. */
 .side .foot { position:absolute; bottom:20px; left:16px; right:16px;
               font-size:.76rem; color:#8d857a; line-height:1.4; }
 .main { flex:1; min-width:0; padding:26px 30px 70px; }
@@ -79,22 +91,34 @@ input[type=text], input[type=number], textarea, select {
 input:focus, textarea:focus, select:focus {
   outline:none; border-color:var(--orange);
   box-shadow:0 0 0 3px rgba(242,92,31,.18); }
+a:focus-visible, button:focus-visible, th[data-sort]:focus-visible,
+summary:focus-visible {
+  outline:none; border-radius:4px; box-shadow:var(--focus-ring); }
+.side nav a:focus-visible { box-shadow:inset var(--focus-ring); }
 textarea { min-height:86px; resize:vertical; }
 button { font-family:'Barlow Condensed',sans-serif; font-weight:600; letter-spacing:.03em;
-         font-size:1.02rem; background:var(--orange); color:#fff; border:0; border-radius:9px;
-         padding:10px 20px; cursor:pointer; margin-top:14px;
+         font-size:1.02rem; background:var(--orange); color:var(--asphalt); border:0;
+         border-radius:9px; padding:10px 20px; cursor:pointer; margin-top:14px;
          box-shadow:0 1px 2px rgba(22,18,14,.12), 0 4px 10px rgba(242,92,31,.25); }
 button:hover { filter:brightness(1.05); }
+button:disabled { filter:none; opacity:.6; cursor:not-allowed;
+                  box-shadow:var(--shadow-soft); }
 button.ghost, form.inline button { box-shadow:var(--shadow-soft); }
 button.ghost { background:transparent; color:var(--asphalt); border:1px solid var(--line); }
-button.danger { background:#8d2f16; }
+button.danger { background:#8d2f16; color:#fff; }
 form.inline { display:inline; }
 form.inline button { margin-top:0; padding:5px 12px; font-size:.85rem; }
 .hint { font-size:.83rem; color:var(--ink2); margin-top:6px; }
 
-table { width:100%; border-collapse:separate; border-spacing:0;
-        background:var(--panel); border:1px solid var(--line);
-        border-radius:12px; overflow:hidden; box-shadow:var(--shadow); }
+/* A 10 column call list at a phone width has no room to shrink into. The
+   table keeps a working minimum width and lives inside .table-wrap, which is
+   the thing that actually scrolls, so a phone pans the table without
+   dragging the rest of the page sideways with it. */
+.table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch;
+              border:1px solid var(--line); border-radius:12px;
+              box-shadow:var(--shadow); margin-bottom:14px; }
+table { width:100%; min-width:640px; border-collapse:separate; border-spacing:0;
+        background:var(--panel); }
 th { font-family:'Barlow Condensed',sans-serif; font-weight:600; text-align:left;
      font-size:.9rem; letter-spacing:.03em; padding:10px 12px;
      background:var(--asphalt); color:var(--chalk); }
@@ -105,7 +129,7 @@ td.num { text-align:right; font-variant-numeric:tabular-nums; }
 td.tel { white-space:nowrap; }
 tr:hover td { background:#faf7f2; }
 th[data-sort] { cursor:pointer; user-select:none; }
-th[data-sort]:hover { color:var(--orange); }
+th[data-sort]:hover { color:var(--ember); }
 
 .chip { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
 .chip i { width:10px; height:10px; border-radius:3px; display:inline-block; }
@@ -114,6 +138,7 @@ th[data-sort]:hover { color:var(--orange); }
 .tag.warn { background:#8a5a00; }
 .bar { height:8px; border-radius:4px; background:var(--line); overflow:hidden; min-width:80px; }
 .bar i { display:block; height:100%; background:var(--orange); }
+.bar.done i { background:#2E7D4F; }  /* a glance tells finished from still running */
 
 pre.log { background:var(--asphalt); color:#e8e2d6; border-radius:12px; padding:15px;
           box-shadow:var(--shadow);
@@ -121,7 +146,7 @@ pre.log { background:var(--asphalt); color:#e8e2d6; border-radius:12px; padding:
           white-space:pre-wrap; word-break:break-word; }
 .status { display:inline-block; font-family:'Barlow Condensed',sans-serif; font-weight:600;
           letter-spacing:.03em; padding:2px 11px; border-radius:11px; background:var(--line); }
-.status.running { background:var(--orange); color:#fff; }
+.status.running { background:var(--orange); color:var(--asphalt); }  /* white on this orange is 3.32:1, below AA; green/red pills already pass */
 .status.done { background:#2E7D4F; color:#fff; }
 .status.failed { background:#8d2f16; color:#fff; }
 
@@ -200,13 +225,43 @@ def _nav(active: str) -> str:
     )
 
 
+# Runs on every console page. A slow redirect after a sweep or dispatch left
+# the button live, and a second click started a second identical job, spending
+# real Places or Vertex quota twice. Disabling on submit does not cancel the
+# submission in flight, only a second one; a form can still opt out with
+# data-no-guard for the rare case where re-submitting is intentional (there is
+# none yet, the escape hatch is here so one is not forced to fight this).
+_SUBMIT_GUARD = """<script>
+(function () {
+  document.addEventListener('submit', function (e) {
+    var form = e.target;
+    if (form.hasAttribute('data-no-guard')) return;
+    var button = form.querySelector('button[type="submit"], button:not([type])');
+    if (!button || button.disabled) return;
+    button.disabled = true;
+    button.dataset.label = button.textContent;
+    button.textContent = button.dataset.loading || 'Working\u2026';
+  });
+})();
+</script>"""
+
+
+_TABLE = re.compile(r"<table\b.*?</table>", re.S)
+
+
+def _wrap_tables(body: str) -> str:
+    """Every table scrolls inside its own box instead of taking the page with
+    it. One point of application so no render function has to remember it."""
+    return _TABLE.sub(lambda m: f'<div class="table-wrap">{m.group(0)}</div>', body)
+
+
 def shell(title: str, body: str, *, active: str = "console", script: str = "") -> str:
     return (_SHELL
             .replace("__CSS__", _CSS)
             .replace("__TITLE__", esc(title))
             .replace("__NAV__", _nav(active))
-            .replace("__BODY__", body)
-            .replace("__SCRIPT__", script))
+            .replace("__BODY__", _wrap_tables(body))
+            .replace("__SCRIPT__", _SUBMIT_GUARD + script))
 
 
 def csrf_field(token: str) -> str:
@@ -217,6 +272,30 @@ def chip(segment: str | None) -> str:
     name = segment or "incomplete"
     color = SEGMENT_COLORS.get(name, SEGMENT_COLORS["incomplete"])
     return f'<span class="chip"><i style="background:{color}"></i>{esc(name)}</span>'
+
+
+def progress_bar(done: int, total: int) -> str:
+    """A bar that turns green at 100%, so a glance across the scans table
+    tells 'finished' from 'still running' without reading the numbers."""
+    pct = int((done / total) * 100) if total else 0
+    complete = " done" if total and done >= total else ""
+    return f'<div class="bar{complete}"><i style="width:{pct}%"></i></div>'
+
+
+def scan_label(batch: Mapping[str, Any]) -> str:
+    """'Colorado Springs &middot; Aug 26' when we know the metro and the
+    start date, the raw scan id otherwise. A batch built without a sweep
+    behind it (the CLI, a smoke test) has neither on record, and the id is
+    still there, just no longer the only thing to look at."""
+    batch_id = batch.get("batch_id", "")
+    market = batch.get("market")
+    started = batch.get("started_at")
+    if market and started:
+        return (f'{esc(market)} <span class="muted">&middot; '
+                f'{esc(started.strftime("%b %d"))}</span>')
+    if market:
+        return esc(market)
+    return esc(batch_id)
 
 
 def tiles(pairs: Sequence[tuple[str, Any]]) -> str:
@@ -311,10 +390,9 @@ def render_run(*, csrf: str, markets: Sequence[str], active_jobs: Sequence[Mappi
                    f"<th>Latest update</th></tr>{rows}</table>")
 
     batch_rows = "".join(
-        f'<tr><td><a href="/console/batches/{esc(b["batch_id"])}">{esc(b["batch_id"])}</a></td>'
+        f'<tr><td><a href="/console/batches/{esc(b["batch_id"])}">{scan_label(b)}</a></td>'
         f'<td class="num">{b.get("total", 0)}</td><td class="num">{b.get("done", 0)}</td>'
-        f'<td><div class="bar"><i style="width:'
-        f'{int((b.get("done", 0) / b["total"]) * 100) if b.get("total") else 0}%"></i></div></td>'
+        f'<td>{progress_bar(b.get("done", 0), b.get("total", 0))}</td>'
         f'<td class="muted">{esc(b.get("latest") or "")}</td></tr>'
         for b in recent_batches[:6]
     )
@@ -486,14 +564,17 @@ def render_jobs(jobs_list: Sequence[Mapping[str, Any]]) -> str:
     rows = "".join(
         f'<tr><td><a href="/console/jobs/{esc(j.get("job_id"))}">{esc(j.get("label"))}</a></td>'
         f'<td>{status_pill(j.get("status", ""))}</td>'
-        f'<td class="muted">{esc(json.dumps(j.get("params") or {})[:80])}</td>'
         f'<td class="muted">{esc((j.get("created_at").strftime("%b %d %H:%M")) if j.get("created_at") else "")}</td>'
         "</tr>"
         for j in jobs_list
     )
-    body = ("<h1>Jobs</h1><div class='sub'>Every long running operation, newest "
-            "first.</div><table><tr><th>Job</th><th>Status</th><th>Params</th>"
-            f"<th>Started</th></tr>{rows or '<tr><td colspan=4 class=muted>Nothing has run yet.</td></tr>'}</table>")
+    empty = ('<tr><td colspan=3 class=muted>Nothing has run yet. Every scan and '
+            'every "write talking points" job shows up here, and keeps going '
+            'even if you close this tab.</td></tr>')
+    body = ('<div class="topbar"><h1>Activity</h1></div>'
+            '<p class="lede">Everything the engine has run, newest first.</p>'
+            "<table><tr><th>What ran</th><th>Status</th><th>Started</th></tr>"
+            f"{rows or empty}</table>")
     return shell("Activity", body, active="jobs")
 
 
@@ -546,27 +627,38 @@ _BATCH_FILTER_SCRIPT = """<script>
   });
 
   var sortState = {key: null, dir: 1};
+  function sortBy(th) {
+    var key = th.dataset.sort;
+    sortState.dir = sortState.key === key ? -sortState.dir : 1;
+    sortState.key = key;
+    // The arrow lives in its own element. The first version rewrote the
+    // header's textContent, which flattened the <abbr> tooltips and the
+    // sub-labels out of existence on the first click.
+    table.querySelectorAll('th[data-sort] .arrow').forEach(function (a) { a.remove(); });
+    var arrow = document.createElement('span');
+    arrow.className = 'arrow';
+    arrow.textContent = sortState.dir === 1 ? ' \u25B2' : ' \u25BC';
+    th.appendChild(arrow);
+    table.querySelectorAll('th[data-sort]').forEach(function (h) {
+      h.setAttribute('aria-sort', h === th ? (sortState.dir === 1 ? 'ascending' : 'descending') : 'none');
+    });
+    rows.sort(function (a, b) {
+      var av = a.dataset['sort_' + key], bv = b.dataset['sort_' + key];
+      var an = parseFloat(av), bn = parseFloat(bv);
+      var cmp = (!isNaN(an) && !isNaN(bn)) ? (an - bn) : String(av).localeCompare(String(bv));
+      return cmp * sortState.dir;
+    });
+    rows.forEach(function (row) { tbody.appendChild(row); });
+  }
   table.querySelectorAll('th[data-sort]').forEach(function (th) {
-    th.style.cursor = 'pointer';
-    th.addEventListener('click', function () {
-      var key = th.dataset.sort;
-      sortState.dir = sortState.key === key ? -sortState.dir : 1;
-      sortState.key = key;
-      // The arrow lives in its own element. The first version rewrote the
-      // header's textContent, which flattened the <abbr> tooltips and the
-      // sub-labels out of existence on the first click.
-      table.querySelectorAll('th[data-sort] .arrow').forEach(function (a) { a.remove(); });
-      var arrow = document.createElement('span');
-      arrow.className = 'arrow';
-      arrow.textContent = sortState.dir === 1 ? ' \u25B2' : ' \u25BC';
-      th.appendChild(arrow);
-      rows.sort(function (a, b) {
-        var av = a.dataset['sort_' + key], bv = b.dataset['sort_' + key];
-        var an = parseFloat(av), bn = parseFloat(bv);
-        var cmp = (!isNaN(an) && !isNaN(bn)) ? (an - bn) : String(av).localeCompare(String(bv));
-        return cmp * sortState.dir;
-      });
-      rows.forEach(function (row) { tbody.appendChild(row); });
+    // Keyboard operable: a header a mouse can click but a keyboard cannot
+    // reach is not operable at all for someone who does not use a mouse.
+    th.setAttribute('tabindex', '0');
+    th.setAttribute('role', 'button');
+    th.setAttribute('aria-sort', 'none');
+    th.addEventListener('click', function () { sortBy(th); });
+    th.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sortBy(th); }
     });
   });
 
@@ -647,10 +739,10 @@ def render_batch(batch_id: str, rows: Sequence[Mapping[str, Any]],
 
     live = ""
     if progress and progress.get("total"):
-        pct = int((progress.get("done", 0) / progress["total"]) * 100)
-        live = (f'<div class="banner">{progress.get("done", 0)} of {progress["total"]} '
-                f'websites checked. <div class="bar" style="margin-top:6px">'
-                f'<i style="width:{pct}%"></i></div></div>')
+        done, total = progress.get("done", 0), progress["total"]
+        state = "Done." if done >= total else f"{done} of {total} websites checked."
+        live = (f'<div class="banner">{state} <div style="margin-top:6px">'
+                f'{progress_bar(done, total)}</div></div>')
 
     body = f"""
 <div class="lede"><a href="/console/batches">&larr; all scans</a></div>
@@ -723,7 +815,7 @@ faster and easier conversation than one that needs everything rebuilt.
 <th>Opportunity<span class="sub">what kind of problem</span></th>{score_headers()}
 <th data-sort="total">Total<span class="sub">out of 100</span></th><th>Phone</th><th></th><th>Next step</th></tr></thead>
 <tbody>
-{"".join(table_rows) or '<tr><td colspan="10" class="muted">No websites checked yet.</td></tr>'}
+{"".join(table_rows) or '<tr><td colspan="10" class="muted">No websites checked yet. This finishes on its own; check back in a few minutes or watch <a href="/console/jobs">Activity</a>.</td></tr>'}
 </tbody></table>
 {_BATCH_FILTER_SCRIPT}
 """
@@ -732,11 +824,10 @@ faster and easier conversation than one that needs everything rebuilt.
 
 def render_batches(batches: Sequence[Mapping[str, Any]]) -> str:
     rows = "".join(
-        f'<tr><td><a href="/console/batches/{esc(b["batch_id"])}">{esc(b["batch_id"])}</a></td>'
+        f'<tr><td><a href="/console/batches/{esc(b["batch_id"])}">{scan_label(b)}</a></td>'
         f'<td class="num">{b.get("total", 0)}</td><td class="num">{b.get("done", 0)}</td>'
         f'<td class="num">{b.get("running", 0)}</td><td class="num">{b.get("pending", 0)}</td>'
-        f'<td><div class="bar"><i style="width:'
-        f'{int((b.get("done", 0) / b["total"]) * 100) if b.get("total") else 0}%"></i></div></td>'
+        f'<td>{progress_bar(b.get("done", 0), b.get("total", 0))}</td>'
         f'<td class="muted">{esc(b.get("latest") or "")}</td></tr>'
         for b in batches
     )
@@ -745,7 +836,10 @@ def render_batches(batches: Sequence[Mapping[str, Any]]) -> str:
             'who to call.</p>'
             "<table><tr><th>Scan</th><th>Companies</th><th>Checked</th>"
             "<th>Running</th><th>Waiting</th><th>Progress</th><th>Last activity</th></tr>"
-            f"{rows or '<tr><td colspan=7 class=muted>No scans yet.</td></tr>'}</table>")
+            + (rows or '<tr><td colspan=7 class=muted>No scans yet. '
+                       '<a href="/console">Start one</a>, it takes a couple of '
+                       'minutes for a small city.</td></tr>')
+            + "</table>")
     return shell("Results", body, active="batches")
 
 

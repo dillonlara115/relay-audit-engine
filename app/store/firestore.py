@@ -138,6 +138,11 @@ def get_batch(batch_id: str) -> dict[str, Any] | None:
     return snap.to_dict() if snap.exists else None
 
 
+def get_market(market_id: str) -> dict[str, Any] | None:
+    snap = get_client().collection(MARKETS).document(market_id).get()
+    return snap.to_dict() if snap.exists else None
+
+
 # ── Prospects ─────────────────────────────────────────────────────────────────
 
 
@@ -423,11 +428,16 @@ def get_draft_findings(audit_id: str) -> dict[str, Any] | None:
 
 
 def batch_overview(days: int = 14) -> list[dict[str, Any]]:
-    """Recent batches aggregated from the task ledger.
+    """Recent batches aggregated from the task ledger, labeled with the metro
+    and start date when we know them.
 
     The ledger is the truth about progress: the batches collection only counts
     what a sweep created, and a batch dispatched by the console or the
-    coordinator never appears there at all.
+    coordinator never appears there at all. So progress comes from the ledger
+    and the label is a best-effort lookup on top of it: a batch a sweep
+    created has a market and a created_at on its own document; a batch built
+    by hand (the CLI, a smoke test) has neither, and falls back to its raw id,
+    same as before this label existed.
     """
     from app.leases import AUDIT_TASKS
 
@@ -452,6 +462,21 @@ def batch_overview(days: int = 14) -> list[dict[str, Any]]:
         if updated and (row["latest"] is None or updated > row["latest"]):
             row["latest"] = updated
     rows = sorted(grouped.values(), key=lambda r: r["latest"] or utcnow(), reverse=True)
+
+    _market_names: dict[str, str] = {}
+    for row in rows:
+        batch_doc = get_batch(row["batch_id"])
+        row["market"] = None
+        row["started_at"] = None
+        if batch_doc:
+            row["started_at"] = batch_doc.get("created_at")
+            market_id = batch_doc.get("market_id")
+            if market_id:
+                if market_id not in _market_names:
+                    market_doc = get_market(market_id)
+                    _market_names[market_id] = (market_doc or {}).get("name") or market_id
+                row["market"] = _market_names[market_id]
+
     for row in rows:
         row["latest_at"] = row["latest"]
         row["latest"] = row["latest"].strftime("%b %d %H:%M") if row["latest"] else ""

@@ -270,7 +270,10 @@ def test_dashboard_templates_carry_no_forbidden_dash():
                          {"Leaky Bucket": 1})
     assert not contains_forbidden_dash(overview)
     assert not contains_forbidden_dash(batch)
-    assert "<script>" not in batch, "names are escaped"
+    # The page legitimately carries a <script> tag now (the submit guard), so
+    # the real assertion is that the business name specifically was escaped,
+    # not that the substring never appears anywhere on the page.
+    assert "Peak <script>" not in batch, "the raw name must not appear unescaped"
     assert "&lt;script&gt;" in batch
 
 

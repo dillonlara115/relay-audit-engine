@@ -18,6 +18,8 @@ from app.console.views import (
     SEGMENT_COLORS,
     chip,
     esc,
+    progress_bar,
+    scan_label,
     score_headers,
     score_legend,
     shell,
@@ -27,23 +29,18 @@ from app.console.views import (
 __all__ = ["SEGMENT_COLORS", "render_overview", "render_batch"]
 
 
-def _progress(done: int, total: int) -> str:
-    pct = int((done / total) * 100) if total else 0
-    return f'<div class="bar"><i style="width:{pct}%"></i></div>'
-
-
 # ── Screen one: every scan ────────────────────────────────────────────────────
 
 
 def render_overview(batches: Sequence[Mapping[str, Any]]) -> str:
     rows = "".join(
-        f'<tr><td><a href="/dashboard/{esc(b["batch_id"])}">{esc(b["batch_id"])}</a></td>'
+        f'<tr><td><a href="/dashboard/{esc(b["batch_id"])}">{scan_label(b)}</a></td>'
         f'<td class="num">{b.get("total", 0)}</td>'
         f'<td class="num">{b.get("done", 0)}</td>'
         f'<td class="num">{b.get("running", 0)}</td>'
         f'<td class="num">{b.get("pending", 0)}</td>'
         f'<td class="num">{b.get("failed", 0)}</td>'
-        f'<td>{_progress(b.get("done", 0), b.get("total", 0))}</td>'
+        f'<td>{progress_bar(b.get("done", 0), b.get("total", 0))}</td>'
         f'<td class="muted">{esc(b.get("latest") or "")}</td></tr>'
         for b in batches
     )
