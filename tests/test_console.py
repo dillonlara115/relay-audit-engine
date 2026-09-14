@@ -745,3 +745,60 @@ def test_batch_overview_falls_back_gracefully_with_no_batch_document(monkeypatch
     rows = store.batch_overview()
     assert rows[0]["market"] is None
     assert rows[0]["started_at"] is None
+
+
+# ── findings that predate their audit ─────────────────────────────────────────
+#
+# An audit document is keyed by prospect and batch, so re-checking a site
+# overwrites its results in place while the findings keep text drafted against
+# the older ones. A contractor who fixed the very thing we named would still
+# read it named.
+
+
+def _dt(day):
+    from datetime import datetime, timezone
+    return datetime(2026, 9, day, tzinfo=timezone.utc)
+
+
+def test_findings_drafted_before_the_latest_check_are_flagged():
+    from app.console.views import findings_predate_audit
+
+    assert findings_predate_audit({"drafted_at": _dt(1)}, {"started_at": _dt(5)})
+
+
+def test_findings_drafted_after_the_check_are_current():
+    from app.console.views import findings_predate_audit
+
+    assert not findings_predate_audit({"drafted_at": _dt(5)}, {"started_at": _dt(1)})
+
+
+def test_a_missing_timestamp_never_raises_a_false_alarm():
+    from app.console.views import findings_predate_audit
+
+    assert not findings_predate_audit({}, {"started_at": _dt(5)})
+    assert not findings_predate_audit({"drafted_at": _dt(1)}, {})
+    assert not findings_predate_audit(None, {"started_at": _dt(5)})
+
+
+def test_mixed_naive_and_aware_timestamps_do_not_raise():
+    """Firestore hands back tz-aware values; a fixture or an older document may
+    not. Comparing them raises, and a crash here would take out the whole audit
+    screen for a warning."""
+    from datetime import datetime
+
+    from app.console.views import findings_predate_audit
+
+    assert not findings_predate_audit(
+        {"drafted_at": datetime(2026, 9, 1)}, {"started_at": _dt(5)})
+
+
+def test_the_stale_warning_reaches_the_screen():
+    page = views.render_audit(
+        audit={"audit_id": "a1", "scores": {}, "started_at": _dt(5)},
+        prospect={"business_name": "Peak"}, checks=[], definitions={},
+        findings={"status": "approved", "drafted_at": _dt(1),
+                  "findings": [{"ordinal": 1, "what_we_saw": "x",
+                                "what_it_means": "y", "what_fixing_takes": "z"}]},
+        evidence=[], csrf="t",
+    )
+    assert "checked again after these were written" in page

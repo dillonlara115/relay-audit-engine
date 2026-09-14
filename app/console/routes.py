@@ -189,8 +189,13 @@ def _assemble_batch(
 
 
 @router.get("/batches")
-async def batches_screen(request: Request) -> Response:
-    return _page(views.render_batches(await asyncio.to_thread(store.batch_overview)))
+async def batches_screen(request: Request, days: int = 14) -> Response:
+    """Recent scans. The window is adjustable because a call list does not stop
+    being useful on day fifteen, and the default used to hide older ones with
+    no way to reach them from the screen."""
+    days = max(1, min(days, 3650))
+    return _page(views.render_batches(
+        await asyncio.to_thread(store.batch_overview, days), days=days))
 
 
 @router.get("/batches/{batch_id}")

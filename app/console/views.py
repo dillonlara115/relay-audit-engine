@@ -131,6 +131,13 @@ tr:hover td { background:#faf7f2; }
 th[data-sort] { cursor:pointer; user-select:none; }
 th[data-sort]:hover { color:var(--ember); }
 
+.windows { margin:0 0 14px; font-size:.9rem; color:var(--ink2); }
+.windows a { display:inline-block; padding:3px 10px; margin-left:6px;
+             border:1px solid var(--line); border-radius:999px; background:var(--panel); }
+.windows a.on { background:var(--orange); color:var(--asphalt); font-weight:600;
+                border-color:var(--orange); }
+.windows a:hover { text-decoration:none; border-color:var(--ember); }
+
 .chip { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
 .chip i { width:10px; height:10px; border-radius:3px; display:inline-block; }
 .tag { font-size:.75rem; padding:1px 8px; border-radius:10px;
@@ -822,7 +829,11 @@ faster and easier conversation than one that needs everything rebuilt.
     return shell(f"Call list {batch_id}", body, active="batches")
 
 
-def render_batches(batches: Sequence[Mapping[str, Any]]) -> str:
+def render_batches(batches: Sequence[Mapping[str, Any]], *, days: int = 14) -> str:
+    windows = "".join(
+        f'<a class="{"on" if d == days else ""}" href="/console/batches?days={d}">{label}</a>'
+        for d, label in ((14, "2 weeks"), (90, "3 months"), (365, "a year"), (3650, "everything"))
+    )
     rows = "".join(
         f'<tr><td><a href="/console/batches/{esc(b["batch_id"])}">{scan_label(b)}</a></td>'
         f'<td class="num">{b.get("total", 0)}</td><td class="num">{b.get("done", 0)}</td>'
@@ -831,14 +842,16 @@ def render_batches(batches: Sequence[Mapping[str, Any]]) -> str:
         f'<td class="muted">{esc(b.get("latest") or "")}</td></tr>'
         for b in batches
     )
+    empty = ('<tr><td colspan=7 class=muted>No scans in this stretch. '
+             '<a href="/console">Start one</a>, it takes a couple of minutes for a '
+             'small city. If you are looking for an older scan, widen the range '
+             'above.</td></tr>')
     body = ('<div class="topbar"><h1>Results</h1></div>'
-            '<p class="lede">Every scan from the last two weeks. Open one to see '
-            'who to call.</p>'
+            '<p class="lede">Open a scan to see who to call.</p>'
+            f'<div class="windows">Showing {windows}</div>'
             "<table><tr><th>Scan</th><th>Companies</th><th>Checked</th>"
             "<th>Running</th><th>Waiting</th><th>Progress</th><th>Last activity</th></tr>"
-            + (rows or '<tr><td colspan=7 class=muted>No scans yet. '
-                       '<a href="/console">Start one</a>, it takes a couple of '
-                       'minutes for a small city.</td></tr>')
+            + (rows or empty)
             + "</table>")
     return shell("Results", body, active="batches")
 
@@ -846,6 +859,27 @@ def render_batches(batches: Sequence[Mapping[str, Any]]) -> str:
 # ── Audit detail, where approval happens ──────────────────────────────────────
 
 _STATUS_CLASS = {"pass": "pass", "fail": "fail", "skipped": "skip", "error": "fail"}
+
+
+def findings_predate_audit(findings: Mapping[str, Any] | None,
+                           audit: Mapping[str, Any]) -> bool:
+    """Whether this site was checked again after its findings were written.
+
+    An audit document is keyed by prospect and batch, so re-checking a site
+    overwrites its results in place while the findings keep the text drafted
+    against the older ones. A contractor who fixed the very thing we named
+    would still read it named, which is the one mistake this report cannot
+    afford. Comparing the two timestamps is enough to say so out loud.
+    """
+    drafted_at = (findings or {}).get("drafted_at")
+    started_at = audit.get("started_at")
+    if drafted_at is None or started_at is None:
+        return False
+    try:
+        return started_at > drafted_at
+    except TypeError:
+        # Mixed tz-aware and naive timestamps: not worth a false warning.
+        return False
 
 
 def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
@@ -899,6 +933,11 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
             for f in findings.get("findings") or []
         )
         warn = ""
+        if findings_predate_audit(findings, audit):
+            warn += ('<div class="banner">This site was checked again after these '
+                     'were written, so they describe what we saw last time. Anything '
+                     'he has fixed since would still be named here. Write them again '
+                     'before sending this to him.</div>')
         if findings.get("needs_review"):
             warn = ('<div class="banner">Read this before approving. Some wording may '
                     'describe how we found the problem rather than what the owner would '
