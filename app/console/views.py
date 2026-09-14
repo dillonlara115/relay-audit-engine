@@ -13,9 +13,14 @@ import re
 from typing import Any, Mapping, Sequence
 
 
-# Segment chips, validated against the chalk surface with the palette
-# validator: worst adjacent pair CVD delta E 12.8, normal vision 15.4. Identity
-# is never colour alone, every chip carries its label.
+# Segment chips, validated with the palette validator: worst adjacent pair CVD
+# delta E 12.8, normal vision 15.4. Identity is never colour alone, every chip
+# carries its label.
+#
+# Re-measured against the lighter field. Every dot improved, and Leaky Bucket's
+# orange went from 2.67:1 on the old beige, which was under the 3:1 floor for
+# a non-text component, to 3.05:1 on the field and 3.32:1 on a white panel.
+# Lightening the page fixed a contrast failure that had been sitting there.
 SEGMENT_COLORS = {
     "Leaky Bucket": "#F25C1F",
     "Invisible Pro": "#1F6BF2",
@@ -25,19 +30,25 @@ SEGMENT_COLORS = {
 }
 
 _CSS = """
-:root { --asphalt:#16120E; --chalk:#ECE6DC; --orange:#F25C1F; --line:#dcd5c8;
-        --ink2:#5d564d; --panel:#fff;
-        /* --orange is the brand fill: buttons, bars, chips, the active nav
-           pill. At 2.67:1 on chalk and 3.32:1 on white it fails WCAG AA as
-           text, so every link and every other text-orange use --ember
-           instead, a darker step on the same hue: 4.72:1 on chalk, 5.86:1 on
-           white. Two roles for one brand color, not one color doing both. */
+:root { --asphalt:#16120E; --field:#F7F5F2; --chalk:#ECE6DC; --orange:#F25C1F;
+        --line:#E6E2DC; --ink2:#5d564d; --panel:#fff; --rail-hover:#F2EFEA;
+        /* The page field is a near-white with a trace of warmth left in it,
+           not the beige it used to be. Lightening it cost nothing and paid
+           for itself in contrast: asphalt went 15.01 to 17.12, ember 4.72 to
+           5.38, ink2 5.83 to 6.65, all measured against the new field.
+
+           --orange is the brand fill and nothing else: the active nav item
+           and the primary button. As text it is 3.05:1 on this field and
+           3.32:1 on white, both under the 4.5 floor, so every link and every
+           other text-orange uses --ember, a darker step on the same hue at
+           5.38:1 on the field and 5.86:1 on white. Two roles for one brand
+           color, not one color doing both. */
         --ember:#B0400E;
-        --shadow: 0 1px 2px rgba(22,18,14,.05), 0 6px 18px rgba(22,18,14,.06);
-        --shadow-soft: 0 1px 2px rgba(22,18,14,.04), 0 3px 10px rgba(22,18,14,.05);
+        --shadow: 0 1px 2px rgba(22,18,14,.04), 0 4px 14px rgba(22,18,14,.05);
+        --shadow-soft: 0 1px 2px rgba(22,18,14,.03), 0 2px 8px rgba(22,18,14,.04);
         --focus-ring: 0 0 0 3px rgba(176,64,14,.35); }
 * { margin:0; padding:0; box-sizing:border-box; }
-body { background:var(--chalk); color:var(--asphalt);
+body { background:var(--field); color:var(--asphalt);
        font-family:'Work Sans',sans-serif; font-size:16px; line-height:1.55; }
 a { color:var(--ember); text-decoration:none; }
 a:hover { text-decoration:underline; color:var(--orange); }
@@ -50,23 +61,40 @@ h3 { font-size:1.1rem; margin:0 0 6px; }
 
 /* shell */
 .layout { display:flex; min-height:100vh; }
-.side { width:232px; flex:0 0 232px; background:var(--asphalt); color:var(--chalk);
+/* The rail reads as an edge of the page rather than a slab laid on top of
+   it: white against the warm field, held by one hairline. It used to be a
+   full height near-black bar carrying a grid texture, which put the heaviest
+   thing on screen next to the lightest and made every screen feel darker
+   than its content actually was. */
+.side { width:232px; flex:0 0 232px; background:var(--panel); color:var(--asphalt);
         padding:22px 16px; position:sticky; top:0; height:100vh;
-        background-image:
-          repeating-linear-gradient(0deg, rgba(236,230,220,.05) 0, rgba(236,230,220,.05) 1px, transparent 1px, transparent 24px),
-          repeating-linear-gradient(90deg, rgba(236,230,220,.05) 0, rgba(236,230,220,.05) 1px, transparent 1px, transparent 24px); }
-.side > * { position:relative; }  /* content sits above the grid, not blended into it */
+        border-right:1px solid var(--line); }
 .side .brand { display:block; font-family:'Barlow Condensed',sans-serif; font-weight:600;
-               font-size:1.35rem; letter-spacing:.04em; color:var(--orange);
+               font-size:1.35rem; letter-spacing:.04em; color:var(--ember);
                text-transform:uppercase; line-height:1.1; margin-bottom:4px; }
-.side .brand:hover { text-decoration:none; opacity:.9; }
-.side .tag { font-size:.78rem; color:#9a9186; margin-bottom:22px; display:block; }
-.side nav a { display:block; padding:9px 12px; border-radius:7px; color:var(--chalk);
-              font-size:.95rem; margin-bottom:3px; }
-.side nav a:hover { background:#2a241d; text-decoration:none; }
-.side nav a.on { background:var(--orange); color:var(--asphalt); font-weight:600; }  /* asphalt on orange: 5.61:1. White on orange at this size is 3.32:1, below AA. */
+/* --ember, not --orange. At 21.6px semibold the brand orange is 3.32:1 on
+   white, which clears AA only by counting as large text. The wordmark is the
+   one piece of type on every screen, so it takes the colour that passes
+   outright rather than the one that passes on a technicality. */
+.side .brand:hover { text-decoration:none; opacity:.85; }
+/* The tagline is not one of the status pills. Without this reset the global
+   .tag rule paints a black lozenge under the wordmark, since .side .tag only
+   ever overrode the colour and let the background through. */
+.side .tag { font-size:.78rem; color:var(--ink2); margin-bottom:22px; display:block;
+             background:none; padding:0; border-radius:0; }
+.side nav a { display:block; padding:9px 12px; border-radius:8px; color:var(--asphalt);
+              font-size:.95rem; margin-bottom:2px; border-left:3px solid transparent; }
+.side nav a:hover { background:var(--rail-hover); text-decoration:none; }
+/* A solid safety-orange block 232px wide was the loudest thing on a page whose
+   whole point is to be quiet, and it competed with the buttons, which are the
+   only things anyone should be drawn to click. The current page is marked with
+   a tint and a solid orange edge instead: same colour, a tenth of the area.
+   Text is --ember on the tint at 5.07:1, and the mark is never colour alone,
+   since the label is also the only one set in semibold. */
+.side nav a.on { background:#FDEBE4; color:var(--ember); font-weight:600;
+                 border-left-color:var(--orange); }
 .side .foot { position:absolute; bottom:20px; left:16px; right:16px;
-              font-size:.76rem; color:#8d857a; line-height:1.4; }
+              font-size:.76rem; color:var(--ink2); line-height:1.4; }
 .main { flex:1; min-width:0; padding:26px 30px 70px; }
 .topbar { display:flex; justify-content:space-between; align-items:baseline;
           gap:16px; margin-bottom:6px; flex-wrap:wrap; }
@@ -99,7 +127,10 @@ textarea { min-height:86px; resize:vertical; }
 button { font-family:'Barlow Condensed',sans-serif; font-weight:600; letter-spacing:.03em;
          font-size:1.02rem; background:var(--orange); color:var(--asphalt); border:0;
          border-radius:9px; padding:10px 20px; cursor:pointer; margin-top:14px;
-         box-shadow:0 1px 2px rgba(22,18,14,.12), 0 4px 10px rgba(242,92,31,.25); }
+         box-shadow:var(--shadow-soft); }
+/* The orange glow that used to sit under every button read as a third
+   brand colour spilling onto the field. The button is already the only
+   orange object on most screens; it does not need a halo to be found. */
 button:hover { filter:brightness(1.05); }
 button:disabled { filter:none; opacity:.6; cursor:not-allowed;
                   box-shadow:var(--shadow-soft); }
@@ -119,15 +150,19 @@ form.inline button { margin-top:0; padding:5px 12px; font-size:.85rem; }
               box-shadow:var(--shadow); margin-bottom:14px; }
 table { width:100%; min-width:640px; border-collapse:separate; border-spacing:0;
         background:var(--panel); }
+/* A header row set in the field colour with dark type, rather than a solid
+   black bar. On a call list of forty companies the bar was the first thing
+   the eye landed on, and the names are the thing worth reading. */
 th { font-family:'Barlow Condensed',sans-serif; font-weight:600; text-align:left;
-     font-size:.9rem; letter-spacing:.03em; padding:10px 12px;
-     background:var(--asphalt); color:var(--chalk); }
+     font-size:.9rem; letter-spacing:.03em; padding:11px 12px;
+     background:var(--field); color:var(--asphalt);
+     border-bottom:1px solid var(--line); }
 th .sub { display:block; font-family:'Work Sans',sans-serif; font-weight:400;
-          font-size:.71rem; color:#b6ada1; letter-spacing:0; margin-top:1px; }
+          font-size:.71rem; color:var(--ink2); letter-spacing:0; margin-top:1px; }
 td { padding:9px 12px; border-top:1px solid var(--line); vertical-align:top; font-size:.95rem; }
 td.num { text-align:right; font-variant-numeric:tabular-nums; }
 td.tel { white-space:nowrap; }
-tr:hover td { background:#faf7f2; }
+tr:hover td { background:var(--field); }
 th[data-sort] { cursor:pointer; user-select:none; }
 th[data-sort]:hover { color:var(--ember); }
 
@@ -143,7 +178,12 @@ th[data-sort]:hover { color:var(--ember); }
 .tag { font-size:.75rem; padding:1px 8px; border-radius:10px;
        background:var(--asphalt); color:var(--chalk); white-space:nowrap; }
 .tag.warn { background:#8a5a00; }
-.bar { height:8px; border-radius:4px; background:var(--line); overflow:hidden; min-width:80px; }
+/* The fill is 2.57:1 against its own track, under the 3:1 a non-text control
+   wants, and the two cannot be pulled further apart without taking the track
+   off the panel entirely. The hairline gives the track an edge instead, so
+   the empty part of the bar is still a visible object. */
+.bar { height:8px; border-radius:4px; background:var(--line); overflow:hidden;
+       min-width:80px; box-shadow:inset 0 0 0 1px rgba(22,18,14,.10); }
 .bar i { display:block; height:100%; background:var(--orange); }
 .bar.done i { background:#2E7D4F; }  /* a glance tells finished from still running */
 

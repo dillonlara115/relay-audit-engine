@@ -538,12 +538,18 @@ def test_links_render_in_ember_not_the_brand_fill_orange():
     assert "a { color:var(--orange)" not in page
 
 
-def test_the_active_nav_pill_and_running_status_use_readable_text():
-    """Both are white-on-orange at a size below the WCAG large-text threshold,
-    which measures 3.32:1. Both must use asphalt text instead."""
+def test_nothing_sets_small_text_on_a_solid_orange_fill():
+    """White on the brand orange is 3.32:1, and both of these sit below the
+    size that would let 3:1 count. The running pill keeps its orange fill and
+    takes asphalt text. The active nav item no longer has a solid fill at all:
+    it is a tint with --ember text at 5.07:1, marked by an orange edge."""
     page = views.render_run(csrf="t", markets=["X"], active_jobs=[], recent_batches=[])
-    assert ".side nav a.on { background:var(--orange); color:var(--asphalt)" in page
     assert ".status.running { background:var(--orange); color:var(--asphalt)" in page
+
+    nav_on = page.split(".side nav a.on")[1].split("}")[0]
+    assert "background:var(--orange)" not in nav_on, "a solid brand fill is back"
+    assert "color:var(--ember)" in nav_on
+    assert "border-left-color:var(--orange)" in nav_on, "the edge is what marks the page"
 
 
 # ── P1.1: double submit guard ─────────────────────────────────────────────────
@@ -652,9 +658,23 @@ def test_scan_label_escapes_the_market_name():
     assert "&lt;script&gt;" in labeled
 
 
-def test_the_sidebar_carries_a_subtle_texture_not_a_flat_fill():
+def test_the_sidebar_is_a_light_rail_held_by_one_hairline():
+    """The rail used to be a near-black bar carrying a grid texture at 5%
+    chalk, which only reads on a dark surface. It is now white against the
+    warm field, so the texture is gone and a single border does the work."""
     page = views.render_run(csrf="t", markets=["X"], active_jobs=[], recent_batches=[])
-    assert "repeating-linear-gradient" in page
+    assert "repeating-linear-gradient" not in page, "texture belonged to the dark rail"
+    assert "border-right:1px solid var(--line)" in page
+
+
+def test_the_wordmark_does_not_lean_on_the_large_text_exemption():
+    """Brand orange is 3.32:1 on white, which clears AA only by counting as
+    large text. The wordmark appears on every screen, so it takes --ember."""
+    page = views.render_run(csrf="t", markets=["X"], active_jobs=[], recent_batches=[])
+    assert ".side .brand" in page
+    brand = page.split(".side .brand")[1].split("}")[0]
+    assert "var(--ember)" in brand
+    assert "var(--orange)" not in brand
 
 
 def test_batch_overview_enriches_rows_with_market_and_start_date(monkeypatch):
