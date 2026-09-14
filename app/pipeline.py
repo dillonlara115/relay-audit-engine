@@ -380,6 +380,30 @@ async def _measure_speed(crawl: SiteCrawl) -> PsiResult | None:
         return PsiResult(ok=False, url=target, error=f"{type(exc).__name__}: {exc}")
 
 
+async def _look_up_serp(prospect: Mapping[str, Any], market: Any) -> Any:
+    """The two defined searches, for F8, F9 and F12.
+
+    Deliberately independent of the crawl. A contractor whose site blocked us,
+    or timed out, still holds whatever rank he holds, and that is worth knowing
+    precisely when we could not read his site.
+    """
+    cfg = get_config()
+    if not cfg.dataforseo_login or not cfg.dataforseo_password:
+        return None
+    from app.tools.serp import look_up_prospect
+
+    try:
+        return await look_up_prospect(
+            website_url=prospect.get("website_url"),
+            city=str(prospect.get("city") or ""),
+            state=getattr(market, "state", None),
+        )
+    except Exception as exc:  # noqa: BLE001 - a provider fault skips its checks
+        from app.tools.serp import SerpFacts
+
+        return SerpFacts(ok=False, error=f"{type(exc).__name__}: {exc}"[:300])
+
+
 
 
 async def _render_form_page(crawl: SiteCrawl, site: "facts.SiteFacts") -> RenderResult | None:

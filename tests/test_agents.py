@@ -25,7 +25,8 @@ def test_the_audit_graph_is_the_spec_architecture():
     assert names == ["recon", "inspector", "score"]
     inspector = graph.sub_agents[1]
     assert isinstance(inspector, ParallelAgent)
-    assert sorted(a.name for a in inspector.sub_agents) == ["form_probe", "look", "speed"]
+    assert sorted(a.name for a in inspector.sub_agents) == [
+        "form_probe", "look", "serp", "speed"]
 
 
 def test_the_graph_builds_fresh_instances():

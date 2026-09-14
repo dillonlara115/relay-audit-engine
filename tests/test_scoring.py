@@ -296,7 +296,7 @@ def test_outcomes_from_skips_disabled_definitions():
     built = outcomes_from({}, CHECK_DEFINITIONS)
     codes = {o.code for o in built}
     assert "F7" in codes
-    assert "F8" not in codes, "SERP checks are disabled this week"
+    assert "F1" not in codes, "Places API exposes no claimed or verified field"
     assert len(built) == sum(1 for r in CHECK_DEFINITIONS if r["enabled"])
 
 

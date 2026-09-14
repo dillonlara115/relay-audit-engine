@@ -27,6 +27,24 @@ the one that loses jobs invisibly. A company that is easy to find but whose lead
 slip away (**Leaky Bucket**) ranks ahead of a company with a higher total score,
 because it is the faster, easier conversation.
 
+### The search checks need a provider
+
+Three of Found's checks read the search page itself rather than the contractor's
+site: **F8** map pack position, **F9** organic position, and **F12** whether one of
+his ads ran. They are worth 7 of Found's 25 enabled points, and they need
+`DATAFORSEO_LOGIN` and `DATAFORSEO_PASSWORD`.
+
+Without those credentials all three skip, which is correct (an unrun check is
+unknown, never a failure) but not free: 7 unmeasured points out of 25 is past the
+20 percent threshold, so **every Found section reads partial** and every audit
+carries an incomplete warning. Scores stay fair either way, because a section
+normalizes over what it actually measured, and a thin Found section never costs a
+prospect its segment. Only a thin Booked section does that.
+
+The definitions ship enabled, but the running system reads them from Firestore, so
+nothing changes in production until you provision the credentials and re-run
+`seed-checks`.
+
 Full criteria and thresholds: [`docs/found-to-booked-audit-spec.md`](docs/found-to-booked-audit-spec.md).
 Technical contract: [`docs/engine-spec.md`](docs/engine-spec.md).
 Working rules (never submit a form, no invented numbers, suppression before every
@@ -67,7 +85,7 @@ sweep_coordinator (LlmAgent)
   │   rank_call_list      tools, the coordinator's only way to affect anything
   └── audit_agent (SequentialAgent, fanned out per prospect over Pub/Sub)
         ├── recon                     robots → homepage → sitemap → key pages
-        ├── inspector (ParallelAgent) look (render + vision) | speed | form probe
+        ├── inspector (ParallelAgent) look (render + vision) | speed | serp | form probe
         └── score                     pure function over ~35 checks
 ```
 
@@ -94,11 +112,11 @@ an agent.
 ```
 app/
   agents/         audit_graph.py (the ADK graph), coordinator.py, vision.py, diagnostician.py
-  checks/         one function per check (base.py, onpage.py, rendered.py, speed.py, vision.py, booked.py)
+  checks/         one function per check (base.py, onpage.py, rendered.py, speed.py, vision.py, booked.py, serp.py)
   console/        the operator web app: routes.py, views.py, auth.py
   report/         the public one-page report + the read-only dashboard
   store/          Firestore access (firestore.py) and GCS evidence (evidence.py)
-  tools/          crawl.py, places.py, pagespeed.py, render.py, phones.py, pubsub.py
+  tools/          crawl.py, places.py, pagespeed.py, render.py, serp.py, phones.py, pubsub.py
   gate.py         the fit gate, a pure function
   scoring.py      the pure scoring function, 100% test coverage
   ranker.py       call-list ordering by segment, not raw score
@@ -109,7 +127,7 @@ app/
   cli.py          the operator CLI
 renderer/         the Playwright render service (Node)
 docs/             engine-spec.md, found-to-booked-audit-spec.md, architecture.png
-tests/            580 tests, no network calls, fixture-driven
+tests/            605 tests, no network calls, fixture-driven
 ```
 
 ## One-time Google Cloud setup
@@ -196,7 +214,13 @@ gcloud secrets create worker-shared-secret   --data-file=- <<< "$(python3 -c 'im
 gcloud secrets create console-password       --data-file=- <<< "a password you will type into a browser"
 gcloud secrets create report-ip-salt         --data-file=- <<< "$(python3 -c 'import secrets;print(secrets.token_urlsafe(24))')"
 
-for s in places-api-key renderer-shared-secret worker-shared-secret console-password report-ip-salt; do
+# The SERP provider, for F8, F9 and F12. Omit these two and those three checks
+# skip, which leaves every Found section partial. See "The search checks need a
+# provider" above.
+gcloud secrets create dataforseo-login    --data-file=- <<< "$YOUR_DATAFORSEO_LOGIN"
+gcloud secrets create dataforseo-password --data-file=- <<< "$YOUR_DATAFORSEO_PASSWORD"
+
+for s in places-api-key renderer-shared-secret worker-shared-secret console-password report-ip-salt dataforseo-login dataforseo-password; do
   gcloud secrets add-iam-policy-binding "$s" \
     --member="serviceAccount:relay-worker@$PROJECT_ID.iam.gserviceaccount.com" \
     --role=roles/secretmanager.secretAccessor
@@ -318,7 +342,7 @@ gcloud run deploy audit-worker --source . --region "$REGION" \
   --memory 1Gi --cpu 1 --min-instances 0 --max-instances 3 --concurrency 2 --timeout 900 \
   --allow-unauthenticated \
   --set-env-vars "GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_LOCATION=$REGION,VERTEX_MODEL_LOCATION=global,GEMINI_MODEL=gemini-3.5-flash,RENDERER_URL=$RENDERER_URL,PUBSUB_AUDIT_TOPIC=run-audit,PUBSUB_JOB_TOPIC=run-job,GCS_EVIDENCE_BUCKET=$PROJECT_ID-evidence" \
-  --set-secrets "GOOGLE_PLACES_API_KEY=places-api-key:latest,PAGESPEED_API_KEY=places-api-key:latest,RENDERER_SHARED_SECRET=renderer-shared-secret:latest,WORKER_SHARED_SECRET=worker-shared-secret:latest,REPORT_IP_SALT=report-ip-salt:latest,CONSOLE_PASSWORD=console-password:latest"
+  --set-secrets "GOOGLE_PLACES_API_KEY=places-api-key:latest,PAGESPEED_API_KEY=places-api-key:latest,RENDERER_SHARED_SECRET=renderer-shared-secret:latest,WORKER_SHARED_SECRET=worker-shared-secret:latest,REPORT_IP_SALT=report-ip-salt:latest,CONSOLE_PASSWORD=console-password:latest,DATAFORSEO_LOGIN=dataforseo-login:latest,DATAFORSEO_PASSWORD=dataforseo-password:latest"
 
 WORKER_URL=$(gcloud run services describe audit-worker --region "$REGION" --format='value(status.url)')
 ```

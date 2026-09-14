@@ -78,6 +78,8 @@ class Config:
     places_api_key: str = field(default_factory=lambda: _str("GOOGLE_PLACES_API_KEY"))
     pagespeed_api_key: str = field(default_factory=lambda: _str("PAGESPEED_API_KEY"))
     meta_ads_access_token: str = field(default_factory=lambda: _str("META_ADS_ACCESS_TOKEN"))
+    dataforseo_login: str = field(default_factory=lambda: _str("DATAFORSEO_LOGIN"))
+    dataforseo_password: str = field(default_factory=lambda: _str("DATAFORSEO_PASSWORD"))
 
     # Storage
     gcs_evidence_bucket: str = field(default_factory=lambda: _str("GCS_EVIDENCE_BUCKET"))
@@ -145,6 +147,8 @@ _ENV_NAME = {
     "places_api_key": "GOOGLE_PLACES_API_KEY",
     "pagespeed_api_key": "PAGESPEED_API_KEY",
     "meta_ads_access_token": "META_ADS_ACCESS_TOKEN",
+    "dataforseo_login": "DATAFORSEO_LOGIN",
+    "dataforseo_password": "DATAFORSEO_PASSWORD",
     "gcs_evidence_bucket": "GCS_EVIDENCE_BUCKET",
     "report_ip_salt": "REPORT_IP_SALT",
     "pubsub_audit_topic": "PUBSUB_AUDIT_TOPIC",

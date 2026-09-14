@@ -31,6 +31,7 @@ from app.checks import extract as facts
 from app.checks.base import AuditContext, run_checks, statuses
 from app.pipeline import (
     AUDIT_TIMEOUT_SECONDS,
+    _look_up_serp,
     _measure_speed,
     _read_homepage,
     _render_form_page,
@@ -146,6 +147,30 @@ class SpeedAgent(_InspectorBranch):
         return f"speed: score {psi.performance_score}, LCP {psi.lcp_ms and round(psi.lcp_ms)}ms"
 
 
+class SerpAgent(_InspectorBranch):
+    """The two defined searches: map pack, organic, and whether an ad ran.
+
+    The only branch that does not read the contractor's site. It asks where a
+    homeowner's search actually puts him, which is the question Found is named
+    for and the one his own pages cannot answer.
+    """
+
+    name: str = "serp"
+    description: str = "Map pack and organic position for the two defined searches."
+
+    async def _inspect(self, crawl: SiteCrawl, state: Any) -> Any:
+        return await _look_up_serp(state.get("prospect") or {}, state.get("market"))
+
+    def _describe(self, serp: Any) -> str:
+        if serp is None:
+            return "serp: not searched"
+        if not getattr(serp, "ok", False):
+            return f"serp: {getattr(serp, 'error', 'no result')}"
+        return (f"serp: map {serp.map_pack_rank or 'unranked'}, "
+                f"organic {serp.organic_rank or 'unranked'}, "
+                f"ads {'yes' if serp.paid else 'no'}")
+
+
 class FormProbeAgent(_InspectorBranch):
     name: str = "form_probe"
     description: str = "Renders the page carrying the lead form. Fills, never submits."
@@ -183,6 +208,7 @@ class ScoreAgent(BaseAgent):
             form_render=form_render,
             psi=state.get("psi"),
             vision=state.get("vision"),
+            serp=state.get("serp"),
         )
         definitions = state["definitions"]
         results = run_checks(audit_ctx, definitions)
@@ -220,8 +246,8 @@ def build_audit_agent() -> SequentialAgent:
     """
     inspector = ParallelAgent(
         name="inspector",
-        description="The three independent reads, fanned out.",
-        sub_agents=[LookAgent(), SpeedAgent(), FormProbeAgent()],
+        description="The independent reads, fanned out.",
+        sub_agents=[LookAgent(), SpeedAgent(), SerpAgent(), FormProbeAgent()],
     )
     return SequentialAgent(
         name="audit_agent",

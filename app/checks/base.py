@@ -61,6 +61,7 @@ class AuditContext:
     form_render: Any = None # tools.render.RenderResult, the page carrying the lead form
     psi: Any = None         # tools.pagespeed.PsiResult
     vision: Any = None
+    serp: Any = None        # tools.serp.SerpFacts
     ads: Mapping[str, Any] | None = None
 
     def field(self, name: str) -> Any:

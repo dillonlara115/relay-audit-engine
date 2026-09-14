@@ -47,7 +47,8 @@ def test_by_code_indexes_every_definition():
 
 
 def test_enabled_only_excludes_the_checks_we_are_not_running():
-    assert section_points(FOUND, enabled_only=True) == 18
+    # F8, F9 and F12 turned on when the SERP tool landed: 18 + 3 + 3 + 1.
+    assert section_points(FOUND, enabled_only=True) == 25
     assert section_points(CHOSEN, enabled_only=True) == 28  # C9 cut
     assert section_points(BOOKED, enabled_only=True) == 36  # B6 cut, see its disabled_reason
 
