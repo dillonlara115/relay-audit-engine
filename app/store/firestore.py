@@ -511,16 +511,47 @@ def set_contacts(place_id: str, contacts: Iterable[Mapping[str, Any]]) -> int:
 
     Replaces rather than merges: contacts are re-derived from every crawl, and
     merging would keep an address that has since come off the site.
+
+    `manual_contacts` is never touched here. An address a person hunted down,
+    after a reply said they had the wrong one, is worth more than anything on
+    the site and must survive the next re-audit.
     """
+    doc = get_client().collection(PROSPECTS).document(place_id)
+    snapshot = doc.get()
+    manual = (snapshot.to_dict() or {}).get("manual_contacts") or [] if snapshot.exists else []
+
     rows = [dict(_plain(c)) for c in contacts]
     payload: dict[str, Any] = {"contacts": rows, "contacts_checked_at": utcnow(),
                                "updated_at": utcnow()}
-    primary = next((r for r in rows if r.get("status") in ("valid", "risky")), None)
     # owner_email is what the suppression check and the publish gate read, so
-    # it only ever holds an address a human could actually write to.
+    # it only ever holds an address a human could actually write to. A manual
+    # address outranks every discovered one.
+    primary = (manual[0] if manual
+               else next((r for r in rows if r.get("status") in ("valid", "risky")), None))
     payload["owner_email"] = primary.get("email") if primary else firestore.DELETE_FIELD
-    get_client().collection(PROSPECTS).document(place_id).set(payload, merge=True)
+    doc.set(payload, merge=True)
     return len(rows)
+
+
+def add_manual_contact(place_id: str, email: str, *, note: str = "") -> str:
+    """Record an address a person supplied. Discovery never overwrites these.
+
+    Most recent first, so the newest correction wins `owner_email` without a
+    caller having to reorder anything.
+    """
+    from app.tools.contacts import normalize
+
+    clean = normalize(email)
+    if not clean:
+        raise ValueError(f"{email!r} is not a usable address")
+
+    doc = get_client().collection(PROSPECTS).document(place_id)
+    existing = [c for c in ((doc.get().to_dict() or {}).get("manual_contacts") or [])
+                if c.get("email") != clean]
+    row = {"email": clean, "source": "manual", "note": note, "added_at": utcnow()}
+    doc.set({"manual_contacts": [row, *existing], "owner_email": clean,
+             "updated_at": utcnow()}, merge=True)
+    return clean
 
 
 # ── Outreach sequences ────────────────────────────────────────────────────────

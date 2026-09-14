@@ -19,6 +19,7 @@ from app.outreach import (
     MAX_TOUCHES,
     MAYBE_LATER,
     NOT_INTERESTED,
+    OTHER,
     OUT_OF_OFFICE,
     PENDING,
     TOUCH_GAPS,
@@ -30,7 +31,9 @@ from app.outreach import (
     apply_policy,
     due_after,
     open_sequence,
+    park_reason,
     policy_for,
+    record_reply,
     resume,
 )
 
@@ -169,8 +172,8 @@ def test_defer_pushes_the_next_touch_out_from_the_reply():
     assert seq.status == ACTIVE
 
 
-def test_needs_contact_parks_the_sequence_without_closing_it():
-    seq = apply_policy(sent_through(1), WRONG_PERSON, ReplyPolicy(needs_contact=True),
+def test_needs_human_parks_the_sequence_without_closing_it():
+    seq = apply_policy(sent_through(1), WRONG_PERSON, ReplyPolicy(needs_human=True),
                        at=DAY0 + days(1))
     assert seq.status == WAITING
     assert seq.next_due_at is None
@@ -178,7 +181,7 @@ def test_needs_contact_parks_the_sequence_without_closing_it():
 
 
 def test_a_parked_sequence_resumes_when_a_human_supplies_a_contact():
-    seq = apply_policy(sent_through(1), WRONG_PERSON, ReplyPolicy(needs_contact=True),
+    seq = apply_policy(sent_through(1), WRONG_PERSON, ReplyPolicy(needs_human=True),
                        at=DAY0 + days(1))
     back = resume(seq, now=DAY0 + days(5))
     assert back.status == ACTIVE
@@ -190,9 +193,9 @@ def test_resume_does_nothing_to_a_sequence_that_is_not_parked():
     assert resume(seq, now=DAY0) == seq
 
 
-def test_suppress_beats_needs_contact():
+def test_suppress_beats_needs_human():
     seq = apply_policy(sent_through(1), WRONG_PERSON,
-                       ReplyPolicy(suppress=True, needs_contact=True), at=DAY0)
+                       ReplyPolicy(suppress=True, needs_human=True), at=DAY0)
     assert seq.status == CLOSED
 
 
@@ -211,13 +214,82 @@ def test_an_unsent_sequence_writes_no_null_last_sent_at():
     assert "last_intent" not in row
 
 
-# ── the open decision ─────────────────────────────────────────────────────────
+# ── the policy table ──────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("intent", [INTERESTED, MAYBE_LATER, WRONG_PERSON,
-                                    NOT_INTERESTED, OUT_OF_OFFICE])
-def test_policy_for_is_still_unset(intent):
-    """Fails loudly rather than defaulting, so the decision cannot be skipped
-    by accident. Delete this test when the policy table is filled in."""
-    with pytest.raises(NotImplementedError):
-        policy_for(intent)
+@pytest.mark.parametrize("intent", list(INTENTS := (
+    "interested", "maybe_later", "wrong_person",
+    "not_interested", "out_of_office", "other")))
+def test_every_intent_has_a_policy(intent):
+    assert policy_for(intent) is not None
+
+
+def test_an_unclassifiable_reply_stops_for_a_human_rather_than_continuing():
+    """The one outcome that is certainly wrong is carrying on blind."""
+    seq, policy = record_reply(sent_through(1), "something nobody anticipated",
+                               at=DAY0 + days(1))
+    assert policy.needs_human is True
+    assert policy.burn_touch is False
+    assert seq.status == WAITING
+
+
+def test_interested_stops_the_sequence_without_suppressing():
+    """He is a call to make, not a no. Suppressing would block every later draft."""
+    seq, policy = record_reply(sent_through(1), INTERESTED, at=DAY0 + days(1))
+    assert seq.status == CLOSED
+    assert policy.suppress is False
+
+
+def test_not_interested_suppresses_permanently():
+    seq, policy = record_reply(sent_through(1), NOT_INTERESTED, at=DAY0 + days(1))
+    assert policy.suppress is True
+    assert seq.status == CLOSED
+
+
+def test_maybe_later_closes_and_schedules_a_fresh_look():
+    """Resuming in ninety days would send a finding off a stale audit."""
+    at = DAY0 + days(2)
+    seq, policy = record_reply(sent_through(1), MAYBE_LATER, at=at)
+    assert seq.status == CLOSED
+    assert seq.next_due_at is None
+    assert seq.revisit_at == at + days(90)
+
+
+def test_a_suppressed_prospect_gets_no_revisit_date():
+    """Coming back to someone who said no would be the whole point of rule 3."""
+    seq, _ = record_reply(sent_through(1), NOT_INTERESTED, at=DAY0)
+    assert seq.revisit_at is None
+
+
+def test_wrong_person_parks_without_suppressing_the_forwarder():
+    before = sent_through(2)
+    seq, policy = record_reply(before, WRONG_PERSON, at=DAY0 + days(4))
+    assert seq.status == WAITING
+    assert policy.suppress is False
+    assert seq.touch_count == before.touch_count - 1   # it reached nobody deciding
+    assert park_reason(seq) == "needs a new contact"
+
+
+def test_out_of_office_costs_nothing_and_waits_a_week():
+    before = sent_through(2)
+    at = DAY0 + days(4)
+    seq, _ = record_reply(before, OUT_OF_OFFICE, at=at)
+    assert seq.touch_count == before.touch_count - 1
+    assert seq.next_due_at == at + days(7)
+    assert seq.status == ACTIVE
+
+
+def test_an_out_of_office_cannot_consume_the_sequence():
+    """Four auto-responders in a row must not spend all four touches."""
+    seq = sent_through(1)
+    for i in range(4):
+        seq, _ = record_reply(seq, OUT_OF_OFFICE, at=DAY0 + days(i + 1))
+        seq = advance(seq, sent_at=seq.next_due_at)
+    assert seq.touch_count == 1
+    assert seq.is_open
+
+
+def test_park_reason_distinguishes_the_two_ways_a_sequence_stalls():
+    wrong, _ = record_reply(sent_through(1), WRONG_PERSON, at=DAY0)
+    other, _ = record_reply(sent_through(1), OTHER, at=DAY0)
+    assert park_reason(wrong) != park_reason(other)

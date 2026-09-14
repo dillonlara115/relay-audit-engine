@@ -464,7 +464,7 @@ def outreach_cell(sequence: Mapping[str, Any] | None, *, prospect_id: str,
                 reason = outreach.INTENT_LABELS.get(seq.last_intent, seq.last_intent)
             return f'<span class="muted">{esc(reason)}</span>'
         if seq.status == outreach.WAITING:
-            return '<span class="tag warn">needs a new contact</span>'
+            return f'<span class="tag warn">{esc(outreach.park_reason(seq))}</span>'
         show_button = seq.is_open
         if seq.touch_count:
             due = seq.next_due_at.strftime("%b %d") if seq.next_due_at else ""

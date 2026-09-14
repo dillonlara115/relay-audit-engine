@@ -153,7 +153,7 @@ async def gate_one(
     """Crawl what exists, evaluate the gate, write the verdict."""
     signals: SiteSignals | None = None
     crawl_error: str | None = None
-    contacts: list[dict[str, Any]] = []
+    contacts: list[dict[str, Any]] | None = None
 
     if record.website_url:
         crawl, crawl_error = await _crawl_for_gate(crawler, record.website_url)
@@ -199,7 +199,7 @@ async def gate_one(
             site_fields["incumbent_agency"] = verdict.incumbent_agency
         if site_fields:
             await asyncio.to_thread(store.upsert_prospect, record.place_id, site_fields)
-        if contacts:
+        if contacts is not None:
             await asyncio.to_thread(store.set_contacts, record.place_id, contacts)
 
     return outcome
@@ -215,7 +215,7 @@ async def _contacts_for(crawl: SiteCrawl) -> list[dict[str, Any]]:
     """
     found = extract_contacts(crawl)
     if not found:
-        return []
+        return []   # ran, saw nothing. Distinct from never having run.
     if not get_config().verify_contacts:
         return [{**c.to_dict(), "status": "unknown", "reason": "Verification is off."}
                 for c in found]

@@ -149,6 +149,9 @@ prospects/{prospectId}
   site_phone, gbp_phone, address, city, state, lat, lng
   review_count, rating, first_review_at, latest_review_at
   owner_name, owner_email, incumbent_agency
+  contacts: [ {email, source, kind, own_domain, page_path, status, reason} ]
+  manual_contacts: [ {email, source, note, added_at} ]   # discovery never writes here
+  contacts_checked_at            # absent means discovery never ran, [] means it ran and found none
   gate_result, gate_reasons[]
   suppressed, suppressed_reason
   latest_audit_id, created_at, updated_at
@@ -179,7 +182,18 @@ suppressions/{id}
   match_value, reason, created_at
 
 outreach/{prospectId}
-  touches: [ {no, evidence_code, draft_body, sent_at, replied_at} ]
+  status: pending|active|waiting|closed
+  touch_count, last_sent_at, next_due_at, last_intent, closed_reason, revisit_at
+  audit_id
+  # status and next_due_at are denormalized onto the parent on purpose: "who is
+  # due today" has to be one indexed query, not a collection-group scan of every
+  # touch ever recorded.
+
+outreach/{prospectId}/touches/{touchId}
+  ordinal, sent_at, audit_id, channel, logged_via, recorded_at
+
+outreach/{prospectId}/replies/{replyId}
+  received_at, intent, excerpt, contact, recorded_at
 
 api_cache/{hash}
   provider, response, fetched_at, expires_at
@@ -189,6 +203,7 @@ api_cache/{hash}
 query rather than degrading and you will find out at the worst moment:
 - `audits`: `batch_id ASC, segment ASC, scores.booked ASC`
 - `prospects`: `market_id ASC, gate_result ASC, suppressed ASC`
+- `outreach`: `status ASC, next_due_at ASC`
 
 **Check definitions live in Firestore, not in code.** You will retune weights after
 the first batch. That should be a document edit, not a deploy. Checks return
@@ -303,13 +318,23 @@ Route: `/r/{slug}`, public, unauthenticated, unguessable 16-character slug.
 
 ## 9. Outreach
 
-`[after Aug 31]` for anything beyond drafting.
+Full plan, including the sending phase and the decisions behind it:
+[`outreach-plan.md`](outreach-plan.md).
 
-- Suppression checked before every action, including draft generation. A suppressed
-  prospect cannot have a draft rendered.
+- Suppression checked before every action, including draft generation and logging a
+  touch. A suppressed prospect cannot have a draft rendered.
 - Touches at day 0, 3, 7, 14, each adding exactly one new finding. Then stop.
+  Enforced by `app/outreach.py`, which is pure and sends nothing.
+- A touch advances only when an operator says it was sent. Publishing a report is
+  not sending it, and with no email API in the path nothing can observe a send any
+  other way.
 - **No sending in v1.** No email API in the outreach path. Drafts are copied by a
   human. Do not automate a message whose reply rate is unknown.
+- When that changes, it changes here and in `CLAUDE.md` rule 4 in the same commit,
+  with the date and the reply rate that earned it. The entry condition is criteria
+  §7: thirty hand-sent and a known rate, which the touch ledger now computes.
+- Reply ingestion uses `gmail.readonly` and no wider scope. Reading transmits
+  nothing, and a token that cannot send enforces rule 4 harder than a test can.
 
 ---
 

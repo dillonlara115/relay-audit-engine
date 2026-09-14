@@ -47,6 +47,7 @@ nothing changes in production until you provision the credentials and re-run
 
 Full criteria and thresholds: [`docs/found-to-booked-audit-spec.md`](docs/found-to-booked-audit-spec.md).
 Technical contract: [`docs/engine-spec.md`](docs/engine-spec.md).
+Outreach, through sending: [`docs/outreach-plan.md`](docs/outreach-plan.md).
 Working rules (never submit a form, no invented numbers, suppression before every
 outreach action, and the rest): [`CLAUDE.md`](CLAUDE.md).
 
@@ -126,7 +127,7 @@ app/
   worker.py       the FastAPI app: Pub/Sub push handlers, console, dashboard, report
   cli.py          the operator CLI
 renderer/         the Playwright render service (Node)
-docs/             engine-spec.md, found-to-booked-audit-spec.md, architecture.png
+docs/             engine-spec.md, found-to-booked-audit-spec.md, outreach-plan.md, architecture.png
 tests/            605 tests, no network calls, fixture-driven
 ```
 

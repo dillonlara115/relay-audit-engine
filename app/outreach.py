@@ -36,8 +36,9 @@ MAYBE_LATER = "maybe_later"
 WRONG_PERSON = "wrong_person"
 NOT_INTERESTED = "not_interested"
 OUT_OF_OFFICE = "out_of_office"
+OTHER = "other"
 
-INTENTS = (INTERESTED, MAYBE_LATER, WRONG_PERSON, NOT_INTERESTED, OUT_OF_OFFICE)
+INTENTS = (INTERESTED, MAYBE_LATER, WRONG_PERSON, NOT_INTERESTED, OUT_OF_OFFICE, OTHER)
 
 INTENT_LABELS = {
     INTERESTED: "Interested",
@@ -45,6 +46,13 @@ INTENT_LABELS = {
     WRONG_PERSON: "Wrong person",
     NOT_INTERESTED: "Not interested",
     OUT_OF_OFFICE: "Out of office",
+    OTHER: "Needs a read",
+}
+
+# Why a sequence is parked, shown to the operator who has to unpark it.
+PARK_REASONS = {
+    WRONG_PERSON: "needs a new contact",
+    OTHER: "a reply to read",
 }
 
 # ── Cadence ───────────────────────────────────────────────────────────────────
@@ -79,7 +87,8 @@ class ReplyPolicy:
     suppress: bool = False       # permanent suppression, per criteria section 7
     burn_touch: bool = True      # False rewinds the counter so the touch resends
     defer_days: int | None = None  # push the next touch out by this many days
-    needs_contact: bool = False  # park it until a human supplies a new address
+    needs_human: bool = False    # park it until a person acts
+    revisit_days: int | None = None  # close now, but come back and re-audit then
 
 
 @dataclass(frozen=True)
@@ -94,6 +103,7 @@ class Sequence:
     next_due_at: datetime | None = None
     last_intent: str | None = None
     closed_reason: str | None = None
+    revisit_at: datetime | None = None
 
     @property
     def touches_left(self) -> int:
@@ -116,7 +126,8 @@ class Sequence:
             "status": self.status,
             "touch_count": self.touch_count,
         }
-        for key in ("audit_id", "last_sent_at", "next_due_at", "last_intent", "closed_reason"):
+        for key in ("audit_id", "last_sent_at", "next_due_at", "last_intent",
+                    "closed_reason", "revisit_at"):
             value = getattr(self, key)
             if value is not None:
                 row[key] = value
@@ -133,6 +144,7 @@ class Sequence:
             next_due_at=row.get("next_due_at"),
             last_intent=row.get("last_intent"),
             closed_reason=row.get("closed_reason"),
+            revisit_at=row.get("revisit_at"),
         )
 
 
@@ -192,9 +204,11 @@ def apply_policy(seq: Sequence, intent: str, policy: ReplyPolicy, *,
             seq, status=CLOSED, touch_count=count, next_due_at=None,
             last_intent=intent,
             closed_reason=("suppressed on reply" if policy.suppress else f"closed on {intent}"),
+            revisit_at=(at + timedelta(days=policy.revisit_days)
+                        if policy.revisit_days is not None and not policy.suppress else None),
         )
 
-    if policy.needs_contact:
+    if policy.needs_human:
         return replace(
             seq, status=WAITING, touch_count=count, next_due_at=None, last_intent=intent,
         )
@@ -225,8 +239,13 @@ def record_reply(seq: Sequence, intent: str, *, at: datetime | None = None
     return apply_policy(seq, intent, policy, at=at), policy
 
 
+def park_reason(seq: Sequence) -> str:
+    """Why this sequence is waiting, in the operator's words."""
+    return PARK_REASONS.get(seq.last_intent or "", "a person to look")
+
+
 def resume(seq: Sequence, *, now: datetime | None = None) -> Sequence:
-    """Un-park a WAITING sequence once a human has supplied a new contact."""
+    """Un-park a WAITING sequence once a human has dealt with whatever stopped it."""
     if seq.status != WAITING:
         return seq
     return replace(seq, status=ACTIVE, next_due_at=now or _utcnow())
@@ -234,32 +253,52 @@ def resume(seq: Sequence, *, now: datetime | None = None) -> Sequence:
 
 # ── The policy table ──────────────────────────────────────────────────────────
 #
-# TODO(dillon): this is the one decision in the ledger that is a judgement about
-# how roofing owners actually reply, not a fact about the code. Fill in the five
-# switches for each intent and delete the raise.
-#
-# `interested` and `not_interested` are obvious: close it, and close plus
-# suppress. The three in the middle are the real call:
-#
-#   MAYBE_LATER    "Not this quarter, ping me in Q3." Section 6 says four
-#                  touches and silence is a no, but this is not silence. Close
-#                  it and re-audit later, or keep it alive with defer_days set
-#                  to something long?
-#   WRONG_PERSON   "Forwarding this to our head of growth." Does the original
-#                  contact get suppressed, or just parked with needs_contact
-#                  while the sequence waits for the new name? Suppressing the
-#                  forwarder is safe but loses the thread.
-#   OUT_OF_OFFICE  Almost certainly should not burn a touch, which is what
-#                  burn_touch=False is for. Worth pairing with defer_days so it
-#                  does not resend into the same empty desk tomorrow.
-#
-# Every field defaults to the harmless value, so a policy you have not thought
-# about yet is `ReplyPolicy()`: keep going, change nothing.
+# What each kind of reply does to the sequence. Every field defaults to the
+# harmless value, so `ReplyPolicy()` means "keep going, change nothing", and a
+# policy below says only what it actually changes.
+
+
+POLICIES: dict[str, ReplyPolicy] = {
+    # A live conversation. Stop the sequence, do not suppress: he is not a no,
+    # he is a call to make, and suppressing him would block every later draft.
+    INTERESTED: ReplyPolicy(close=True),
+
+    # Criteria section 7: any request not to be contacted is permanent and
+    # immediate. Suppression matches on every identifier we hold, so this ends
+    # the prospect rather than the sequence.
+    NOT_INTERESTED: ReplyPolicy(close=True, suppress=True),
+
+    # "Not this quarter, ping me in Q3." Closing beats deferring. Resuming in
+    # ninety days would send touch three of four against an audit a quarter
+    # old, and the site may well have changed in between: a finding he has
+    # already fixed is worse than no contact at all. Close it, and mark it to
+    # be re-audited fresh, which starts a new sequence off current evidence.
+    MAYBE_LATER: ReplyPolicy(close=True, revisit_days=90),
+
+    # "Forwarding this to our head of growth." The touch never reached a
+    # decision maker, so it should not count against the four. The forwarder
+    # did us a favour and is not suppressed. The sequence parks until someone
+    # supplies the name it was forwarded to.
+    WRONG_PERSON: ReplyPolicy(burn_touch=False, needs_human=True),
+
+    # An auto-responder read by nobody. It does not burn a touch, and it waits
+    # a week rather than resending into the same empty desk tomorrow. A week
+    # is a guess: most out of office messages state a return date and none of
+    # them state it in a format worth parsing.
+    OUT_OF_OFFICE: ReplyPolicy(burn_touch=False, defer_days=7),
+
+    # Anything that fits none of the above. A person wrote back and we could
+    # not tell what they meant, so a person reads it. Continuing the sequence
+    # blind is the one outcome that is certainly wrong.
+    OTHER: ReplyPolicy(burn_touch=False, needs_human=True),
+}
 
 
 def policy_for(intent: str) -> ReplyPolicy:
-    """Map a reply intent to what it does to the sequence."""
-    raise NotImplementedError(
-        "policy_for is unset. See the TODO above: fill in the ReplyPolicy for "
-        f"each of {', '.join(INTENTS)}."
-    )
+    """Map a reply intent to what it does to the sequence.
+
+    An unrecognized intent is treated as OTHER rather than as nothing: a reply
+    we cannot classify still came from a person, and the safe answer is to stop
+    and let someone read it.
+    """
+    return POLICIES.get(intent, POLICIES[OTHER])

@@ -61,6 +61,9 @@ _ROLE_LOCAL = frozenset({
     "quote", "scheduling", "schedule", "billing", "accounting", "accounts",
     "team", "inquiries", "inquiry", "enquiries", "help", "mail", "email",
     "roofing", "roofs", "dispatch", "frontdesk", "reception",
+    # Observed on a live Colorado Springs sweep, both read as personal names.
+    "projectbids", "bids", "ask", "getaquote", "getstarted", "appointments",
+    "customercare", "newcustomer", "leads", "web", "website", "marketing",
 })
 
 KIND_PERSONAL = "personal"
