@@ -178,6 +178,10 @@ th[data-sort]:hover { color:var(--ember); }
 .tag { font-size:.75rem; padding:1px 8px; border-radius:10px;
        background:var(--asphalt); color:var(--chalk); white-space:nowrap; }
 .tag.warn { background:#8a5a00; }
+.tag.ok { background:#2E7D4F; }
+.tag.bad { background:#8d2f16; }
+.tag.dim { background:var(--line); color:var(--ink2); }
+.mail { word-break:break-all; font-size:.88rem; }
 /* The fill is 2.57:1 against its own track, under the 3:1 a non-text control
    wants, and the two cannot be pulled further apart without taking the track
    off the panel entirely. The hairline gives the track an edge instead, so
@@ -412,6 +416,70 @@ def score_legend(open_by_default: bool = False) -> str:
 
 def status_pill(status: str) -> str:
     return f'<span class="status {esc(status)}">{esc(status)}</span>'
+
+
+_CONTACT_TAG = {"valid": "ok", "risky": "warn", "invalid": "bad", "unknown": "dim"}
+
+# What the operator is told, not what the checker measured. "Shared mailbox" is
+# the consequence; "role address" is the mechanism.
+_CONTACT_LABEL = {
+    "valid": "good", "risky": "check first", "invalid": "bad", "unknown": "unchecked",
+}
+
+
+def contact_cell(contacts: Sequence[Mapping[str, Any]]) -> str:
+    """The best address we found, or an honest blank.
+
+    A prospect with no address is not a failure and is not styled like one. It
+    is a prospect whose site does not publish one, which is a thing to go and
+    find by hand.
+    """
+    usable = [c for c in contacts if c.get("status") in ("valid", "risky", "unknown")]
+    if not usable:
+        return '<span class="muted">none on the site</span>'
+    first = usable[0]
+    status = str(first.get("status") or "unknown")
+    extra = f'<br><span class="muted">+{len(usable) - 1} more</span>' if len(usable) > 1 else ""
+    return (f'<span class="mail">{esc(first.get("email"))}</span> '
+            f'<span class="tag {_CONTACT_TAG.get(status, "dim")}">'
+            f'{esc(_CONTACT_LABEL.get(status, status))}</span>{extra}')
+
+
+def outreach_cell(sequence: Mapping[str, Any] | None, *, prospect_id: str,
+                  audit_id: str | None, csrf: str, can_start: bool) -> str:
+    """Where this prospect sits in the four-touch sequence.
+
+    The button records a touch an operator already sent by hand. It is not a
+    send button and the route behind it transmits nothing.
+    """
+    from app import outreach
+
+    state = ""
+    show_button = can_start
+    if sequence:
+        seq = outreach.Sequence.from_dict(sequence)
+        if seq.status == outreach.CLOSED:
+            reason = seq.closed_reason or "finished"
+            if seq.last_intent:
+                reason = outreach.INTENT_LABELS.get(seq.last_intent, seq.last_intent)
+            return f'<span class="muted">{esc(reason)}</span>'
+        if seq.status == outreach.WAITING:
+            return '<span class="tag warn">needs a new contact</span>'
+        show_button = seq.is_open
+        if seq.touch_count:
+            due = seq.next_due_at.strftime("%b %d") if seq.next_due_at else ""
+            state = (f'<span class="muted">{seq.touch_count} of '
+                     f'{outreach.MAX_TOUCHES} sent{", next " + esc(due) if due else ""}</span><br>')
+
+    if not show_button:
+        return state or '<span class="muted">not started</span>'
+    label = "I sent this" if state else "I sent the first one"
+    audit_field = (f'<input type="hidden" name="audit_id" value="{esc(audit_id)}">'
+                   if audit_id else "")
+    return (f'{state}<form class="inline" method="post" '
+            f'action="/console/outreach/{esc(prospect_id)}/log-touch">'
+            f'{csrf_field(csrf)}{audit_field}'
+            f'<button class="ghost" type="submit">{label}</button></form>')
 
 
 # ── Run screen ────────────────────────────────────────────────────────────────
@@ -756,6 +824,15 @@ def render_batch(batch_id: str, rows: Sequence[Mapping[str, Any]],
         else:
             action = f'<a href="/console/audits/{esc(r["audit_id"])}">open</a>'
 
+        contact_html = contact_cell(r.get("contacts") or [])
+        # A touch can only be logged once a report exists to have sent.
+        outreach_html = outreach_cell(
+            r.get("sequence"),
+            prospect_id=r.get("prospect_id") or "",
+            audit_id=r.get("audit_id"),
+            csrf=csrf,
+            can_start=bool(r.get("report_slug")),
+        )
         business_needle = esc(f'{r.get("business_name") or ""} {r.get("city") or ""}'.lower())
         checks_json = esc(json.dumps(r.get("checks") or {}, separators=(",", ":")))
         segment_value = esc(r.get("segment") or "incomplete")
@@ -779,6 +856,8 @@ def render_batch(batch_id: str, rows: Sequence[Mapping[str, Any]],
             f'<td class="num">{scores.get("booked", "")}</td>'
             f'<td class="num">{scores.get("total", "")}</td>'
             f'<td class="tel">{esc(r.get("phone") or "")}</td>'
+            f'<td>{contact_html}</td>'
+            f'<td>{outreach_html}</td>'
             f"<td>{' '.join(tags)}</td>"
             f"<td>{action}</td>"
             "</tr>"
@@ -860,9 +939,11 @@ faster and easier conversation than one that needs everything rebuilt.
 <table id="call-list"><thead><tr>
 <th data-sort="rank">#</th><th data-sort="business">Company</th>
 <th>Opportunity<span class="sub">what kind of problem</span></th>{score_headers()}
-<th data-sort="total">Total<span class="sub">out of 100</span></th><th>Phone</th><th></th><th>Next step</th></tr></thead>
+<th data-sort="total">Total<span class="sub">out of 100</span></th><th>Phone</th>
+<th>Contact<span class="sub">who to write to</span></th>
+<th>Outreach<span class="sub">four touches, then stop</span></th><th></th><th>Next step</th></tr></thead>
 <tbody>
-{"".join(table_rows) or '<tr><td colspan="10" class="muted">No websites checked yet. This finishes on its own; check back in a few minutes or watch <a href="/console/jobs">Activity</a>.</td></tr>'}
+{"".join(table_rows) or '<tr><td colspan="12" class="muted">No websites checked yet. This finishes on its own; check back in a few minutes or watch <a href="/console/jobs">Activity</a>.</td></tr>'}
 </tbody></table>
 {_BATCH_FILTER_SCRIPT}
 """

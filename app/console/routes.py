@@ -14,7 +14,9 @@ sent, so a sweep started in a handler would be killed halfway; instead the job
 goes over Pub/Sub to a worker, which is the same path audits already take.
 
 There is no send route. Rule 4 is drafts only, and a button is how that rule
-would erode.
+would erode. `log-touch` is not one: it records that a human already sent
+something from their own mailbox, which is the only way the sequence clock can
+move while nothing in this codebase can send. It transmits nothing.
 """
 
 from __future__ import annotations
@@ -172,6 +174,8 @@ def _assemble_batch(
         key=lambda d: d.get("sort_order", 0),
     )
 
+    sequences = store.sequences_for_batch(batch_id)
+
     rows, segments = [], {}
     for r in rank(audits, prospects):
         segments[r.segment or "incomplete"] = segments.get(r.segment or "incomplete", 0) + 1
@@ -184,6 +188,9 @@ def _assemble_batch(
             "report_slug": slugs.get(r.audit_id),
             "findings_status": (findings or {}).get("status"),
             "checks": checks_by_audit.get(r.audit_id) or {},
+            "prospect_id": r.prospect_id,
+            "contacts": (prospects.get(r.prospect_id) or {}).get("contacts") or [],
+            "sequence": sequences.get(r.prospect_id),
         })
     return rows, segments, check_defs
 
@@ -317,6 +324,67 @@ async def reaudit(audit_id: str, request: Request, csrf: str = Form(None)) -> Re
                         {"place_id": audit.get("prospect_id"),
                          "batch_id": audit.get("batch_id") or "manual"},
                         "Re-audit")
+
+
+# ── The outreach ledger ───────────────────────────────────────────────────────
+
+
+@router.post("/outreach/{prospect_id}/log-touch")
+async def log_touch(prospect_id: str, request: Request, audit_id: str = Form(None),
+                    csrf: str = Form(None)) -> Response:
+    """Record a touch a human already sent by hand.
+
+    This does not send anything and cannot: there is no mail client in this
+    process. It moves the sequence clock, which criteria section 6 defines and
+    which nothing else can observe while rule 4 stands.
+
+    Suppression is checked first, because logging a touch is an outreach action
+    and rule 3 admits no exceptions.
+    """
+    if not check_csrf(request, csrf):
+        return Response(status_code=403, content="stale form, reload the page")
+
+    from app import outreach
+
+    def record() -> str | None:
+        prospect = store.get_prospect(prospect_id) or {}
+        hit = store.suppression_hit(
+            store.load_suppressions(),
+            place_id=prospect_id,
+            domain=prospect.get("domain"),
+            phone=prospect.get("gbp_phone"),
+            email=prospect.get("owner_email"),
+        )
+        if hit:
+            return f"That prospect is suppressed ({hit}). Nothing was recorded."
+
+        row = store.get_sequence(prospect_id)
+        seq = (outreach.Sequence.from_dict(row) if row
+               else outreach.open_sequence(prospect_id, audit_id=audit_id))
+        if not seq.is_open:
+            return "That sequence is finished. Nothing was recorded."
+
+        sent_at = store.utcnow()
+        advanced = outreach.advance(seq, sent_at=sent_at)
+        store.add_touch(prospect_id, {
+            "ordinal": advanced.touch_count,
+            "sent_at": sent_at,
+            "audit_id": audit_id or seq.audit_id,
+            "channel": "email",
+            "logged_via": "console",
+        })
+        store.save_sequence(advanced)
+        return None
+
+    blocked = await asyncio.to_thread(record)
+    if blocked:
+        return _page(views.shell(
+            "Not recorded",
+            f'<h1>Not recorded</h1><div class="banner">{views.esc(blocked)}</div>'
+            '<p><a href="/console/batches">Back to the scans</a></p>',
+            active="batches",
+        ))
+    return _redirect(request.headers.get("referer") or "/console/batches")
 
 
 # ── Suppression ───────────────────────────────────────────────────────────────

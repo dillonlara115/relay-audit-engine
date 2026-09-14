@@ -522,3 +522,94 @@ def set_contacts(place_id: str, contacts: Iterable[Mapping[str, Any]]) -> int:
     get_client().collection(PROSPECTS).document(place_id).set(payload, merge=True)
     return len(rows)
 
+
+# ── Outreach sequences ────────────────────────────────────────────────────────
+#
+# One document per prospect at outreach/{place_id}, with touches and replies
+# beneath it. `status` and `next_due_at` are denormalized onto the parent so
+# "who is due today" is one indexed query rather than a collection-group scan
+# of every touch ever recorded. Backed by: status ASC, next_due_at ASC.
+
+
+def get_sequence(prospect_id: str) -> dict[str, Any] | None:
+    snap = get_client().collection(OUTREACH).document(prospect_id).get()
+    return snap.to_dict() if snap.exists else None
+
+
+def save_sequence(seq: Any) -> None:
+    """Persist a Sequence (or a plain mapping shaped like one)."""
+    row = seq.to_dict() if hasattr(seq, "to_dict") else dict(seq)
+    prospect_id = row.get("prospect_id")
+    if not prospect_id:
+        raise ValueError("a sequence needs a prospect_id")
+    doc = get_client().collection(OUTREACH).document(str(prospect_id))
+    payload = dict(_plain(row))
+    payload["updated_at"] = utcnow()
+    if not doc.get().exists:
+        payload["created_at"] = utcnow()
+    # A field absent from the dataclass means "no longer set", not "unchanged":
+    # a closed sequence has to actually clear its next_due_at or it keeps
+    # answering the due query forever.
+    for key in ("audit_id", "last_sent_at", "next_due_at", "last_intent", "closed_reason"):
+        payload.setdefault(key, firestore.DELETE_FIELD)
+    doc.set(payload, merge=True)
+
+
+def add_touch(prospect_id: str, touch: Mapping[str, Any]) -> str:
+    """Append one touch to the ledger. The sequence itself is saved separately."""
+    doc = get_client().collection(OUTREACH).document(prospect_id).collection(TOUCHES).document()
+    doc.set({**_plain(dict(touch)), "recorded_at": utcnow()})
+    return doc.id
+
+
+def add_reply(prospect_id: str, reply: Mapping[str, Any]) -> str:
+    doc = get_client().collection(OUTREACH).document(prospect_id).collection(REPLIES).document()
+    doc.set({**_plain(dict(reply)), "recorded_at": utcnow()})
+    return doc.id
+
+
+def touches_for(prospect_id: str) -> list[dict[str, Any]]:
+    snaps = (
+        get_client().collection(OUTREACH).document(prospect_id).collection(TOUCHES)
+        .order_by("recorded_at").stream()
+    )
+    return [{**(s.to_dict() or {}), "touch_id": s.id} for s in snaps]
+
+
+def replies_for(prospect_id: str) -> list[dict[str, Any]]:
+    snaps = (
+        get_client().collection(OUTREACH).document(prospect_id).collection(REPLIES)
+        .order_by("recorded_at").stream()
+    )
+    return [{**(s.to_dict() or {}), "reply_id": s.id} for s in snaps]
+
+
+def sequences_due(now: datetime | None = None, *, status: str = "active",
+                  limit: int = 50) -> list[dict[str, Any]]:
+    """Sequences whose next touch has come due. The unattended query.
+
+    Backed by composite index: status ASC, next_due_at ASC.
+    """
+    query = (
+        get_client()
+        .collection(OUTREACH)
+        .where(filter=firestore.FieldFilter("status", "==", status))
+        .where(filter=firestore.FieldFilter("next_due_at", "<=", now or utcnow()))
+        .order_by("next_due_at")
+        .limit(limit)
+    )
+    return [snap.to_dict() or {} for snap in query.stream()]
+
+
+def sequences_for_batch(batch_id: str) -> dict[str, dict[str, Any]]:
+    """Every sequence belonging to a batch's audits, keyed by prospect id.
+
+    Read whole rather than per-row: the call list renders up to a hundred rows
+    and a lookup each would be a hundred round trips.
+    """
+    wanted = {a.get("prospect_id") for a in audits_for_batch(batch_id)}
+    out: dict[str, dict[str, Any]] = {}
+    for snap in get_client().collection(OUTREACH).stream():
+        if snap.id in wanted:
+            out[snap.id] = snap.to_dict() or {}
+    return out

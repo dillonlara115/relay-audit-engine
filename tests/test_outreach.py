@@ -1,0 +1,223 @@
+"""The outreach sequence state machine. Pure, so every case is a dataclass in
+and a dataclass out.
+
+Cadence comes from criteria section 6: touches at day 0, 3, 7 and 14, then
+silence. The reply cases are exercised against explicit policies rather than
+`policy_for`, which is a business decision that is deliberately still open.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+from app.outreach import (
+    ACTIVE,
+    CLOSED,
+    INTERESTED,
+    MAX_TOUCHES,
+    MAYBE_LATER,
+    NOT_INTERESTED,
+    OUT_OF_OFFICE,
+    PENDING,
+    TOUCH_GAPS,
+    WAITING,
+    WRONG_PERSON,
+    ReplyPolicy,
+    Sequence,
+    advance,
+    apply_policy,
+    due_after,
+    open_sequence,
+    policy_for,
+    resume,
+)
+
+DAY0 = datetime(2026, 9, 14, 9, 0, tzinfo=timezone.utc)
+
+
+def days(n: int) -> timedelta:
+    return timedelta(days=n)
+
+
+def sent_through(n: int, start: datetime = DAY0) -> Sequence:
+    """A sequence with n touches sent on the intended schedule."""
+    seq = open_sequence("place-1", audit_id="audit-1", now=start)
+    at = start
+    for _ in range(n):
+        seq = advance(seq, sent_at=at)
+        if seq.next_due_at:
+            at = seq.next_due_at
+    return seq
+
+
+# ── cadence ───────────────────────────────────────────────────────────────────
+
+
+def test_the_cadence_is_day_0_3_7_14():
+    assert TOUCH_GAPS == (3, 4, 7)
+    assert MAX_TOUCHES == 4
+
+
+def test_a_new_sequence_is_pending_and_due_now():
+    seq = open_sequence("place-1", now=DAY0)
+    assert seq.status == PENDING
+    assert seq.touch_count == 0
+    assert seq.due(now=DAY0) is True
+
+
+def test_each_touch_schedules_the_next_one():
+    seq = advance(open_sequence("place-1", now=DAY0), sent_at=DAY0)
+    assert (seq.status, seq.touch_count) == (ACTIVE, 1)
+    assert seq.next_due_at == DAY0 + days(3)
+
+    seq = advance(seq, sent_at=seq.next_due_at)
+    assert seq.next_due_at == DAY0 + days(7)
+
+    seq = advance(seq, sent_at=seq.next_due_at)
+    assert seq.next_due_at == DAY0 + days(14)
+
+
+def test_the_fourth_touch_closes_the_sequence():
+    seq = sent_through(4)
+    assert seq.status == CLOSED
+    assert seq.touch_count == 4
+    assert seq.next_due_at is None
+    assert "no reply" in seq.closed_reason
+
+
+def test_a_closed_sequence_ignores_further_touches():
+    seq = sent_through(4)
+    assert advance(seq, sent_at=DAY0 + days(30)) == seq
+
+
+def test_a_late_touch_moves_the_rest_of_the_sequence_with_it():
+    """Sending touch two a week late must not bunch three and four together."""
+    seq = advance(open_sequence("place-1", now=DAY0), sent_at=DAY0)
+    late = DAY0 + days(10)
+    seq = advance(seq, sent_at=late)
+    assert seq.next_due_at == late + days(4)
+
+
+def test_a_sequence_is_not_due_before_its_date():
+    seq = advance(open_sequence("place-1", now=DAY0), sent_at=DAY0)
+    assert seq.due(now=DAY0 + days(2)) is False
+    assert seq.due(now=DAY0 + days(3)) is True
+
+
+def test_a_closed_sequence_is_never_due():
+    assert sent_through(4).due(now=DAY0 + days(365)) is False
+
+
+def test_due_after_is_none_past_the_last_touch():
+    assert due_after(MAX_TOUCHES, DAY0) is None
+    assert due_after(0, DAY0) is None
+
+
+def test_touches_left_counts_down():
+    assert open_sequence("place-1").touches_left == 4
+    assert sent_through(2).touches_left == 2
+    assert sent_through(4).touches_left == 0
+
+
+# ── replies ───────────────────────────────────────────────────────────────────
+
+
+def test_a_closing_reply_stops_the_clock():
+    seq = apply_policy(sent_through(1), INTERESTED, ReplyPolicy(close=True), at=DAY0 + days(1))
+    assert seq.status == CLOSED
+    assert seq.next_due_at is None
+    assert seq.last_intent == INTERESTED
+
+
+def test_a_suppressing_reply_closes_and_says_so():
+    seq = apply_policy(sent_through(1), NOT_INTERESTED,
+                       ReplyPolicy(close=True, suppress=True), at=DAY0 + days(1))
+    assert seq.status == CLOSED
+    assert seq.closed_reason == "suppressed on reply"
+
+
+def test_a_reply_that_does_not_burn_a_touch_rewinds_the_counter():
+    """An out of office reached nobody, so that touch should go again."""
+    before = sent_through(2)
+    after = apply_policy(before, OUT_OF_OFFICE, ReplyPolicy(burn_touch=False),
+                         at=DAY0 + days(4))
+    assert after.touch_count == before.touch_count - 1
+    assert after.status == ACTIVE
+
+
+def test_the_counter_never_rewinds_below_zero():
+    seq = apply_policy(open_sequence("place-1", now=DAY0), OUT_OF_OFFICE,
+                       ReplyPolicy(burn_touch=False), at=DAY0)
+    assert seq.touch_count == 0
+
+
+def test_a_rewound_touch_can_be_resent_and_the_sequence_still_ends_at_four():
+    seq = sent_through(2)
+    seq = apply_policy(seq, OUT_OF_OFFICE, ReplyPolicy(burn_touch=False), at=DAY0 + days(4))
+    for _ in range(seq.touches_left):
+        seq = advance(seq, sent_at=seq.next_due_at or DAY0)
+    assert seq.touch_count == MAX_TOUCHES
+    assert seq.status == CLOSED
+
+
+def test_defer_pushes_the_next_touch_out_from_the_reply():
+    at = DAY0 + days(2)
+    seq = apply_policy(sent_through(1), MAYBE_LATER, ReplyPolicy(defer_days=90), at=at)
+    assert seq.next_due_at == at + days(90)
+    assert seq.status == ACTIVE
+
+
+def test_needs_contact_parks_the_sequence_without_closing_it():
+    seq = apply_policy(sent_through(1), WRONG_PERSON, ReplyPolicy(needs_contact=True),
+                       at=DAY0 + days(1))
+    assert seq.status == WAITING
+    assert seq.next_due_at is None
+    assert seq.due(now=DAY0 + days(365)) is False
+
+
+def test_a_parked_sequence_resumes_when_a_human_supplies_a_contact():
+    seq = apply_policy(sent_through(1), WRONG_PERSON, ReplyPolicy(needs_contact=True),
+                       at=DAY0 + days(1))
+    back = resume(seq, now=DAY0 + days(5))
+    assert back.status == ACTIVE
+    assert back.due(now=DAY0 + days(5)) is True
+
+
+def test_resume_does_nothing_to_a_sequence_that_is_not_parked():
+    seq = sent_through(1)
+    assert resume(seq, now=DAY0) == seq
+
+
+def test_suppress_beats_needs_contact():
+    seq = apply_policy(sent_through(1), WRONG_PERSON,
+                       ReplyPolicy(suppress=True, needs_contact=True), at=DAY0)
+    assert seq.status == CLOSED
+
+
+# ── persistence shape ─────────────────────────────────────────────────────────
+
+
+def test_round_trips_through_a_dict():
+    seq = sent_through(2)
+    assert Sequence.from_dict(seq.to_dict()) == seq
+
+
+def test_an_unsent_sequence_writes_no_null_last_sent_at():
+    """Absent stays absent, so nothing downstream reads a null as a zero."""
+    row = open_sequence("place-1", now=DAY0).to_dict()
+    assert "last_sent_at" not in row
+    assert "last_intent" not in row
+
+
+# ── the open decision ─────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("intent", [INTERESTED, MAYBE_LATER, WRONG_PERSON,
+                                    NOT_INTERESTED, OUT_OF_OFFICE])
+def test_policy_for_is_still_unset(intent):
+    """Fails loudly rather than defaulting, so the decision cannot be skipped
+    by accident. Delete this test when the policy table is filled in."""
+    with pytest.raises(NotImplementedError):
+        policy_for(intent)

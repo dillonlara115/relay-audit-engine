@@ -147,13 +147,58 @@ def test_every_console_route_is_gated(client):
 # ── The rules a web app could erode ───────────────────────────────────────────
 
 
+# The ledger route records a touch a human already sent from their own mailbox.
+# It is the one path allowed to mention outreach, and it is spelled out here so
+# that adding a second one is a deliberate edit to this list.
+LEDGER_ROUTES = {"/console/outreach/{prospect_id}/log-touch"}
+
+
 def test_there_is_no_send_route(client):
     """Rule 4: drafts only, no automated sending. A button is how that erodes."""
     from app.console.routes import router
 
     paths = " ".join(getattr(r, "path", "") for r in router.routes).lower()
-    for word in ("send", "email", "outreach", "message"):
+    for word in ("send", "email", "message", "deliver", "campaign"):
         assert word not in paths, f"a {word} route exists in the console"
+
+
+def test_the_ledger_is_the_only_route_that_touches_outreach(client):
+    """A path may say 'outreach' only if it is on the list above."""
+    from app.console.routes import router
+
+    named = {getattr(r, "path", "") for r in router.routes
+             if "outreach" in getattr(r, "path", "").lower()}
+    assert named == LEDGER_ROUTES
+
+
+def test_nothing_in_the_app_can_transmit_mail():
+    """The real guard on rule 4, and a much harder one to erode than a URL.
+
+    A send button has to import something that speaks to a mail server. None of
+    these appear anywhere in the package, so no route can send whatever it is
+    called.
+    """
+    import pathlib
+
+    banned = ("smtplib", "sendgrid", "mailgun", "postmarker", "boto3",
+              "resend", "aiosmtplib", "yagmail", "mailjet", "sparkpost")
+    root = pathlib.Path(__file__).resolve().parent.parent / "app"
+    offenders = []
+    for path in root.rglob("*.py"):
+        source = path.read_text()
+        for name in banned:
+            if f"import {name}" in source or f"from {name}" in source:
+                offenders.append(f"{path.name} imports {name}")
+    assert offenders == [], offenders
+
+
+def test_the_ledger_route_records_rather_than_sends():
+    """Its own docstring has to say so, because that is what the next person reads."""
+    from app.console.routes import log_touch
+
+    doc = (log_touch.__doc__ or "").lower()
+    assert "does not send" in doc
+    assert "suppression" in doc
 
 
 def test_no_console_template_offers_to_send_anything():
@@ -822,3 +867,153 @@ def test_the_stale_warning_reaches_the_screen():
         evidence=[], csrf="t",
     )
     assert "checked again after these were written" in page
+
+
+# ── The outreach ledger in the console ────────────────────────────────────────
+
+
+def test_a_prospect_with_no_address_is_not_styled_as_a_failure():
+    """No address on the site is a thing to go and find, not a red mark."""
+    cell = views.contact_cell([])
+    assert "none on the site" in cell
+    assert "tag bad" not in cell
+
+
+def test_the_contact_cell_leads_with_the_best_address_and_counts_the_rest():
+    cell = views.contact_cell([
+        {"email": "dave@whitakerroofing.com", "status": "valid"},
+        {"email": "info@whitakerroofing.com", "status": "risky"},
+    ])
+    assert "dave@whitakerroofing.com" in cell
+    assert "+1 more" in cell
+    assert "info@whitakerroofing.com" not in cell
+
+
+def test_an_undeliverable_address_is_not_offered_at_all():
+    assert "x@dead.com" not in views.contact_cell([{"email": "x@dead.com", "status": "invalid"}])
+
+
+def test_an_unverified_address_is_still_offered_with_a_caveat():
+    """Unknown means we did not check, not that it is dead."""
+    cell = views.contact_cell([{"email": "dave@x.com", "status": "unknown"}])
+    assert "dave@x.com" in cell
+    assert "unchecked" in cell
+
+
+def test_the_contact_cell_names_no_mechanism():
+    """Copy rule: outcome language. 'Role address' and 'MX' are mechanisms."""
+    cells = [views.contact_cell([{"email": "a@b.com", "status": s}])
+             for s in ("valid", "risky", "unknown")]
+    flat = " ".join(cells).lower()
+    for word in ("mx", "role address", "dns", "smtp", "catch-all"):
+        assert word not in flat
+
+
+def test_a_touch_cannot_be_logged_before_a_report_exists():
+    cell = views.outreach_cell(None, prospect_id="p1", audit_id="a1", csrf="t",
+                               can_start=False)
+    assert "log-touch" not in cell
+
+
+def test_the_ledger_cell_shows_the_position_in_the_sequence():
+    from app import outreach
+
+    seq = outreach.advance(outreach.open_sequence("p1"))
+    cell = views.outreach_cell(seq.to_dict(), prospect_id="p1", audit_id="a1",
+                               csrf="t", can_start=True)
+    assert "1 of 4 sent" in cell
+
+
+def test_a_finished_sequence_offers_no_further_touch():
+    from app import outreach
+
+    seq = outreach.apply_policy(outreach.advance(outreach.open_sequence("p1")),
+                                outreach.NOT_INTERESTED,
+                                outreach.ReplyPolicy(close=True, suppress=True))
+    cell = views.outreach_cell(seq.to_dict(), prospect_id="p1", audit_id="a1",
+                               csrf="t", can_start=True)
+    assert "log-touch" not in cell
+    assert "Not interested" in cell
+
+
+def test_the_ledger_copy_carries_no_em_dash():
+    from app import outreach
+
+    seq = outreach.advance(outreach.open_sequence("p1"))
+    blob = "".join([
+        views.contact_cell([{"email": "a@b.com", "status": "risky"}]),
+        views.contact_cell([]),
+        views.outreach_cell(seq.to_dict(), prospect_id="p1", audit_id="a1",
+                            csrf="t", can_start=True),
+    ])
+    assert not contains_forbidden_dash(blob)
+
+
+def _ledger_store(monkeypatch, *, suppressions=None, sequence=None):
+    import app.console.routes as routes
+
+    written: dict = {"touches": [], "sequences": []}
+    monkeypatch.setattr(routes.store, "get_prospect",
+                        lambda pid: {"domain": "whitakerroofing.com",
+                                     "owner_email": "dave@whitakerroofing.com"})
+    monkeypatch.setattr(routes.store, "load_suppressions",
+                        lambda: suppressions or {"place_id": set(), "domain": set(),
+                                                 "phone": set(), "email": set()})
+    monkeypatch.setattr(routes.store, "get_sequence", lambda pid: sequence)
+    monkeypatch.setattr(routes.store, "add_touch",
+                        lambda pid, touch: written["touches"].append((pid, touch)) or "t1")
+    monkeypatch.setattr(routes.store, "save_sequence",
+                        lambda seq: written["sequences"].append(seq))
+    return written
+
+
+def test_logging_a_touch_advances_the_sequence(client, monkeypatch):
+    written = _ledger_store(monkeypatch)
+    csrf = sign_in(client)
+
+    response = client.post("/console/outreach/p1/log-touch",
+                           data={"csrf": csrf, "audit_id": "a1"}, follow_redirects=False)
+
+    assert response.status_code == 303
+    assert written["touches"][0][1]["ordinal"] == 1
+    assert written["sequences"][0].touch_count == 1
+    assert written["sequences"][0].next_due_at is not None
+
+
+def test_a_suppressed_prospect_cannot_have_a_touch_logged(client, monkeypatch):
+    """Rule 3: suppression is checked before every outreach action."""
+    written = _ledger_store(monkeypatch, suppressions={
+        "place_id": set(), "phone": set(), "email": set(),
+        "domain": {"whitakerroofing.com"},
+    })
+    csrf = sign_in(client)
+
+    response = client.post("/console/outreach/p1/log-touch",
+                           data={"csrf": csrf, "audit_id": "a1"})
+
+    assert "suppressed" in response.text.lower()
+    assert written["touches"] == []
+    assert written["sequences"] == []
+
+
+def test_logging_a_touch_needs_a_csrf_token(client, monkeypatch):
+    written = _ledger_store(monkeypatch)
+    sign_in(client)
+
+    response = client.post("/console/outreach/p1/log-touch", data={"csrf": "wrong"})
+
+    assert response.status_code == 403
+    assert written["touches"] == []
+
+
+def test_a_finished_sequence_records_nothing_further(client, monkeypatch):
+    from app import outreach
+
+    spent = outreach.Sequence(prospect_id="p1", status=outreach.CLOSED, touch_count=4)
+    written = _ledger_store(monkeypatch, sequence=spent.to_dict())
+    csrf = sign_in(client)
+
+    response = client.post("/console/outreach/p1/log-touch", data={"csrf": csrf})
+
+    assert "finished" in response.text.lower()
+    assert written["touches"] == []

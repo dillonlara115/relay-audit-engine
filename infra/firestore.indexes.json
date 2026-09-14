@@ -10,6 +10,14 @@
       ]
     },
     {
+      "collectionGroup": "outreach",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "next_due_at", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "prospects",
       "queryScope": "COLLECTION",
       "fields": [
