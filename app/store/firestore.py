@@ -29,6 +29,8 @@ REPORT_FINDINGS = "report_findings"
 CHECK_DEFS = "check_defs"
 SUPPRESSIONS = "suppressions"
 OUTREACH = "outreach"
+TOUCHES = "touches"      # subcollection of outreach
+REPLIES = "replies"      # subcollection of outreach
 API_CACHE = "api_cache"
 
 GATE_PASS = "pass"
@@ -499,3 +501,24 @@ def batch_overview(days: int = 14) -> list[dict[str, Any]]:
         row["latest_at"] = row["latest"]
         row["latest"] = row["latest"].strftime("%b %d %H:%M") if row["latest"] else ""
     return rows
+
+
+# ── Contacts ──────────────────────────────────────────────────────────────────
+
+
+def set_contacts(place_id: str, contacts: Iterable[Mapping[str, Any]]) -> int:
+    """Write the addresses discovery found onto the prospect.
+
+    Replaces rather than merges: contacts are re-derived from every crawl, and
+    merging would keep an address that has since come off the site.
+    """
+    rows = [dict(_plain(c)) for c in contacts]
+    payload: dict[str, Any] = {"contacts": rows, "contacts_checked_at": utcnow(),
+                               "updated_at": utcnow()}
+    primary = next((r for r in rows if r.get("status") in ("valid", "risky")), None)
+    # owner_email is what the suppression check and the publish gate read, so
+    # it only ever holds an address a human could actually write to.
+    payload["owner_email"] = primary.get("email") if primary else firestore.DELETE_FIELD
+    get_client().collection(PROSPECTS).document(place_id).set(payload, merge=True)
+    return len(rows)
+

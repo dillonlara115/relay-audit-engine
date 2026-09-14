@@ -9,6 +9,7 @@ uvicorn[standard]
 httpx
 selectolax
 phonenumbers
+dnspython
 python-dotenv
 pydantic
 typer

@@ -23,6 +23,7 @@ from app.gate import GATE_FAIL, GATE_PASS, GATE_REVIEW, GateInput, GateVerdict, 
 from app.markets import MarketSpec, resolve_market
 from app.store import firestore as store
 from app.scoring import Score, compute, outcomes_from
+from app.tools.contacts import extract_contacts
 from app.tools.crawl import (
     GATE_PRIORITY_FRAGMENTS,
     Crawler,
@@ -35,6 +36,7 @@ from app.tools.pagespeed import PsiResult, analyze
 from app.tools.places import PlaceRecord, ingest_market
 from app.tools.render import RenderResult, render
 from app.tools.site_signals import SiteSignals, extract_signals
+from app.tools.verify_email import verify
 
 # The gate asks whether this is a real, established, residential operator. That
 # lives on the about, team, careers and contact pages, not the homepage alone.
@@ -151,11 +153,13 @@ async def gate_one(
     """Crawl what exists, evaluate the gate, write the verdict."""
     signals: SiteSignals | None = None
     crawl_error: str | None = None
+    contacts: list[dict[str, Any]] = []
 
     if record.website_url:
         crawl, crawl_error = await _crawl_for_gate(crawler, record.website_url)
         if crawl is not None:
             signals = extract_signals(crawl)
+            contacts = await _contacts_for(crawl)
 
     verdict = evaluate(
         GateInput(
@@ -195,8 +199,31 @@ async def gate_one(
             site_fields["incumbent_agency"] = verdict.incumbent_agency
         if site_fields:
             await asyncio.to_thread(store.upsert_prospect, record.place_id, site_fields)
+        if contacts:
+            await asyncio.to_thread(store.set_contacts, record.place_id, contacts)
 
     return outcome
+
+
+async def _contacts_for(crawl: SiteCrawl) -> list[dict[str, Any]]:
+    """Addresses on the crawled site, verified unless verification is off.
+
+    Verification is DNS, which blocks, so it runs off the event loop. A domain
+    is resolved once per process regardless of how many addresses it carries.
+    An unverified contact keeps status "unknown", which is the honest answer
+    and never reads as a failure.
+    """
+    found = extract_contacts(crawl)
+    if not found:
+        return []
+    if not get_config().verify_contacts:
+        return [{**c.to_dict(), "status": "unknown", "reason": "Verification is off."}
+                for c in found]
+
+    def check_all() -> list[dict[str, Any]]:
+        return [{**c.to_dict(), **verify(c.email).to_dict()} for c in found]
+
+    return await asyncio.to_thread(check_all)
 
 
 def _site_fields(signals: SiteSignals | None, crawl_error: str | None) -> dict[str, Any]:

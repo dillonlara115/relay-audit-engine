@@ -103,6 +103,10 @@ class Config:
 
     max_concurrent_audits: int = field(default_factory=lambda: _int("MAX_CONCURRENT_AUDITS", 4))
 
+    # Contact verification is DNS only: MX and A lookups, never a message. Off
+    # leaves every discovered address at status "unknown" rather than guessing.
+    verify_contacts: bool = field(default_factory=lambda: _bool("VERIFY_CONTACTS", True))
+
     # Pub/Sub
     pubsub_audit_topic: str = field(
         default_factory=lambda: _str("PUBSUB_AUDIT_TOPIC", "run-audit")
