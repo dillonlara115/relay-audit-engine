@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Sequence
 
 from app.config import get_config
 from app.copy_rules import sanitize
@@ -42,6 +42,20 @@ finished roofs. If there are no meaningful photographs at all, that is true too,
 and say so in stock_reason.
 
 Keep each reason to one sentence. Never use an em-dash or an en-dash."""
+
+# The screenshot is one clipped mobile viewport, so the model cannot see a
+# footer address or a review widget that loads further down, and it reads that
+# absence as absence. On a real prospect it reported the homepage had no phone
+# number, no reviews and no credentials while the checks that measure those
+# three precisely had each confirmed otherwise on the same audit. Handing it
+# what we already measured costs nothing and removes the guess.
+GROUNDING = """Already confirmed present on this page by direct measurement of the
+page itself, not read off the screenshot. The screenshot is a single phone-sized
+view and does not show all of it. Never say any of these is missing, weak, or
+hard to find:
+{facts}
+
+"""
 
 RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "OBJECT",
@@ -101,7 +115,16 @@ def parse_verdict(raw: Any, *, model: str | None = None) -> VisionVerdict:
     )
 
 
-async def read_screenshot(image: bytes, *, mime_type: str = "image/png") -> VisionVerdict:
+def prompt_for(known_present: Sequence[str] = ()) -> str:
+    """The prompt, with anything we already measured stated up front."""
+    if not known_present:
+        return PROMPT
+    facts = "\n".join(f"- {note}" for note in known_present)
+    return GROUNDING.format(facts=facts) + PROMPT
+
+
+async def read_screenshot(image: bytes, *, mime_type: str = "image/png",
+                          known_present: Sequence[str] = ()) -> VisionVerdict:
     """Ask the model to look at one homepage. Never raises."""
     cfg = get_config()
     if not image:
@@ -118,7 +141,7 @@ async def read_screenshot(image: bytes, *, mime_type: str = "image/png") -> Visi
             model=cfg.gemini_model,
             contents=[
                 types.Part.from_bytes(data=image, mime_type=mime_type),
-                PROMPT,
+                prompt_for(known_present),
             ],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",

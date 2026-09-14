@@ -433,7 +433,38 @@ async def _render_form_page(crawl: SiteCrawl, site: "facts.SiteFacts") -> Render
         return RenderResult(ok=False, url=target, error=f"{type(exc).__name__}: {exc}")
 
 
-async def _read_homepage(rendered: RenderResult | None) -> VisionVerdict | None:
+# The trust signals the vision read keeps getting wrong off a clipped
+# screenshot, and the checks that measure each of them exactly. Running the
+# real check functions rather than re-deriving the signals keeps the facts we
+# hand the model identical to the ones the audit will go on to assert.
+TRUST_GROUNDING_CODES = ("C5", "C6", "C10", "C11")
+
+
+def _trust_grounding(rendered: RenderResult | None,
+                     site_facts: "facts.SiteFacts | None") -> list[str]:
+    """Notes from the trust checks that already passed, for the vision prompt."""
+    if site_facts is None:
+        return []
+    from app.checks.base import REGISTRY, AuditContext as _Ctx
+    from app.status import PASS
+
+    ctx = _Ctx(place={}, site=site_facts, render=rendered)
+    notes = []
+    for code in TRUST_GROUNDING_CODES:
+        check_fn = REGISTRY.get(code)
+        if check_fn is None:
+            continue
+        try:
+            outcome = check_fn(ctx)
+        except Exception:  # noqa: BLE001 - grounding is additive, never fatal
+            continue
+        if outcome.status == PASS and outcome.note:
+            notes.append(outcome.note)
+    return notes
+
+
+async def _read_homepage(rendered: RenderResult | None,
+                         site_facts: "facts.SiteFacts | None" = None) -> VisionVerdict | None:
     """Hand the screenshot to the vision component.
 
     This is the one stage that cannot run beside the render, because it is the
@@ -447,7 +478,10 @@ async def _read_homepage(rendered: RenderResult | None) -> VisionVerdict | None:
     if not image:
         return None
     try:
-        return await read_screenshot(image, mime_type=rendered.screenshot_mime)
+        return await read_screenshot(
+            image, mime_type=rendered.screenshot_mime,
+            known_present=_trust_grounding(rendered, site_facts),
+        )
     except Exception as exc:  # noqa: BLE001 - a model fault skips its checks
         return VisionVerdict(ok=False, error=f"{type(exc).__name__}: {exc}")
 
@@ -557,7 +591,7 @@ async def audit_one(
 
     async def look() -> tuple[RenderResult | None, VisionVerdict | None]:
         rendered = await _render_homepage(crawl)
-        return rendered, await _read_homepage(rendered)
+        return rendered, await _read_homepage(rendered, site_facts)
 
     (render_result, vision_result), psi_result, form_render = await asyncio.gather(
         look(), _measure_speed(crawl), _render_form_page(crawl, site_facts)

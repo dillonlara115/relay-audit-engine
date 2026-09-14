@@ -119,7 +119,10 @@ class LookAgent(_InspectorBranch):
 
     async def _inspect(self, crawl: SiteCrawl, state: Any) -> Any:
         rendered = await _render_homepage(crawl)
-        vision = await _read_homepage(rendered)
+        # The vision read gets what the page checks already measured, so it
+        # stops reporting a phone number or reviews as missing because the
+        # clipped screenshot did not reach them.
+        vision = await _read_homepage(rendered, state.get("site_facts"))
         state["render"] = rendered
         state["vision"] = vision
         return rendered

@@ -211,3 +211,45 @@ def test_the_prompt_holds_the_lines_that_matter():
     assert "Do not comment on design taste" in PROMPT, "we do not sell web design"
     assert "em-dash" in PROMPT, "the brand rule is asked for as well as enforced"
     assert not contains_forbidden_dash(PROMPT)
+
+
+# ── grounding the trust read ──────────────────────────────────────────────────
+#
+# C17 is a model reading one clipped mobile screenshot. On Triton Roofing it
+# reported the homepage lacked a physical address, a local phone number,
+# reviews and credentials, while C5, C6, C10 and C11 had each confirmed
+# otherwise on that same audit. The screenshot could not reach a footer or a
+# review widget, and the model read absence of evidence as evidence of absence.
+
+
+def test_the_prompt_is_unchanged_when_nothing_was_measured():
+    from app.agents.vision import PROMPT, prompt_for
+
+    assert prompt_for() == PROMPT
+    assert prompt_for([]) == PROMPT
+
+
+def test_measured_facts_are_stated_before_the_question():
+    from app.agents.vision import PROMPT, prompt_for
+
+    filled = prompt_for([
+        "The phone number (719) 322-3673 is visible without scrolling.",
+        "Customer reviews appear on the homepage.",
+    ])
+    assert "(719) 322-3673" in filled
+    assert "Customer reviews appear on the homepage" in filled
+    assert "Never say any of these is missing" in filled
+    # The spec's own wording still has to reach the model intact.
+    assert filled.endswith(PROMPT)
+
+
+def test_grounding_passes_only_the_checks_that_actually_passed():
+    """The notes handed to the model come from running the real check
+    functions, so they cannot drift from what the audit goes on to assert."""
+    from app.checks.extract import SiteFacts
+    from app.pipeline import _trust_grounding
+
+    # No render and an empty site: nothing passed, so nothing is claimed.
+    assert _trust_grounding(None, SiteFacts(homepage=None)) == []
+    # No site facts at all is not an error, just no grounding.
+    assert _trust_grounding(None, None) == []
