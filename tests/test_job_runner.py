@@ -82,7 +82,7 @@ def test_only_audit_id_drafts_just_that_one_audit(monkeypatch):
     fake = FakeStore(audits, prospects, checks)
     monkeypatch.setattr(job_runner, "store", fake)
 
-    async def fake_draft_findings(*, business_name, city, failures):
+    async def fake_draft_findings(*, business_name, city, failures, passing=()):
         return Diagnosis(ok=True, findings=(_finding("F1", 1), _finding("F2", 2), _finding("F3", 3)),
                          model="test")
 
@@ -107,7 +107,7 @@ def test_without_only_audit_id_drafts_the_top_n(monkeypatch):
     fake = FakeStore(audits, prospects, checks)
     monkeypatch.setattr(job_runner, "store", fake)
 
-    async def fake_draft_findings(*, business_name, city, failures):
+    async def fake_draft_findings(*, business_name, city, failures, passing=()):
         return Diagnosis(ok=True, findings=(_finding("F1", 1), _finding("F2", 2), _finding("F3", 3)),
                          model="test")
 

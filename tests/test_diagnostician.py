@@ -88,3 +88,48 @@ def test_empty_fields_are_rejected():
 @pytest.mark.parametrize("garbage", ["not json", "[1,2]", '{"findings": "three"}'])
 def test_a_drifting_model_is_an_error_not_a_report(garbage):
     assert not parse_diagnosis(garbage, valid_codes=CODES).ok
+
+
+# ── grounding the draft in what passed ────────────────────────────────────────
+#
+# Triton Roofing, batch 2MqjsKpPqeiBw5FhFlrA: C17 is read off a screenshot and
+# reported "the page lacks visible trust signals such as a physical address,
+# local phone number, reviews, or credentials". On the same audit C5, C10 and
+# C11 had confirmed the phone is visible, reviews are on the homepage, and the
+# site states it is licensed and insured. Given only the failures, the draft
+# turned the screenshot's guess into a finding telling the owner his site shows
+# none of the three. A human caught it at the approval gate. The passing checks
+# go into the prompt so the next one does not get that far.
+
+
+def test_the_prompt_states_what_passed_as_ground_truth():
+    from app.agents.diagnostician import PROMPT, _passing_block
+
+    block = _passing_block([
+        {"code": "C5", "title": "Phone above fold",
+         "note": "The phone number (719) 322-3673 is visible without scrolling."},
+        {"code": "C10", "title": "Reviews on page",
+         "note": "Customer reviews appear on the homepage."},
+    ])
+    assert "(719) 322-3673 is visible without scrolling" in block
+    assert "Customer reviews appear on the homepage" in block
+    # A finding may only cite a failed check, so passing codes stay out of it.
+    assert "C5" not in block and "C10" not in block
+
+    filled = PROMPT.format(business_name="Triton Roofing", city="Colorado Springs",
+                           passing=block, failures="- C17 (Trust read, 2 pts): weak")
+    assert "Never say any of these is missing" in filled
+    assert "(719) 322-3673" in filled
+
+
+def test_an_audit_with_nothing_passing_still_renders():
+    from app.agents.diagnostician import _passing_block
+
+    assert _passing_block([]) == "(nothing on this site was confirmed working)"
+
+
+def test_a_passing_check_with_no_note_still_lists_its_title():
+    from app.agents.diagnostician import _passing_block
+
+    assert _passing_block([{"code": "C11", "title": "Licensed / insured"}]) == (
+        "- Licensed / insured")

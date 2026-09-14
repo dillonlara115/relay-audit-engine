@@ -47,6 +47,11 @@ segments. Write as if the owner will read this over coffee.
 
 Business: {business_name}, {city}
 
+Already confirmed working on this site. Never say any of these is missing, weak, or
+hard to find, and never write anything that contradicts them. A failed check's note
+may be vague or overstated: where it disagrees with this list, this list is right.
+{passing}
+
 Failed checks:
 {failures}
 """
@@ -183,11 +188,37 @@ def _failures_block(failures: Sequence[Mapping[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _passing_block(passing: Sequence[Mapping[str, Any]]) -> str:
+    """What the audit confirmed is working, as ground truth for the draft.
+
+    A failing check's note is sometimes a model's impression rather than a
+    measurement. C17 is read off a screenshot, and on a real prospect it
+    reported the homepage had no phone number, reviews or credentials while
+    C5, C10 and C11 had each confirmed otherwise on the same audit. Given only
+    the failures, the diagnostician elaborated the screenshot's guess into
+    three confident sentences aimed at the owner of a site that plainly shows
+    all three. The passing checks are the cheapest correction available: state
+    them, and the contradiction has nowhere to start.
+
+    Codes are deliberately left out. A finding may only cite a check that
+    failed, so naming these codes would invite a draft that gets rejected.
+    """
+    if not passing:
+        return "(nothing on this site was confirmed working)"
+    lines = []
+    for row in passing:
+        note = str(row.get("note") or "").strip()
+        title = row.get("title") or row.get("code")
+        lines.append(f"- {title}: {note}" if note else f"- {title}")
+    return "\n".join(lines)
+
+
 async def draft_findings(
     *,
     business_name: str,
     city: str,
     failures: Sequence[Mapping[str, Any]],
+    passing: Sequence[Mapping[str, Any]] = (),
 ) -> Diagnosis:
     """Ask the model to pick three and write consequences. Never raises."""
     cfg = get_config()
@@ -197,6 +228,7 @@ async def draft_findings(
 
     prompt = PROMPT.format(
         business_name=business_name, city=city or "Colorado",
+        passing=_passing_block(passing),
         failures=_failures_block(failures),
     )
     try:

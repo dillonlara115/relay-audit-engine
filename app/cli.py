@@ -915,9 +915,14 @@ def _draft_top(rows) -> None:
             for c in checks if c.get("status") == "fail"
         ]
         failures.sort(key=lambda f: -f["points"])
+        # What passed is ground truth the draft may not contradict.
+        passing = [
+            {**c, "title": definitions.get(c.get("code"), {}).get("title")}
+            for c in checks if c.get("status") == "pass"
+        ]
         diagnosis = await draft_findings(
             business_name=row.business_name, city=row.city or "",
-            failures=failures,
+            failures=failures, passing=passing,
         )
         if not diagnosis.ok:
             return row, None, diagnosis.error

@@ -182,9 +182,15 @@ async def run_draft_job(job_id: str, params: Mapping[str, Any]) -> dict[str, Any
             for c in checks if c.get("status") == "fail"
         ]
         failures.sort(key=lambda f: -f["points"])
+        # What passed is ground truth the draft may not contradict.
+        passing = [
+            {**c, "title": definitions.get(c.get("code"), {}).get("title")}
+            for c in checks if c.get("status") == "pass"
+        ]
 
         diagnosis = await draft_findings(
-            business_name=row.business_name, city=row.city or "", failures=failures
+            business_name=row.business_name, city=row.city or "",
+            failures=failures, passing=passing,
         )
         if not diagnosis.ok:
             await asyncio.to_thread(jobs.log, job_id,
