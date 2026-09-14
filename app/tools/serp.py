@@ -47,6 +47,37 @@ DEFAULT_TIMEOUT = 90.0
 MAP_PACK_QUERY = "roofer {city}"
 ORGANIC_QUERY = "roof replacement {city}"
 
+# DataForSEO location names spell the state out: "Colorado Springs,Colorado,
+# United States". A MarketSpec stores the two-letter code, and sending that
+# gets the whole task rejected with "Invalid Field: 'location_name'", which
+# costs all three checks. Measured against the live API on Rampart Roofing.
+US_STATES = {
+    "AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas",
+    "CA": "California", "CO": "Colorado", "CT": "Connecticut", "DE": "Delaware",
+    "DC": "District of Columbia", "FL": "Florida", "GA": "Georgia", "HI": "Hawaii",
+    "ID": "Idaho", "IL": "Illinois", "IN": "Indiana", "IA": "Iowa",
+    "KS": "Kansas", "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine",
+    "MD": "Maryland", "MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota",
+    "MS": "Mississippi", "MO": "Missouri", "MT": "Montana", "NE": "Nebraska",
+    "NV": "Nevada", "NH": "New Hampshire", "NJ": "New Jersey", "NM": "New Mexico",
+    "NY": "New York", "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio",
+    "OK": "Oklahoma", "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island",
+    "SC": "South Carolina", "SD": "South Dakota", "TN": "Tennessee", "TX": "Texas",
+    "UT": "Utah", "VT": "Vermont", "VA": "Virginia", "WA": "Washington",
+    "WV": "West Virginia", "WI": "Wisconsin", "WY": "Wyoming",
+}
+
+
+def location_name_for(city: str, state: str | None) -> str:
+    """The provider's location string for a metro.
+
+    An unknown state is dropped rather than guessed at. "Colorado Springs,
+    United States" still resolves; "Colorado Springs,XX,United States" is a
+    rejected task and three skipped checks.
+    """
+    full = US_STATES.get((state or "").strip().upper())
+    return f"{city},{full},United States" if full else f"{city},United States"
+
 # DataForSEO groups every block on the page under one items list, tagged by
 # type. These are the three we read.
 LOCAL_PACK_TYPES = {"local_pack", "map"}
@@ -233,7 +264,7 @@ async def look_up_prospect(*, website_url: str | None, city: str,
     if not city:
         return SerpFacts(ok=False, error="no city to search in")
 
-    location_name = f"{city},{state},United States" if state else f"{city},United States"
+    location_name = location_name_for(city, state)
     queries = (MAP_PACK_QUERY.format(city=city), ORGANIC_QUERY.format(city=city))
 
     owned = client is None

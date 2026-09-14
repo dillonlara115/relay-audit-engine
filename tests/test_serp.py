@@ -190,3 +190,22 @@ def test_found_goes_partial_when_the_serp_provider_is_not_configured():
     # Booked section does that.
     with_serp = {**measured, **{c: PASS for c in serp_codes}}
     assert not compute(outcomes_from(with_serp, CHECK_DEFINITIONS)).sections["found"].partial
+
+
+def test_the_location_spells_the_state_out():
+    """Measured against the live API: a MarketSpec stores "CO", and sending
+    that gets the whole task rejected with "Invalid Field: 'location_name'",
+    which costs all three checks on every prospect in the metro."""
+    from app.tools.serp import location_name_for
+
+    assert location_name_for("Colorado Springs", "CO") == (
+        "Colorado Springs,Colorado,United States")
+    assert location_name_for("Pueblo", "co") == "Pueblo,Colorado,United States"
+
+
+def test_an_unknown_state_is_dropped_rather_than_guessed():
+    """A bad state rejects the task. No state still resolves."""
+    from app.tools.serp import location_name_for
+
+    assert location_name_for("Denver", None) == "Denver,United States"
+    assert location_name_for("Denver", "XX") == "Denver,United States"
