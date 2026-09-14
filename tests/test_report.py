@@ -295,3 +295,45 @@ def test_the_dashboard_and_console_share_one_shell():
     for page in (overview, batch):
         assert "<form" not in page
         assert "<button" not in page
+
+
+# ── a published report is a snapshot of a day ─────────────────────────────────
+
+
+def test_publish_freezes_the_screenshot_under_the_slug():
+    """Evidence is stored per audit at a fixed filename, and an audit is keyed
+    by prospect and batch, so a re-check overwrites its own screenshot in
+    place. The report renders evidence live, so without a copy taken at
+    publish time a re-audit would swap a newer screenshot in beside findings
+    written weeks earlier, under a caption saying nothing was altered."""
+    import inspect
+
+    from app.report import publish as publish_mod
+    from app.store import evidence as evidence_mod
+
+    assert hasattr(evidence_mod, "freeze_for_report")
+    source = inspect.getsource(publish_mod.publish)
+    assert "freeze_for_report" in source
+    assert "report_screenshot_path" in source
+
+
+def test_the_frozen_copy_is_scoped_to_the_slug_not_the_audit():
+    """Scoping by audit would put the copy back in the path a re-audit
+    overwrites, which is the whole problem."""
+    import inspect
+
+    from app.store import evidence as evidence_mod
+
+    source = inspect.getsource(evidence_mod.freeze_for_report)
+    assert 'f"reports/{slug}/{name}"' in source
+
+
+def test_the_report_prefers_the_frozen_copy_over_live_evidence():
+    import inspect
+
+    from app.report import publish as publish_mod
+
+    source = inspect.getsource(publish_mod.render_by_slug)
+    assert "report_screenshot_path" in source
+    # Older reports published before the copy existed still render.
+    assert "audit_evidence" in source

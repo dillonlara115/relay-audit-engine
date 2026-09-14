@@ -108,9 +108,25 @@ def publish(audit_id: str) -> PublishResult:
     if leaked:
         raise PublishBlocked(f"the rendered page leaks internal vocabulary: {leaked}")
 
+    # Freeze the screenshot this report was approved against. A re-audit
+    # overwrites an audit's own evidence in place, and this page renders its
+    # evidence live, so without the copy a re-check would swap a newer
+    # screenshot in beside findings written weeks earlier.
+    frozen = None
+    for row in evidence:
+        if row.get("kind") == "screenshot" and row.get("gcs_path"):
+            try:
+                frozen = evidence_store.freeze_for_report(row["gcs_path"], slug)
+            except Exception as exc:  # noqa: BLE001 - fall back to live evidence
+                frozen = None
+                store.update_audit(audit_id, {
+                    "report_evidence_error": f"{type(exc).__name__}: {exc}"[:200]})
+            break
+
     store.update_audit(audit_id, {
         "report_slug": slug,
         "published_at": store.utcnow(),
+        **({"report_screenshot_path": frozen} if frozen else {}),
     })
     return PublishResult(slug=slug, audit_id=audit_id, url_path=f"/r/{slug}")
 
@@ -144,14 +160,20 @@ def render_by_slug(slug: str) -> str | None:
         return None
     audit, prospect, findings = loaded
 
+    # The frozen copy taken at publish time is what this report was approved
+    # against. Reports published before that copy existed fall back to the
+    # audit's live evidence, which is what they have always rendered.
     screenshot_url = None
-    for row in evidence_store.audit_evidence(audit["audit_id"]):
-        if row.get("kind") == "screenshot" and row.get("gcs_path"):
-            try:
-                screenshot_url = evidence_store.signed_url(row["gcs_path"])
-            except Exception:  # noqa: BLE001 - a page without its screenshot still loads
-                screenshot_url = None
-            break
+    frozen = audit.get("report_screenshot_path")
+    candidates = [frozen] if frozen else [
+        row.get("gcs_path") for row in evidence_store.audit_evidence(audit["audit_id"])
+        if row.get("kind") == "screenshot" and row.get("gcs_path")
+    ]
+    for path in candidates[:1]:
+        try:
+            screenshot_url = evidence_store.signed_url(path)
+        except Exception:  # noqa: BLE001 - a page without its screenshot still loads
+            screenshot_url = None
 
     report = build_public_report(
         audit, prospect, findings, slug=slug, screenshot_url=screenshot_url
