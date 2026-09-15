@@ -41,19 +41,63 @@ from app.console.routes import router as console_router  # noqa: E402
 app.include_router(console_router)
 
 
+# Everything on this service needs a console session except these. The list is
+# short, explicit, and deliberately deny-by-default: a route added next week is
+# private until somebody adds it here on purpose, rather than public until
+# somebody remembers to guard it.
+#
+# "Open" means "not console-gated", not "unauthenticated". The Pub/Sub and
+# scheduler endpoints carry their own shared-secret check in `_authorized`,
+# because a push subscription cannot log in to anything.
+OPEN_PREFIXES = (
+    "/r/",          # the public report. Its access control is the 16 character slug.
+    "/health",
+    "/healthz",
+    "/robots.txt",
+    "/pubsub/",     # token-gated
+    "/tick",        # token-gated
+)
+
+
+def is_open_path(path: str) -> bool:
+    return path.startswith(OPEN_PREFIXES)
+
+
 @app.middleware("http")
 async def console_gate(request: Request, call_next):
-    """Guard every console path before FastAPI parses a body.
+    """Close the whole service except the few paths that must answer publicly.
 
-    In a handler this check ran after form validation, so an
-    unauthenticated POST got a 422 listing the fields it should have sent.
-    Here it also covers routes added later without anyone remembering to.
+    Runs before FastAPI parses a body. In a handler the check ran after form
+    validation, so an unauthenticated POST got a 422 listing the fields it
+    should have sent.
+
+    Every response leaves with X-Robots-Tag whatever produced it, including
+    404s, errors, and handlers written after this was. Nothing on this service
+    belongs in a search index: the operator side is a private tool, and a
+    report names one contractor's problems and is his to share or not.
     """
-    if request.url.path.startswith(("/console", "/dashboard")):
+    if not is_open_path(request.url.path):
         gate = _console_authorize(request)
         if gate is not None:
+            gate.headers["X-Robots-Tag"] = "noindex, nofollow"
             return gate
-    return await call_next(request)
+
+    response = await call_next(request)
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return response
+
+
+@app.get("/robots.txt", include_in_schema=False)
+def robots() -> Response:
+    """Nothing here is for a crawler.
+
+    The authoritative control is the X-Robots-Tag header above, not this file:
+    a disallowed URL is one a crawler will not fetch, so it never reads the
+    noindex either. This is the polite signal, the header is the rule.
+    """
+    return Response(content="User-agent: *\nDisallow: /\n", media_type="text/plain",
+                    headers={"X-Robots-Tag": "noindex, nofollow",
+                             "Cache-Control": "public, max-age=86400"})
 
 # One worker identity per process, so leases can be attributed and reclaimed.
 WORKER = worker_id()

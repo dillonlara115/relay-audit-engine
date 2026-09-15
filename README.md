@@ -335,9 +335,11 @@ gcloud run deploy renderer --source renderer/ --region "$REGION" \
 
 RENDERER_URL=$(gcloud run services describe renderer --region "$REGION" --format='value(status.url)')
 
-# The audit worker. Public: Pub/Sub push and the public /r/{slug} reports both
-# need to reach it without a bearer token. The console and dashboard are gated
-# by CONSOLE_PASSWORD regardless of Cloud Run's own IAM.
+# The audit worker. Reachable without a bearer token because Pub/Sub push and
+# the public /r/{slug} reports both need to be. Everything else on the service
+# is closed by default: see OPEN_PREFIXES in app/worker.py for the whole public
+# surface, which is the report, the health checks, robots.txt and the two
+# token-gated machine endpoints. Every response carries noindex.
 gcloud run deploy audit-worker --source . --region "$REGION" \
   --service-account relay-worker@$PROJECT_ID.iam.gserviceaccount.com \
   --memory 1Gi --cpu 1 --min-instances 0 --max-instances 3 --concurrency 2 --timeout 900 \

@@ -1121,3 +1121,76 @@ def test_a_thin_pool_closes_the_sequence_early(client, monkeypatch):
 
     assert written["sequences"][0].max_touches == 2
     assert written["sequences"][0].next_due_at is not None
+
+
+# ── Closed by default, open by exception ──────────────────────────────────────
+
+
+def test_a_route_nobody_thought_about_is_private(client):
+    """The point of the inversion. A path not on the open list needs a session
+    without anyone having remembered to guard it."""
+    from app.worker import is_open_path
+
+    for path in ("/export", "/admin", "/api/prospects", "/", "/dashboardish"):
+        assert is_open_path(path) is False
+        assert client.get(path, follow_redirects=False).status_code == 401
+
+
+def test_the_open_list_is_the_whole_public_surface(client):
+    """If this list grows, it should be because somebody decided to grow it."""
+    from app.worker import OPEN_PREFIXES
+
+    assert set(OPEN_PREFIXES) == {
+        "/r/", "/health", "/healthz", "/robots.txt", "/pubsub/", "/tick",
+    }
+
+
+def test_a_report_answers_without_a_password(client, monkeypatch):
+    """A contractor cannot log in, so this one path stays open on purpose."""
+    monkeypatch.setattr("app.report.publish.render_by_slug", lambda slug: "<html>report</html>")
+    monkeypatch.setattr("app.report.publish.log_view", lambda *a, **k: None)
+
+    response = client.get("/r/abcdefghijklmnop")
+
+    assert response.status_code == 200
+    assert "report" in response.text
+
+
+def test_a_report_that_does_not_exist_is_a_404_not_a_login(client, monkeypatch):
+    """A wrong slug must not leak that there is a console behind this."""
+    monkeypatch.setattr("app.report.publish.render_by_slug", lambda slug: None)
+    assert client.get("/r/abcdefghijklmnop").status_code == 404
+
+
+def test_health_answers_for_cloud_run(client):
+    assert client.get("/health").status_code == 200
+    assert client.get("/healthz").status_code == 200
+
+
+def test_robots_is_public_and_refuses_everything(client):
+    response = client.get("/robots.txt")
+    assert response.status_code == 200
+    assert "Disallow: /" in response.text
+    assert "User-agent: *" in response.text
+
+
+def test_every_response_carries_noindex_however_it_ended(client, monkeypatch):
+    """Including the ones nobody wrote a header for: 401s, 404s, robots itself."""
+    monkeypatch.setattr("app.report.publish.render_by_slug", lambda slug: None)
+
+    for path in ("/health", "/robots.txt", "/console", "/export",
+                 "/r/abcdefghijklmnop", "/nothing-here"):
+        response = client.get(path, follow_redirects=False)
+        assert response.headers.get("X-Robots-Tag") == "noindex, nofollow", path
+
+
+def test_the_gated_401_itself_is_not_indexable(client):
+    response = client.get("/console", follow_redirects=False)
+    assert response.status_code == 401
+    assert response.headers["X-Robots-Tag"] == "noindex, nofollow"
+
+
+def test_a_signed_in_operator_still_reaches_the_console(client):
+    """The inversion must not have locked out the person who has the password."""
+    sign_in(client)
+    assert client.get("/console").status_code == 200

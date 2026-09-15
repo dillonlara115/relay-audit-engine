@@ -420,3 +420,12 @@ Treat a violation as a failing build.
    experience, never how we detected it or how we would fix it.
 10. **Every finding shown to a prospect has stored evidence**, asserted at publish
     time.
+11. **The service is closed by default.** Everything needs a console session except
+    an explicit short list: the report at `/r/{slug}`, the Cloud Run health checks,
+    `robots.txt`, and the two token-gated machine endpoints. A route added later is
+    private until somebody puts it on that list on purpose. Enforced by test.
+12. **Nothing on this service is indexable.** `X-Robots-Tag: noindex, nofollow` is
+    set in middleware on every response, including 401s, 404s and handlers written
+    after the rule. `robots.txt` disallows everything. The header is the control and
+    the file is the courtesy: a crawler that obeys a disallow never fetches the page
+    and so never reads the noindex.
