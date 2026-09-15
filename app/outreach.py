@@ -104,10 +104,11 @@ class Sequence:
     last_intent: str | None = None
     closed_reason: str | None = None
     revisit_at: datetime | None = None
+    max_touches: int = MAX_TOUCHES
 
     @property
     def touches_left(self) -> int:
-        return max(0, MAX_TOUCHES - self.touch_count)
+        return max(0, min(self.max_touches, MAX_TOUCHES) - self.touch_count)
 
     @property
     def is_open(self) -> bool:
@@ -131,6 +132,8 @@ class Sequence:
             value = getattr(self, key)
             if value is not None:
                 row[key] = value
+        if self.max_touches != MAX_TOUCHES:
+            row["max_touches"] = self.max_touches
         return row
 
     @classmethod
@@ -145,25 +148,65 @@ class Sequence:
             last_intent=row.get("last_intent"),
             closed_reason=row.get("closed_reason"),
             revisit_at=row.get("revisit_at"),
+            max_touches=int(row.get("max_touches") or MAX_TOUCHES),
         )
 
 
-def due_after(touch_count: int, last_sent_at: datetime) -> datetime | None:
+# A report carries three findings, so a pool of six supports the report plus
+# three follow-ups. Fewer failures means fewer touches, not a touch with
+# nothing new in it: criteria section 6 says each follow-up adds one finding.
+REPORT_FINDINGS = 3
+
+
+def touches_supported(pool_size: int, *, report_findings: int = REPORT_FINDINGS) -> int:
+    """How far a sequence can run on a pool of this size.
+
+    Three findings is one touch. Every finding past the third buys one more,
+    up to the four the cadence allows.
+    """
+    if pool_size < report_findings:
+        return 0
+    return min(MAX_TOUCHES, 1 + (pool_size - report_findings))
+
+
+def finding_for_touch(ordinal: int, pool_size: int,
+                      *, report_findings: int = REPORT_FINDINGS) -> int | None:
+    """Which finding in the pool a given touch carries, 1-based.
+
+    Touch one is the report itself and carries the chosen three, so it has no
+    single finding and returns None. Touch two onward takes the next unchosen
+    one in rank order.
+    """
+    if ordinal <= 1:
+        return None
+    position = report_findings + (ordinal - 1)
+    return position if position <= pool_size else None
+
+
+def due_after(touch_count: int, last_sent_at: datetime,
+              *, max_touches: int = MAX_TOUCHES) -> datetime | None:
     """When the next touch comes due, or None when the sequence is spent."""
-    if touch_count < 1 or touch_count >= MAX_TOUCHES:
+    if touch_count < 1 or touch_count >= min(max_touches, MAX_TOUCHES):
         return None
     return last_sent_at + timedelta(days=TOUCH_GAPS[touch_count - 1])
 
 
 def open_sequence(prospect_id: str, *, audit_id: str | None = None,
-                  now: datetime | None = None) -> Sequence:
-    """A sequence with nothing sent yet, due immediately. Touch one is day 0."""
+                  now: datetime | None = None,
+                  max_touches: int = MAX_TOUCHES) -> Sequence:
+    """A sequence with nothing sent yet, due immediately. Touch one is day 0.
+
+    `max_touches` comes from `touches_supported(len(pool))`: a prospect whose
+    audit produced four findings gets two touches, and the sequence closes when
+    it runs out of material rather than when the calendar does.
+    """
     return Sequence(
         prospect_id=prospect_id,
         audit_id=audit_id,
         status=PENDING,
         touch_count=0,
         next_due_at=now or _utcnow(),
+        max_touches=max(1, min(max_touches, MAX_TOUCHES)),
     )
 
 
@@ -173,14 +216,15 @@ def advance(seq: Sequence, *, sent_at: datetime | None = None) -> Sequence:
         return seq
     sent_at = sent_at or _utcnow()
     count = seq.touch_count + 1
-    following = due_after(count, sent_at)
+    following = due_after(count, sent_at, max_touches=seq.max_touches)
+    spent = "sequence complete, no reply" if count >= MAX_TOUCHES else "no findings left to send"
     return replace(
         seq,
         status=ACTIVE if following is not None else CLOSED,
         touch_count=count,
         last_sent_at=sent_at,
         next_due_at=following,
-        closed_reason=None if following is not None else "sequence complete, no reply",
+        closed_reason=None if following is not None else spent,
     )
 
 
@@ -214,7 +258,7 @@ def apply_policy(seq: Sequence, intent: str, policy: ReplyPolicy, *,
         )
 
     base = seq.last_sent_at or at
-    following = due_after(count, base) if count >= 1 else at
+    following = due_after(count, base, max_touches=seq.max_touches) if count >= 1 else at
     if policy.defer_days is not None:
         following = at + timedelta(days=policy.defer_days)
     return replace(

@@ -182,6 +182,9 @@ th[data-sort]:hover { color:var(--ember); }
 .tag.bad { background:#8d2f16; }
 .tag.dim { background:var(--line); color:var(--ink2); }
 .mail { word-break:break-all; font-size:.88rem; }
+.pick { display:flex; gap:10px; align-items:flex-start; cursor:pointer;
+        font-size:1.02rem; line-height:1.45; }
+.pick input { margin-top:5px; width:17px; height:17px; flex:none; accent-color:var(--orange); }
 /* The fill is 2.57:1 against its own track, under the 3:1 a non-text control
    wants, and the two cannot be pulled further apart without taking the track
    off the panel entirely. The hairline gives the track an edge instead, so
@@ -1044,15 +1047,38 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
     findings_block = ""
     if findings:
         state = findings.get("status")
-        cards = "".join(
-            f'<div class="finding"><h3>{esc(f.get("ordinal"))}. {esc(f.get("what_we_saw"))}</h3>'
-            f'<p>{esc(f.get("what_it_means"))}</p>'
-            f'<p><strong>{esc(f.get("what_fixing_takes"))}</strong></p>'
-            + (f'<p class="muted">flagged: {esc(", ".join(f.get("mechanism_flags") or []))}</p>'
-               if f.get("mechanism_flags") else "")
-            + "</div>"
-            for f in findings.get("findings") or []
-        )
+        pool = list(findings.get("findings") or [])
+        selected = [int(o) for o in (findings.get("selected") or [])]
+        draft = state == "draft"
+
+        def card(f: Mapping[str, Any], position: int) -> str:
+            ordinal = int(f.get("ordinal") or 0)
+            flags = (f'<p class="muted">flagged: {esc(", ".join(f.get("mechanism_flags") or []))}</p>'
+                     if f.get("mechanism_flags") else "")
+            if draft:
+                # The top three are pre-ticked because that is the model's
+                # ranking, not because it is the answer. Rule 7 is the person
+                # changing it.
+                checked = " checked" if position <= 3 else ""
+                head = (f'<label class="pick"><input type="checkbox" name="selected" '
+                        f'value="{ordinal}"{checked}> '
+                        f'<strong>{esc(f.get("what_we_saw"))}</strong></label>')
+            else:
+                if ordinal in selected:
+                    tag = f'<span class="tag ok">report, number {selected.index(ordinal) + 1}</span>'
+                else:
+                    later = [o for o in
+                             [int(x.get("ordinal") or 0) for x in pool]
+                             if o not in selected]
+                    tag = (f'<span class="tag dim">follow up {later.index(ordinal) + 1}</span>'
+                           if ordinal in later else "")
+                head = f'<h3>{tag} {esc(f.get("what_we_saw"))}</h3>'
+            return (f'<div class="finding">{head}'
+                    f'<p>{esc(f.get("what_it_means"))}</p>'
+                    f'<p><strong>{esc(f.get("what_fixing_takes"))}</strong></p>{flags}</div>')
+
+        cards = "".join(card(f, i + 1) for i, f in enumerate(pool))
+
         warn = ""
         if findings_predate_audit(findings, audit):
             warn += ('<div class="banner">This site was checked again after these '
@@ -1064,13 +1090,17 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                     'describe how we found the problem rather than what the owner would '
                     'notice. He should hear what a customer experiences, never how we '
                     'measured it.</div>')
-        if state == "draft":
-            action = (f'<form method="post" action="/console/audits/{esc(audit_id)}/approve">'
-                      f'{csrf_field(csrf)}<button type="submit">These look right</button>'
-                      "</form>"
-                      '<p class="hint">A person has to agree these are the right three '
-                      "before a report can exist. Approving does not send or publish "
-                      "anything.</p>")
+
+        if draft:
+            action = ('<p class="hint">Tick the three he should read. They go in the '
+                      'report in the order they appear here. Whatever you leave '
+                      'unticked is held back, one per follow up, so each message '
+                      'after the first has something new in it. Choosing does not '
+                      'send or publish anything.</p>'
+                      f'<button type="submit">Use these three</button>')
+            cards = (f'<form method="post" action="/console/audits/{esc(audit_id)}/approve">'
+                     f'{csrf_field(csrf)}{cards}{action}</form>')
+            action = ""
         elif state == "approved" and not audit.get("report_slug"):
             action = (f'<form method="post" action="/console/audits/{esc(audit_id)}/publish">'
                       f'{csrf_field(csrf)}<button type="submit">Create the shareable report</button></form>')
@@ -1079,12 +1109,20 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                       f'rel="noopener noreferrer">Open the report you can share</a></p>')
         else:
             action = ""
+
+        held = max(0, len(pool) - 3)
+        note = ""
+        if state != "draft" and held < 3:
+            note = (f'<p class="muted">{held} held back, so this company gets '
+                    f'{held + 1} message{"s" if held else ""} rather than four. '
+                    'There was not enough wrong with the site to say something new '
+                    'a fourth time.</p>')
         findings_block = (f"<h2>Talking points <span class='tag'>{esc(state)}</span></h2>"
-                          f"{warn}{cards}{action}")
+                          f"{warn}{cards}{action}{note}")
     else:
         findings_block = (f"""<h2>Talking points</h2><div class="card">
-<p class="muted">Nothing written yet. We will pick the three problems costing this
-company the most work and explain each in plain language.</p>
+<p class="muted">Nothing written yet. We will rank the problems costing this company
+the most work and explain each in plain language. You pick the three he reads.</p>
 <form method="post" action="/console/audits/{esc(audit_id)}/draft">{csrf_field(csrf)}
 <button type="submit">Write talking points</button></form></div>""")
 

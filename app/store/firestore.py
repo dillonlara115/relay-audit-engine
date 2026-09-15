@@ -442,6 +442,32 @@ def save_draft_findings(audit_id: str, findings: list[Mapping[str, Any]],
     )
 
 
+def approve_report_findings(audit_id: str, selected: list[int], *, via: str = "console") -> None:
+    """Record which of the drafted pool a human chose for the report.
+
+    Rule 7 in its strongest form. The model ranks the pool; the person decides
+    which three the contractor reads. The rest stay in the document as the
+    follow-up material criteria section 6 calls for.
+    """
+    from app.report.data import FINDINGS_REQUIRED
+
+    doc = get_client().collection(REPORT_FINDINGS).document(audit_id)
+    snapshot = doc.get()
+    if not snapshot.exists:
+        raise ValueError(f"no drafted findings for {audit_id}")
+    available = {int(f.get("ordinal")) for f in (snapshot.to_dict() or {}).get("findings") or []}
+
+    chosen = list(dict.fromkeys(int(o) for o in selected))
+    if len(chosen) != FINDINGS_REQUIRED:
+        raise ValueError(f"a report carries exactly {FINDINGS_REQUIRED} findings, got {len(chosen)}")
+    missing = [o for o in chosen if o not in available]
+    if missing:
+        raise ValueError(f"no drafted finding with ordinal {missing}")
+
+    doc.set({"selected": chosen, "status": "approved", "approved_at": utcnow(),
+             "approved_via": via}, merge=True)
+
+
 def get_draft_findings(audit_id: str) -> dict[str, Any] | None:
     snap = get_client().collection(REPORT_FINDINGS).document(audit_id).get()
     return snap.to_dict() if snap.exists else None

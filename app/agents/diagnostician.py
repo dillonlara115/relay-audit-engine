@@ -1,4 +1,5 @@
-"""The diagnostician. Drafts the three findings a report is built around.
+"""The diagnostician. Drafts the ranked findings a report and its follow-ups
+are built around.
 
 The model drafts, the human approves. Rule 7 is absolute: findings are never
 auto-selected by score rank, so everything this module produces is stored as a
@@ -6,8 +7,18 @@ draft that an operator must approve before any report exists. What the model is
 for is the part scoring cannot do: judging which three failures cost the most
 booked jobs, and saying so in a homeowner's language.
 
+It drafts a pool of up to six, ranked worst first. The report takes three of
+them, chosen by a human, and criteria section 6's follow-ups draw one each from
+what is left. A site with only four failures yields four findings and therefore
+two touches: the sequence runs out of material rather than sending a nudge with
+nothing new in it, which section 6 does not allow.
+
+Drafting six instead of three also makes rule 7 mean something. Approving the
+model's only three is closer to a rubber stamp than a selection. Choosing three
+from six is the human act the rule describes.
+
 Brand rules enforced here, not just asked for in the prompt:
-- exactly three findings, asserted at parse time
+- the pool is exactly the size asked for, asserted at parse time
 - no em-dashes, sanitized at the boundary
 - no mechanism language, screened and flagged for the approving human
 - no numbers the audit did not measure
@@ -23,15 +34,22 @@ from typing import Any, Mapping, Sequence
 from app.config import get_config
 from app.copy_rules import sanitize
 
+# What a report carries. Fixed by the copy rules and asserted again in
+# report/data.py, which is the artifact a contractor actually reads.
 FINDINGS_REQUIRED = 3
+
+# What the model drafts: the three for the report plus one per follow-up touch
+# at day 3, 7 and 14.
+FINDINGS_POOL = 6
 
 PROMPT = """You are looking at the audit of a residential roofing contractor's online presence.
 Below are the checks that failed, with what the auditor saw. Internal notes may name
 tools and mechanisms; your output NEVER does.
 
-Pick exactly the three failures that cost this business the most booked jobs, ranked
-by lost revenue, not by how easy they are to fix. For each, write three short plain
-sentences for the owner:
+Pick the {count} failures that cost this business the most booked jobs and put them in
+order, worst first. Rank by lost revenue, not by how easy they are to fix. The top of
+your list is what the owner reads first, so the ordering matters as much as the
+selection. For each, write three short plain sentences for the owner:
 
 - what_we_saw: what a homeowner looking for a roofer actually experiences. Outcome
   language only. Never name a tool, platform, tag, script, schema, widget, or metric.
@@ -43,7 +61,8 @@ sentences for the owner:
   change to the site, a service his office can turn on). No vendor names.
 
 Rules: never use an em-dash or en-dash. Never mention scores, points, bands, or
-segments. Write as if the owner will read this over coffee.
+segments. Write as if the owner will read this over coffee. Return exactly {count},
+each citing a different failed check.
 
 Business: {business_name}, {city}
 
@@ -130,8 +149,9 @@ def _screen(text: str) -> tuple[str, list[str], bool]:
     return cleaned, flags, dirty
 
 
-def parse_diagnosis(raw: Any, *, valid_codes: Sequence[str], model: str | None = None) -> Diagnosis:
-    """Validate the model's draft. Exactly three findings or nothing."""
+def parse_diagnosis(raw: Any, *, valid_codes: Sequence[str], model: str | None = None,
+                    expected: int = FINDINGS_REQUIRED) -> Diagnosis:
+    """Validate the model's draft. Exactly the pool size asked for, or nothing."""
     if isinstance(raw, str):
         try:
             raw = json.loads(raw)
@@ -141,11 +161,12 @@ def parse_diagnosis(raw: Any, *, valid_codes: Sequence[str], model: str | None =
     if not isinstance(findings_raw, list):
         return Diagnosis(ok=False, model=model, error="response carried no findings list")
 
-    # Exactly three. Not "up to three", not "the best four". Enforced by code
-    # because a prompt is a request and this is a rule.
-    if len(findings_raw) != FINDINGS_REQUIRED:
+    # Exactly the number asked for. Not "up to", not "the best few". Enforced by
+    # code because a prompt is a request and this is a rule. A short pool would
+    # silently cost the sequence a follow-up touch.
+    if len(findings_raw) != expected:
         return Diagnosis(ok=False, model=model,
-                         error=f"expected {FINDINGS_REQUIRED} findings, got {len(findings_raw)}")
+                         error=f"expected {expected} findings, got {len(findings_raw)}")
 
     valid = set(valid_codes)
     findings: list[Finding] = []
@@ -174,7 +195,7 @@ def parse_diagnosis(raw: Any, *, valid_codes: Sequence[str], model: str | None =
                                 sanitized=dirty, **texts))
 
     codes = [f.check_code for f in findings]
-    if len(set(codes)) != FINDINGS_REQUIRED:
+    if len(set(codes)) != expected:
         return Diagnosis(ok=False, model=model, error=f"duplicate finding codes: {codes}")
 
     return Diagnosis(ok=True, findings=tuple(findings), model=model, needs_review=any_flags)
@@ -219,15 +240,24 @@ async def draft_findings(
     city: str,
     failures: Sequence[Mapping[str, Any]],
     passing: Sequence[Mapping[str, Any]] = (),
+    pool: int | None = None,
 ) -> Diagnosis:
-    """Ask the model to pick three and write consequences. Never raises."""
+    """Ask the model to rank the worst failures and write consequences.
+
+    The pool is capped by how many checks actually failed, because a finding
+    has to cite one. A site with four failures gets four, and the caller reads
+    that as two touches rather than four. Never raises.
+    """
     cfg = get_config()
     if len(failures) < FINDINGS_REQUIRED:
         return Diagnosis(ok=False,
-                         error=f"only {len(failures)} failed checks, three findings need three failures")
+                         error=f"only {len(failures)} failed checks, a report needs {FINDINGS_REQUIRED}")
+
+    count = min(pool or FINDINGS_POOL, len(failures))
 
     prompt = PROMPT.format(
         business_name=business_name, city=city or "Colorado",
+        count=count,
         passing=_passing_block(passing),
         failures=_failures_block(failures),
     )
@@ -247,7 +277,9 @@ async def draft_findings(
                 # Reasoning off, as with vision: measured to give the same
                 # selections for a fraction of the tokens on this shaped task.
                 thinking_config=types.ThinkingConfig(thinking_budget=0),
-                max_output_tokens=1200,
+                # Scaled with the pool: six findings is twice the prose three was,
+                # and a truncated response is a lost draft rather than a short one.
+                max_output_tokens=400 * count,
             ),
         )
     except Exception as exc:  # noqa: BLE001 - a model fault is a missing draft, not a crash
@@ -259,4 +291,4 @@ async def draft_findings(
         return Diagnosis(ok=False, model=cfg.gemini_model, error="response truncated")
 
     return parse_diagnosis(response.text, valid_codes=[str(f.get("code")) for f in failures],
-                           model=cfg.gemini_model)
+                           model=cfg.gemini_model, expected=count)

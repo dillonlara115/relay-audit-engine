@@ -96,7 +96,9 @@ touches Firestore or Vertex.
   back," not "no scheduling widget detected."
 - **No em-dashes in user-facing copy.** Add a test that fails the build if one
   appears in report templates or model output.
-- Exactly three findings, enforced by runtime assertion.
+- Exactly three findings in a report, enforced by runtime assertion. The
+  diagnostician drafts a ranked pool of up to six and a human picks the three;
+  the rest are follow-up material, never extra report findings.
 - Booked findings must state the limit honestly: we can see whether the tools exist,
   not how fast his team moves.
 - Brand tokens: asphalt `#16120E`, chalk `#ECE6DC`, safety orange `#F25C1F`.

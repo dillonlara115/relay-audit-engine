@@ -269,18 +269,26 @@ async def audit_screen(audit_id: str, request: Request) -> Response:
 
 @router.post("/audits/{audit_id}/approve")
 async def approve_findings(audit_id: str, request: Request,
+                           selected: list[int] = Form(default=[]),
                            csrf: str = Form(None)) -> Response:
-    """The human selection rule 7 requires. Approving publishes nothing."""
+    """The human selection rule 7 requires. Approving publishes nothing.
+
+    The model ranks a pool of up to six; this is where a person decides which
+    three the contractor reads. The rest become the follow-up material criteria
+    section 6 asks for.
+    """
     if not check_csrf(request, csrf):
         return Response(status_code=403, content="stale form, reload the page")
 
-    def approve() -> None:
-        store.get_client().collection(store.REPORT_FINDINGS).document(audit_id).set(
-            {"status": "approved", "approved_at": store.utcnow(),
-             "approved_via": "console"}, merge=True
-        )
-
-    await asyncio.to_thread(approve)
+    try:
+        await asyncio.to_thread(store.approve_report_findings, audit_id, selected)
+    except ValueError as exc:
+        return _page(views.shell(
+            "Not approved",
+            f'<h1>Not approved</h1><div class="banner">{views.esc(exc)}</div>'
+            f'<p><a href="/console/audits/{views.esc(audit_id)}">Back to the audit</a></p>',
+            active="batches",
+        ))
     return _redirect(f"/console/audits/{audit_id}")
 
 
@@ -359,8 +367,15 @@ async def log_touch(prospect_id: str, request: Request, audit_id: str = Form(Non
             return f"That prospect is suppressed ({hit}). Nothing was recorded."
 
         row = store.get_sequence(prospect_id)
-        seq = (outreach.Sequence.from_dict(row) if row
-               else outreach.open_sequence(prospect_id, audit_id=audit_id))
+        if row:
+            seq = outreach.Sequence.from_dict(row)
+        else:
+            pool = len(((store.get_draft_findings(audit_id) or {}) if audit_id
+                        else {}).get("findings") or [])
+            seq = outreach.open_sequence(
+                prospect_id, audit_id=audit_id,
+                max_touches=outreach.touches_supported(pool) or 1,
+            )
         if not seq.is_open:
             return "That sequence is finished. Nothing was recorded."
 

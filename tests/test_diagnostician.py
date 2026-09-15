@@ -117,7 +117,8 @@ def test_the_prompt_states_what_passed_as_ground_truth():
     assert "C5" not in block and "C10" not in block
 
     filled = PROMPT.format(business_name="Triton Roofing", city="Colorado Springs",
-                           passing=block, failures="- C17 (Trust read, 2 pts): weak")
+                           count=6, passing=block,
+                           failures="- C17 (Trust read, 2 pts): weak")
     assert "Never say any of these is missing" in filled
     assert "(719) 322-3673" in filled
 

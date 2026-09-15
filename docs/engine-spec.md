@@ -172,7 +172,11 @@ audits/{auditId}/evidence/{evidenceId}
   gcs_path, payload, captured_at
 
 report_findings/{auditId}
-  findings: [ {code, ordinal, consequence_text} ]   # exactly 3, human-selected
+  findings: [ {code, ordinal, what_we_saw, what_it_means, what_fixing_takes} ]
+             # the ranked pool, up to 6. Ordinal is the model's rank, not the
+             # report's order.
+  selected: [ordinal, ordinal, ordinal]   # exactly 3, human-chosen, in reading order
+  status: draft|approved, approved_at, approved_via, needs_review, model
 
 check_defs/{code}
   section, title, full_credit, points, automation, sort_order, enabled

@@ -337,3 +337,60 @@ def test_the_report_prefers_the_frozen_copy_over_live_evidence():
     assert "report_screenshot_path" in source
     # Older reports published before the copy existed still render.
     assert "audit_evidence" in source
+
+
+# ── Which of the pool the contractor actually reads ───────────────────────────
+
+
+def _doc(n=6, **extra):
+    return {"findings": [{"ordinal": i, "what_we_saw": f"saw {i}",
+                          "what_it_means": "y", "what_fixing_takes": "z"}
+                         for i in range(1, n + 1)], **extra}
+
+
+def test_the_report_takes_the_three_a_person_chose():
+    from app.report.publish import report_findings
+
+    chosen = report_findings(_doc(selected=[4, 1, 5]))
+    assert [f["ordinal"] for f in chosen] == [4, 1, 5]
+
+
+def test_the_chosen_order_is_the_order_he_reads_them_in():
+    """Ticking 4, 1, 5 must not silently re-sort to 1, 4, 5."""
+    from app.report.publish import build_public_report
+
+    report = build_public_report({}, {"business_name": "Peak"}, _doc(selected=[4, 1, 5]),
+                                 slug="s1")
+    assert [f.what_we_saw for f in report.findings] == ["saw 4", "saw 1", "saw 5"]
+    assert [f.ordinal for f in report.findings] == [1, 2, 3]
+
+
+def test_the_follow_ups_are_the_rest_in_rank_order():
+    from app.report.publish import followup_findings
+
+    assert [f["ordinal"] for f in followup_findings(_doc(selected=[4, 1, 5]))] == [2, 3, 6]
+
+
+def test_a_document_drafted_before_selection_existed_still_renders():
+    """Those reports were published with the first three. Re-rendering one must
+    not reorder the page a contractor already has."""
+    from app.report.publish import report_findings
+
+    assert [f["ordinal"] for f in report_findings(_doc(3))] == [1, 2, 3]
+
+
+def test_a_report_is_still_exactly_three_however_big_the_pool():
+    from app.report.publish import build_public_report
+
+    report = build_public_report({}, {"business_name": "Peak"}, _doc(6, selected=[1, 2, 3]),
+                                 slug="s1")
+    assert len(report.findings) == 3
+
+
+def test_a_pool_with_no_valid_selection_cannot_build_a_report():
+    import pytest as _pytest
+    from app.report.publish import build_public_report
+
+    with _pytest.raises(ValueError):
+        build_public_report({}, {"business_name": "Peak"}, _doc(6, selected=[9, 10, 11]),
+                            slug="s1")

@@ -214,13 +214,14 @@ def test_no_console_template_offers_to_send_anything():
 def test_approving_is_presented_as_the_human_act():
     audit = {"audit_id": "a1", "scores": {}, "batch_id": "b1"}
     findings = {"status": "draft", "needs_review": False, "findings": [
-        {"ordinal": 1, "what_we_saw": "x", "what_it_means": "y", "what_fixing_takes": "z"}
+        {"ordinal": i, "what_we_saw": f"saw {i}", "what_it_means": "y",
+         "what_fixing_takes": "z"} for i in range(1, 7)
     ]}
     page = views.render_audit(audit=audit, prospect={"business_name": "Peak"},
                               checks=[], definitions={}, findings=findings,
                               evidence=[], csrf="t")
-    assert "These look right" in page
-    assert "A person has to agree these are the right three" in page
+    assert "Use these three" in page
+    assert "Tick the three he should read" in page
     assert "does not send or publish" in page
 
 
@@ -949,10 +950,14 @@ def test_the_ledger_copy_carries_no_em_dash():
     assert not contains_forbidden_dash(blob)
 
 
-def _ledger_store(monkeypatch, *, suppressions=None, sequence=None):
+def _ledger_store(monkeypatch, *, suppressions=None, sequence=None, pool=6):
     import app.console.routes as routes
 
     written: dict = {"touches": [], "sequences": []}
+    monkeypatch.setattr(routes.store, "get_draft_findings", lambda aid: {
+        "findings": [{"ordinal": i} for i in range(1, pool + 1)],
+        "selected": [1, 2, 3],
+    })
     monkeypatch.setattr(routes.store, "get_prospect",
                         lambda pid: {"domain": "whitakerroofing.com",
                                      "owner_email": "dave@whitakerroofing.com"})
@@ -1017,3 +1022,101 @@ def test_a_finished_sequence_records_nothing_further(client, monkeypatch):
 
     assert "finished" in response.text.lower()
     assert written["touches"] == []
+
+
+# ── Choosing three from the pool ──────────────────────────────────────────────
+
+
+def _audit_page(findings):
+    return views.render_audit(
+        audit={"audit_id": "a1", "scores": {}, "batch_id": "b1"},
+        prospect={"business_name": "Peak"}, checks=[], definitions={},
+        findings=findings, evidence=[], csrf="t",
+    )
+
+
+def _pool(n=6, **doc):
+    return {"status": "draft", "needs_review": False,
+            "findings": [{"ordinal": i, "what_we_saw": f"saw {i}",
+                          "what_it_means": "y", "what_fixing_takes": "z"}
+                         for i in range(1, n + 1)], **doc}
+
+
+def test_the_whole_pool_is_shown_for_the_human_to_choose_from():
+    page = _audit_page(_pool())
+    for i in range(1, 7):
+        assert f"saw {i}" in page
+    assert page.count('name="selected"') == 6
+
+
+def test_the_models_ranking_is_pre_ticked_but_only_the_top_three():
+    """Rule 7 is the person changing it, so the default cannot be all six."""
+    page = _audit_page(_pool())
+    assert page.count("checked>") == 3
+
+
+def test_an_approved_pool_shows_which_three_the_contractor_reads():
+    page = _audit_page(_pool(status="approved", selected=[2, 4, 1]))
+    assert "report, number 1" in page
+    assert "follow up 1" in page
+    assert 'name="selected"' not in page
+
+
+def test_a_thin_pool_says_the_company_gets_fewer_messages():
+    """Four findings is two touches, and the screen should say so plainly."""
+    page = _audit_page(_pool(4, status="approved", selected=[1, 2, 3]))
+    assert "2 messages rather than four" in page or "2 message rather than four" in page
+
+
+def test_a_full_pool_does_not_apologise_for_itself():
+    assert "rather than four" not in _audit_page(_pool(6, status="approved",
+                                                       selected=[1, 2, 3]))
+
+
+def test_the_selection_copy_carries_no_em_dash():
+    assert not contains_forbidden_dash(_audit_page(_pool()))
+    assert not contains_forbidden_dash(_audit_page(_pool(status="approved",
+                                                         selected=[1, 2, 3])))
+
+
+def test_approving_records_the_three_a_person_picked(client, monkeypatch):
+    import app.console.routes as routes
+
+    got: dict = {}
+    monkeypatch.setattr(routes.store, "approve_report_findings",
+                        lambda aid, sel, **kw: got.update(audit=aid, selected=sel))
+    csrf = sign_in(client)
+
+    response = client.post("/console/audits/a1/approve",
+                           data={"csrf": csrf, "selected": ["2", "4", "1"]},
+                           follow_redirects=False)
+
+    assert response.status_code == 303
+    assert got["selected"] == [2, 4, 1]
+
+
+def test_approving_the_wrong_number_is_refused_with_a_reason(client, monkeypatch):
+    import app.console.routes as routes
+
+    def boom(aid, sel, **kw):
+        raise ValueError("a report carries exactly 3 findings, got 2")
+
+    monkeypatch.setattr(routes.store, "approve_report_findings", boom)
+    csrf = sign_in(client)
+
+    response = client.post("/console/audits/a1/approve",
+                           data={"csrf": csrf, "selected": ["1", "2"]})
+
+    assert "exactly 3 findings" in response.text
+
+
+def test_a_thin_pool_closes_the_sequence_early(client, monkeypatch):
+    """Four findings buys two touches, not four."""
+    written = _ledger_store(monkeypatch, pool=4)
+    csrf = sign_in(client)
+
+    client.post("/console/outreach/p1/log-touch",
+                data={"csrf": csrf, "audit_id": "a1"}, follow_redirects=False)
+
+    assert written["sequences"][0].max_touches == 2
+    assert written["sequences"][0].next_due_at is not None

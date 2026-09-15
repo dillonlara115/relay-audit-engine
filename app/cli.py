@@ -678,12 +678,18 @@ def suppress(
 @app.command()
 def approve(
     audit_id: str = typer.Argument(..., help="Audit whose drafted findings to approve."),
-    yes: bool = typer.Option(False, "--yes", help="Confirm approval non-interactively."),
+    pick: list[int] = typer.Option(None, "--pick", "-p",
+                                   help="Ordinal of a finding for the report. Give three."),
+    yes: bool = typer.Option(False, "--yes", help="Skip the confirmation prompt."),
 ) -> None:
-    """Approve the drafted findings. This command IS the human selection.
+    """Choose the three findings the report carries. This command IS the selection.
 
-    Rule 7: findings are never auto-selected. Running this after reading them
-    is the act the rule requires, so it prints them and asks.
+    Rule 7: findings are never auto-selected by rank. The model drafts a pool
+    of up to six and this is where a person decides which three a contractor
+    reads. There is deliberately no default: taking the model's top three
+    without being asked is the rubber stamp the rule exists to prevent.
+
+    Whatever is left over becomes the follow-up material, one per touch.
     """
     doc = store.get_draft_findings(audit_id)
     if doc is None:
@@ -705,13 +711,36 @@ def approve(
         console.print("\n[yellow]The model flagged possible mechanism language above. "
                       "Fix the wording in Firestore before approving if it names a tool.[/]")
 
-    if not yes and not typer.confirm("\nApprove these three findings for the report?"):
+    available = [int(f.get("ordinal")) for f in (doc.get("findings") or [])
+                 if f.get("ordinal") is not None]
+    chosen = list(pick or [])
+
+    if not chosen:
+        if yes:
+            console.print("\n[red]Nothing picked.[/] Pass three, for example: "
+                          f"[dim]--pick {' --pick '.join(str(o) for o in available[:3])}[/]")
+            raise typer.Exit(code=1)
+        raw = typer.prompt("\nWhich three does he read? Numbers, best first, comma separated")
+        try:
+            chosen = [int(part) for part in raw.replace(" ", "").split(",") if part]
+        except ValueError:
+            console.print("[red]Those were not numbers.[/] Left as draft.")
+            raise typer.Exit(code=1)
+
+    held = [o for o in available if o not in chosen]
+    console.print(f"\nReport: {', '.join(str(o) for o in chosen)}")
+    console.print(f"Held back for follow ups: {', '.join(str(o) for o in held) or 'nothing'}"
+                  f"  [dim]({len(held) + 1} message{'s' if held else ''} total)[/]")
+
+    if not yes and not typer.confirm("Use these three?"):
         console.print("Left as draft.")
         raise typer.Exit(code=1)
 
-    store.get_client().collection(store.REPORT_FINDINGS).document(audit_id).set(
-        {"status": "approved", "approved_at": store.utcnow()}, merge=True
-    )
+    try:
+        store.approve_report_findings(audit_id, chosen, via="cli")
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(code=1)
     console.print("[green]Approved.[/] Publish with: "
                   f"[dim]python -m app.cli publish {audit_id}[/]")
 

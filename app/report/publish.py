@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from app.copy_rules import contains_forbidden_dash
-from app.report.data import PublicFinding, PublicReport, new_slug
+from app.report.data import FINDINGS_REQUIRED, PublicFinding, PublicReport, new_slug
 from app.report.template import render_report
 from app.store import evidence as evidence_store
 from app.store import firestore as store
@@ -34,12 +34,12 @@ def build_public_report(
 ) -> PublicReport:
     findings = tuple(
         PublicFinding(
-            ordinal=int(row.get("ordinal") or i + 1),
+            ordinal=i + 1,
             what_we_saw=str(row.get("what_we_saw") or ""),
             what_it_means=str(row.get("what_it_means") or ""),
             what_fixing_takes=str(row.get("what_fixing_takes") or ""),
         )
-        for i, row in enumerate(findings_doc.get("findings") or [])
+        for i, row in enumerate(report_findings(findings_doc))
     )
     return PublicReport(
         slug=slug,
@@ -49,6 +49,29 @@ def build_public_report(
         screenshot_url=screenshot_url,
         competitor_note=findings_doc.get("competitor_note"),
     )
+
+
+def report_findings(findings_doc: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """The three a human chose, in the order they chose them.
+
+    A document drafted before selection existed carries no `selected` list, so
+    it falls back to the first three of the pool. That is what those reports
+    were published with and re-rendering one must not silently reorder it.
+    """
+    pool = list(findings_doc.get("findings") or [])
+    selected = findings_doc.get("selected")
+    if not selected:
+        return pool[:FINDINGS_REQUIRED]
+    by_ordinal = {int(f.get("ordinal")): f for f in pool if f.get("ordinal") is not None}
+    return [by_ordinal[int(o)] for o in selected if int(o) in by_ordinal]
+
+
+def followup_findings(findings_doc: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """The pool minus the report's three, in rank order. One per follow-up touch."""
+    chosen = {int(f["ordinal"]) for f in report_findings(findings_doc)
+              if f.get("ordinal") is not None}
+    return [f for f in (findings_doc.get("findings") or [])
+            if int(f.get("ordinal") or 0) not in chosen]
 
 
 @dataclass(frozen=True)

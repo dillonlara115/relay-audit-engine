@@ -31,10 +31,12 @@ from app.outreach import (
     apply_policy,
     due_after,
     open_sequence,
+    finding_for_touch,
     park_reason,
     policy_for,
     record_reply,
     resume,
+    touches_supported,
 )
 
 DAY0 = datetime(2026, 9, 14, 9, 0, tzinfo=timezone.utc)
@@ -293,3 +295,65 @@ def test_park_reason_distinguishes_the_two_ways_a_sequence_stalls():
     wrong, _ = record_reply(sent_through(1), WRONG_PERSON, at=DAY0)
     other, _ = record_reply(sent_through(1), OTHER, at=DAY0)
     assert park_reason(wrong) != park_reason(other)
+
+
+# ── How far a pool carries a sequence ─────────────────────────────────────────
+
+
+@pytest.mark.parametrize("pool,expected", [
+    (3, 1),   # report only, nothing new to add
+    (4, 2),
+    (5, 3),
+    (6, 4),   # the full cadence
+    (9, 4),   # capped by section 6, not by material
+    (2, 0),   # not even a report
+])
+def test_a_pool_buys_one_touch_per_finding_past_the_report(pool, expected):
+    assert touches_supported(pool) == expected
+
+
+def test_touch_one_is_the_report_and_carries_no_single_finding():
+    assert finding_for_touch(1, 6) is None
+
+
+def test_each_follow_up_takes_the_next_unchosen_finding():
+    assert [finding_for_touch(t, 6) for t in (2, 3, 4)] == [4, 5, 6]
+
+
+def test_a_touch_past_the_pool_has_nothing_to_carry():
+    assert finding_for_touch(3, 4) is None
+
+
+def test_a_thin_pool_closes_when_it_runs_out_of_material():
+    """Four findings is two touches. Not a third with nothing new in it."""
+    seq = open_sequence("p1", now=DAY0, max_touches=touches_supported(4))
+    seq = advance(seq, sent_at=DAY0)
+    assert seq.status == ACTIVE
+    seq = advance(seq, sent_at=seq.next_due_at)
+    assert seq.status == CLOSED
+    assert seq.closed_reason == "no findings left to send"
+
+
+def test_a_full_pool_still_runs_the_whole_cadence():
+    seq = open_sequence("p1", now=DAY0, max_touches=touches_supported(6))
+    for _ in range(4):
+        seq = advance(seq, sent_at=seq.next_due_at or DAY0)
+    assert seq.touch_count == 4
+    assert seq.closed_reason == "sequence complete, no reply"
+
+
+def test_the_two_ways_a_sequence_ends_are_distinguishable():
+    """Ran out of things to say is not the same as said everything and got silence."""
+    thin = open_sequence("p1", now=DAY0, max_touches=touches_supported(4))
+    thin = advance(advance(thin, sent_at=DAY0), sent_at=DAY0 + days(3))
+    full = sent_through(4)
+    assert thin.closed_reason != full.closed_reason
+
+
+def test_max_touches_survives_the_round_trip():
+    seq = open_sequence("p1", now=DAY0, max_touches=2)
+    assert Sequence.from_dict(seq.to_dict()).max_touches == 2
+
+
+def test_a_sequence_stored_before_pools_existed_reads_as_the_full_cadence():
+    assert Sequence.from_dict({"prospect_id": "p1", "status": "active"}).max_touches == 4

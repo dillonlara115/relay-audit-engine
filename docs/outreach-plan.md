@@ -16,6 +16,7 @@ Criteria doc §6 and §7 govern. Where this disagrees with them, they win.
 |---|---|---|
 | 1A | Contact discovery and DNS verification | **Built.** 50% coverage on a live Colorado Springs sweep |
 | 1B | The four-touch ledger, hand-logged | **Built.** Cadence, parking, rewind, reply policy table |
+| Findings pool | Six ranked, three chosen, the rest held for follow-ups | **Built.** Section 6 now has material to send |
 | 1C | Reply ingestion and intent classification | Next |
 | 2 | Console: CSV export, excluded tab, score history | Independent of the rest |
 | 3 | Sending, with open and click tracking | **Blocked on an entry condition.** See below |
@@ -170,6 +171,18 @@ principle that an unrun check never counts as a failure.
 **Manual contacts survive re-crawl.** An address a person hunted down after a
 `wrong_person` reply outranks anything on the site and is held in a separate
 field discovery never writes to.
+
+**Findings are drafted six at a time and chosen three.** The model ranks up to
+six failures worst first; a person picks the three the report carries; the rest
+become follow-up material, one per touch. A pool is capped by how many checks
+actually failed, so a site with four failures yields two touches rather than
+four, and the sequence closes with `no findings left to send` rather than
+sending a nudge with nothing new in it.
+
+This also strengthens rule 7 rather than bending it. Approving a model's only
+three is closer to a rubber stamp than a selection; choosing three from six is
+the human act the rule describes. Neither the console nor the CLI has a default
+selection, and `approve --yes` with no `--pick` is an error.
 
 **The reply policy table** lives in `app/outreach.py`. Two entries are worth
 restating because they are judgements rather than mechanics:
