@@ -119,7 +119,7 @@ def test_the_page_holds_the_required_structure():
     assert "lead-leakage-calculator" in page
     assert "reply to the message" in page.lower()
     assert "#16120E".lower() in page.lower() and "#F25C1F".lower() in page.lower()
-    assert "Barlow Condensed" in page and "Work Sans" in page
+    assert "PT Sans" in page and "Work Sans" in page
 
 
 def test_untrusted_text_is_escaped():

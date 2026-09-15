@@ -52,7 +52,7 @@ body { background:var(--field); color:var(--asphalt);
        font-family:'Work Sans',sans-serif; font-size:16px; line-height:1.55; }
 a { color:var(--ember); text-decoration:none; }
 a:hover { text-decoration:underline; color:var(--orange); }
-h1,h2,h3,h4 { font-family:'Barlow Condensed',sans-serif; letter-spacing:.01em; font-weight:600; }
+h1,h2,h3,h4 { font-family:'PT Sans',sans-serif; letter-spacing:normal; font-weight:700; }
 h1 { font-size:2rem; line-height:1.15; }
 h2 { font-size:1.35rem; margin:34px 0 4px; }
 h3 { font-size:1.1rem; margin:0 0 6px; }
@@ -69,7 +69,7 @@ h3 { font-size:1.1rem; margin:0 0 6px; }
 .side { width:232px; flex:0 0 232px; background:var(--panel); color:var(--asphalt);
         padding:22px 16px; position:sticky; top:0; height:100vh;
         border-right:1px solid var(--line); }
-.side .brand { display:block; font-family:'Barlow Condensed',sans-serif; font-weight:600;
+.side .brand { display:block; font-family:'PT Sans',sans-serif; font-weight:700;
                font-size:1.35rem; letter-spacing:.04em; color:var(--ember);
                text-transform:uppercase; line-height:1.1; margin-bottom:4px; }
 /* --ember, not --orange. At 21.6px semibold the brand orange is 3.32:1 on
@@ -107,7 +107,7 @@ h3 { font-size:1.1rem; margin:0 0 6px; }
          gap:10px; margin:14px 0; }
 .tile { background:var(--panel); border:1px solid var(--line); border-radius:11px;
         padding:13px 15px; box-shadow:var(--shadow-soft); }
-.tile .n { font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:1.75rem;
+.tile .n { font-family:'PT Sans',sans-serif; font-weight:700; font-size:1.75rem;
            line-height:1; }
 .tile .l { font-size:.79rem; color:var(--ink2); margin-top:3px; }
 
@@ -124,7 +124,7 @@ summary:focus-visible {
   outline:none; border-radius:4px; box-shadow:var(--focus-ring); }
 .side nav a:focus-visible { box-shadow:inset var(--focus-ring); }
 textarea { min-height:86px; resize:vertical; }
-button { font-family:'Barlow Condensed',sans-serif; font-weight:600; letter-spacing:.03em;
+button { font-family:'PT Sans',sans-serif; font-weight:700; letter-spacing:.01em;
          font-size:1.02rem; background:var(--orange); color:var(--asphalt); border:0;
          border-radius:9px; padding:10px 20px; cursor:pointer; margin-top:14px;
          box-shadow:var(--shadow-soft); }
@@ -153,8 +153,8 @@ table { width:100%; min-width:640px; border-collapse:separate; border-spacing:0;
 /* A header row set in the field colour with dark type, rather than a solid
    black bar. On a call list of forty companies the bar was the first thing
    the eye landed on, and the names are the thing worth reading. */
-th { font-family:'Barlow Condensed',sans-serif; font-weight:600; text-align:left;
-     font-size:.9rem; letter-spacing:.03em; padding:11px 12px;
+th { font-family:'PT Sans',sans-serif; font-weight:700; text-align:left;
+     font-size:.9rem; letter-spacing:.01em; padding:11px 12px;
      background:var(--field); color:var(--asphalt);
      border-bottom:1px solid var(--line); }
 th .sub { display:block; font-family:'Work Sans',sans-serif; font-weight:400;
@@ -198,8 +198,8 @@ pre.log { background:var(--asphalt); color:#e8e2d6; border-radius:12px; padding:
           box-shadow:var(--shadow);
           font-size:.85rem; line-height:1.5; max-height:440px; overflow:auto;
           white-space:pre-wrap; word-break:break-word; }
-.status { display:inline-block; font-family:'Barlow Condensed',sans-serif; font-weight:600;
-          letter-spacing:.03em; padding:2px 11px; border-radius:11px; background:var(--line); }
+.status { display:inline-block; font-family:'PT Sans',sans-serif; font-weight:700;
+          letter-spacing:.01em; padding:2px 11px; border-radius:11px; background:var(--line); }
 .status.running { background:var(--orange); color:var(--asphalt); }  /* white on this orange is 3.32:1, below AA; green/red pills already pass */
 .status.done { background:#2E7D4F; color:#fff; }
 .status.failed { background:#8d2f16; color:#fff; }
@@ -219,7 +219,7 @@ abbr[title] { text-decoration:underline dotted; cursor:help; }
 details.legend { background:var(--panel); border:1px solid var(--line);
   border-radius:12px; margin:14px 0; box-shadow:var(--shadow-soft); }
 details.legend summary { cursor:pointer; padding:13px 17px;
-  font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:1.05rem; }
+  font-family:'PT Sans',sans-serif; font-weight:700; font-size:1.05rem; }
 details.legend .inner { padding:2px 17px 15px; }
 details.legend h4 { font-size:1rem; margin:12px 0 2px; }
 details.legend p { margin:0 0 5px; font-size:.93rem; }
@@ -243,7 +243,7 @@ _SHELL = """<!doctype html>
 <meta name="robots" content="noindex,nofollow">
 <title>__TITLE__</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=Work+Sans:wght@400;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans:wght@400;700&family=Work+Sans:wght@400;600&display=swap" rel="stylesheet">
 <style>__CSS__</style>
 </head>
 <body>
