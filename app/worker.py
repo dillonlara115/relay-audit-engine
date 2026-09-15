@@ -18,9 +18,11 @@ silent; a redelivery is not.
 from __future__ import annotations
 
 import logging
+import re
 import os
 
 from fastapi import FastAPI, Request, Response
+from fastapi.responses import RedirectResponse
 
 from app.config import get_config
 from app.leases import worker_id
@@ -50,7 +52,7 @@ app.include_router(console_router)
 # scheduler endpoints carry their own shared-secret check in `_authorized`,
 # because a push subscription cannot log in to anything.
 OPEN_PREFIXES = (
-    "/r/",          # the public report. Its access control is the 16 character slug.
+    "/r/",          # the pre-move report path, now a redirect. See REPORT_SLUG.
     "/health",
     "/healthz",
     "/robots.txt",
@@ -59,8 +61,17 @@ OPEN_PREFIXES = (
 )
 
 
+# A report lives at the root, so the open rule for it is a shape rather than a
+# prefix: anything else at the root stays closed. new_slug() is
+# secrets.token_urlsafe(12), which is always exactly 16 characters from this
+# alphabet, so the match is exact rather than a range. A route whose own path
+# happened to match this would be public by accident, which is why
+# test_no_route_can_be_mistaken_for_a_report walks the app and forbids it.
+REPORT_SLUG = re.compile(r"^/[A-Za-z0-9_-]{16}$")
+
+
 def is_open_path(path: str) -> bool:
-    return path.startswith(OPEN_PREFIXES)
+    return path.startswith(OPEN_PREFIXES) or bool(REPORT_SLUG.match(path))
 
 
 @app.middleware("http")
@@ -272,9 +283,28 @@ async def tick(request: Request) -> Response:
     )
 
 
-@app.get("/r/{slug}")
+@app.get("/r/{slug}", include_in_schema=False)
+def public_report_legacy(slug: str) -> Response:
+    """Reports published before they moved to the root.
+
+    Three existed at the time of the move. A link that is already in somebody's
+    inbox cannot be recalled, and one permanent redirect is cheaper than ever
+    finding out the hard way which of them was shared.
+    """
+    if not REPORT_SLUG.match(f"/{slug}"):
+        return Response(status_code=404)
+    return RedirectResponse(f"/{slug}", status_code=301)
+
+
+@app.get("/{slug}")
 def public_report(slug: str, request: Request) -> Response:
-    """The one-page report. Public by slug, and only by slug.
+    """The one-page report, at the root of its own hostname.
+
+    This is a single-segment catch-all, so every named single-segment route
+    has to be declared above it or this would swallow it. Pinned by
+    test_no_named_route_is_shadowed_by_the_report rather than by memory.
+
+    Public by slug, and only by slug.
 
     The slug is 16 CSPRNG characters and the only access control this page
     has, which is why it never appears in a sitemap, a log line, or a search
@@ -283,7 +313,7 @@ def public_report(slug: str, request: Request) -> Response:
     """
     from app.report.publish import log_view, render_by_slug
 
-    if len(slug) < 12 or len(slug) > 24:
+    if not REPORT_SLUG.match(f"/{slug}"):
         return Response(status_code=404)
 
     page = render_by_slug(slug)

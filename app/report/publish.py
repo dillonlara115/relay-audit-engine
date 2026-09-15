@@ -151,7 +151,7 @@ def publish(audit_id: str) -> PublishResult:
         "published_at": store.utcnow(),
         **({"report_screenshot_path": frozen} if frozen else {}),
     })
-    return PublishResult(slug=slug, audit_id=audit_id, url_path=f"/r/{slug}")
+    return PublishResult(slug=slug, audit_id=audit_id, url_path=f"/{slug}")
 
 
 def load_by_slug(slug: str) -> tuple[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any]] | None:

@@ -92,7 +92,7 @@ def render_batch(
         findings = r.get("findings_status")
         report = ""
         if r.get("report_slug"):
-            report = (f'<a href="/r/{esc(r["report_slug"])}" target="_blank" '
+            report = (f'<a href="/{esc(r["report_slug"])}" target="_blank" '
                       f'rel="noopener noreferrer">report</a>')
         elif findings:
             report = f'<span class="muted">{esc(findings)}</span>'

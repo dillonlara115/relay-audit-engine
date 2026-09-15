@@ -1150,7 +1150,7 @@ def test_a_report_answers_without_a_password(client, monkeypatch):
     monkeypatch.setattr("app.report.publish.render_by_slug", lambda slug: "<html>report</html>")
     monkeypatch.setattr("app.report.publish.log_view", lambda *a, **k: None)
 
-    response = client.get("/r/abcdefghijklmnop")
+    response = client.get("/abcdefghijklmnop")
 
     assert response.status_code == 200
     assert "report" in response.text
@@ -1159,7 +1159,7 @@ def test_a_report_answers_without_a_password(client, monkeypatch):
 def test_a_report_that_does_not_exist_is_a_404_not_a_login(client, monkeypatch):
     """A wrong slug must not leak that there is a console behind this."""
     monkeypatch.setattr("app.report.publish.render_by_slug", lambda slug: None)
-    assert client.get("/r/abcdefghijklmnop").status_code == 404
+    assert client.get("/abcdefghijklmnop").status_code == 404
 
 
 def test_health_answers_for_cloud_run(client):
@@ -1179,7 +1179,7 @@ def test_every_response_carries_noindex_however_it_ended(client, monkeypatch):
     monkeypatch.setattr("app.report.publish.render_by_slug", lambda slug: None)
 
     for path in ("/health", "/robots.txt", "/console", "/export",
-                 "/r/abcdefghijklmnop", "/nothing-here"):
+                 "/abcdefghijklmnop", "/nothing-here"):
         response = client.get(path, follow_redirects=False)
         assert response.headers.get("X-Robots-Tag") == "noindex, nofollow", path
 
@@ -1194,3 +1194,69 @@ def test_a_signed_in_operator_still_reaches_the_console(client):
     """The inversion must not have locked out the person who has the password."""
     sign_in(client)
     assert client.get("/console").status_code == 200
+
+
+# ── The report at the root ────────────────────────────────────────────────────
+
+
+def test_a_slug_shaped_path_is_the_only_thing_open_at_the_root():
+    from app.worker import is_open_path
+
+    assert is_open_path("/" + "a" * 16) is True
+    for closed in ("/" + "a" * 15, "/" + "a" * 17, "/export", "/admin",
+                   "/prospects", "/", "/a.b"):
+        assert is_open_path(closed) is False, closed
+
+
+def test_the_open_shape_matches_what_new_slug_actually_produces():
+    """If new_slug ever changes length or alphabet, this catches it before a
+    published report stops resolving."""
+    from app.report.data import new_slug
+    from app.worker import REPORT_SLUG
+
+    for _ in range(50):
+        assert REPORT_SLUG.match("/" + new_slug())
+
+
+def test_no_named_route_is_shadowed_by_the_report():
+    """The report is a single-segment catch-all. Any named single-segment route
+    declared after it would become unreachable, and any route whose path
+    happened to be sixteen characters would become public."""
+    from app.worker import REPORT_SLUG, app
+
+    paths = [getattr(r, "path", "") for r in app.routes]
+    catch_all = paths.index("/{slug}")
+
+    for i, path in enumerate(paths):
+        if not path or path == "/{slug}":
+            continue
+        assert not REPORT_SLUG.match(path), f"{path} is shaped like a report slug"
+        single_segment = path.count("/") == 1 and "{" not in path
+        assert not (single_segment and i > catch_all), \
+            f"{path} is declared after the catch-all and can never be reached"
+
+
+def test_an_old_report_link_still_resolves(client, monkeypatch):
+    """Three were published before the move. A link already sent cannot be
+    recalled."""
+    monkeypatch.setattr("app.report.publish.render_by_slug", lambda slug: "<html>ok</html>")
+    monkeypatch.setattr("app.report.publish.log_view", lambda *a, **k: None)
+
+    response = client.get("/r/S8_n4NYrBhlviJJW", follow_redirects=False)
+
+    assert response.status_code == 301
+    assert response.headers["location"] == "/S8_n4NYrBhlviJJW"
+
+
+def test_publish_hands_back_the_new_path():
+    from app.report.publish import PublishResult
+
+    assert PublishResult(slug="abcdefghijklmnop", audit_id="a1",
+                         url_path="/abcdefghijklmnop").url_path.startswith("/")
+
+
+def test_a_junk_slug_on_the_old_path_is_not_an_open_redirect():
+    from app.worker import REPORT_SLUG
+
+    for hostile in ("//evil.com", "..%2f..%2fadmin", "a" * 40):
+        assert not REPORT_SLUG.match(f"/{hostile}")

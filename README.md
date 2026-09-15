@@ -336,7 +336,7 @@ gcloud run deploy renderer --source renderer/ --region "$REGION" \
 RENDERER_URL=$(gcloud run services describe renderer --region "$REGION" --format='value(status.url)')
 
 # The audit worker. Reachable without a bearer token because Pub/Sub push and
-# the public /r/{slug} reports both need to be. Everything else on the service
+# the public /{slug} reports both need to be. Everything else on the service
 # is closed by default: see OPEN_PREFIXES in app/worker.py for the whole public
 # surface, which is the report, the health checks, robots.txt and the two
 # token-gated machine endpoints. Every response carries noindex.

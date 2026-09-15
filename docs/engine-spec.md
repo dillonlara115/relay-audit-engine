@@ -296,7 +296,14 @@ def compute(outcomes: list[CheckOutcome]) -> Score: ...
 
 ## 8. Reports
 
-Route: `/r/{slug}`, public, unauthenticated, unguessable 16-character slug.
+Route: `/{slug}` at the root of the public hostname, unauthenticated, unguessable
+16-character slug. `/r/{slug}` 301s to it for reports published before the move.
+
+The public hostname is **`reports.relayforroofers.com`**, and it serves the report
+and nothing else: the console and dashboard stay on the Cloud Run URL, which is
+not guessable. A URL is something a contractor reads, so the subdomain follows the
+same copy rule as the page. `leads.` was considered and rejected on those grounds,
+since it names what the tool does for us rather than what the page is for him.
 
 - `noindex,nofollow` in meta and in the `X-Robots-Tag` header.
 - Server-side data access only. The public payload carries business name, city, the
@@ -421,7 +428,7 @@ Treat a violation as a failing build.
 10. **Every finding shown to a prospect has stored evidence**, asserted at publish
     time.
 11. **The service is closed by default.** Everything needs a console session except
-    an explicit short list: the report at `/r/{slug}`, the Cloud Run health checks,
+    an explicit short list: the report at `/{slug}`, the Cloud Run health checks,
     `robots.txt`, and the two token-gated machine endpoints. A route added later is
     private until somebody puts it on that list on purpose. Enforced by test.
 12. **Nothing on this service is indexable.** `X-Robots-Tag: noindex, nofollow` is

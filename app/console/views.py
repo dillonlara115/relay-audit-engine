@@ -817,7 +817,7 @@ def render_batch(batch_id: str, rows: Sequence[Mapping[str, Any]],
 
         state = r.get("findings_status")
         if r.get("report_slug"):
-            action = f'<a href="/r/{esc(r["report_slug"])}">report</a>'
+            action = f'<a href="/{esc(r["report_slug"])}">report</a>'
         elif state == "approved":
             action = (f'<form class="inline" method="post" action="/console/audits/'
                       f'{esc(r["audit_id"])}/publish">{csrf_field(csrf)}'
@@ -1105,7 +1105,7 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
             action = (f'<form method="post" action="/console/audits/{esc(audit_id)}/publish">'
                       f'{csrf_field(csrf)}<button type="submit">Create the shareable report</button></form>')
         elif audit.get("report_slug"):
-            action = (f'<p><a href="/r/{esc(audit["report_slug"])}" target="_blank" '
+            action = (f'<p><a href="/{esc(audit["report_slug"])}" target="_blank" '
                       f'rel="noopener noreferrer">Open the report you can share</a></p>')
         else:
             action = ""
