@@ -373,6 +373,7 @@ def test_assemble_batch_attaches_per_audit_check_statuses(monkeypatch):
     monkeypatch.setattr(routes.store, "audits_for_batch", lambda b: audits)
     monkeypatch.setattr(routes.store, "get_prospect", lambda p: {"business_name": "Peak"})
     monkeypatch.setattr(routes.store, "get_draft_findings", lambda a: None)
+    monkeypatch.setattr(routes.store, "sequences_for_batch", lambda b: {})
     monkeypatch.setattr(routes.store, "audit_checks",
                         lambda a: [{"code": "C16", "status": "fail"}, {"code": "B1", "status": "pass"}])
     monkeypatch.setattr(routes.store, "all_check_defs", lambda: [

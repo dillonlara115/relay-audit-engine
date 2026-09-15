@@ -107,6 +107,11 @@ class Config:
     # leaves every discovered address at status "unknown" rather than guessing.
     verify_contacts: bool = field(default_factory=lambda: _bool("VERIFY_CONTACTS", True))
 
+    # Reply ingestion. The OAuth client is the operator's own, and the stored
+    # token carries gmail.readonly and nothing else: see app/tools/gmail.py.
+    gmail_client_secrets: str = field(default_factory=lambda: _str("GMAIL_CLIENT_SECRETS"))
+    gmail_token_path: str = field(default_factory=lambda: _str("GMAIL_TOKEN_PATH"))
+
     # Pub/Sub
     pubsub_audit_topic: str = field(
         default_factory=lambda: _str("PUBSUB_AUDIT_TOPIC", "run-audit")
@@ -158,6 +163,8 @@ _ENV_NAME = {
     "pubsub_audit_topic": "PUBSUB_AUDIT_TOPIC",
     "worker_shared_secret": "WORKER_SHARED_SECRET",
     "console_password": "CONSOLE_PASSWORD",
+    "gmail_client_secrets": "GMAIL_CLIENT_SECRETS",
+    "gmail_token_path": "GMAIL_TOKEN_PATH",
 }
 
 

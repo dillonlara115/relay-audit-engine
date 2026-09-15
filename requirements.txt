@@ -4,6 +4,8 @@ google-cloud-firestore
 google-cloud-storage
 google-cloud-pubsub
 google-auth
+google-auth-oauthlib
+google-api-python-client
 fastapi
 uvicorn[standard]
 httpx

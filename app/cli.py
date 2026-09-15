@@ -15,6 +15,7 @@ import os
 from typing import Any
 
 import typer
+from rich import box
 from rich.console import Console
 from rich.table import Table
 
@@ -979,6 +980,153 @@ def _draft_top(rows) -> None:
             console.print(f"      saw:   {f.what_we_saw}")
             console.print(f"      means: {f.what_it_means}")
             console.print(f"      fix:   {f.what_fixing_takes}")
+
+
+
+@app.command("gmail-connect")
+def gmail_connect(
+    force: bool = typer.Option(False, "--force", help="Replace an existing token."),
+) -> None:
+    """Authorize reading replies from your own mailbox. Read only.
+
+    Opens a browser once and stores a refresh token. The only scope requested
+    is gmail.readonly, so the credential this produces cannot send. That is
+    hard rule 4 enforced by Google rather than by a test in this repo.
+    """
+    import json as _json
+
+    from app.tools.gmail import SCOPES, token_path
+
+    cfg = get_config()
+    path = token_path()
+    if path.exists() and not force:
+        console.print(f"[green]Already connected.[/] Token at {path}. "
+                      "Re-run with --force to replace it.")
+        return
+    if not cfg.gmail_client_secrets:
+        console.print("[red]GMAIL_CLIENT_SECRETS is not set.[/] Create an OAuth client "
+                      "of type 'Desktop app' in the Google Cloud console, download the "
+                      "JSON, and point that variable at it.")
+        raise typer.Exit(code=1)
+
+    try:
+        from google_auth_oauthlib.flow import InstalledAppFlow
+    except ImportError:
+        console.print("[red]google-auth-oauthlib is not installed.[/] "
+                      "pip install -r requirements.txt")
+        raise typer.Exit(code=1)
+
+    console.print(f"Requesting [bold]{SCOPES[0]}[/] and nothing else.")
+    flow = InstalledAppFlow.from_client_secrets_file(cfg.gmail_client_secrets, list(SCOPES))
+    creds = flow.run_local_server(port=0)
+
+    granted = set(creds.scopes or ())
+    if granted != set(SCOPES):
+        console.print(f"[red]Refusing to store this token.[/] Google granted "
+                      f"{sorted(granted)}, which is not read only.")
+        raise typer.Exit(code=1)
+
+    path.write_text(creds.to_json())
+    path.chmod(0o600)
+    console.print(f"[green]Connected.[/] Token stored at {path}. "
+                  "Scan with: [dim]python -m app.cli replies[/]")
+
+
+@app.command()
+def replies(
+    limit: int = typer.Option(50, "--limit", "-n", help="Sequences to scan."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Classify but change nothing."),
+) -> None:
+    """Read replies to touches already sent, and let the ledger act on them.
+
+    Reads. Never sends. A reply that cannot be classified confidently parks the
+    sequence for a person rather than being guessed at, because the alternative
+    is suppressing a prospect on a coin flip.
+    """
+    import asyncio as _asyncio
+
+    from app.replies import scan
+
+    if dry_run:
+        console.print("[yellow]Dry run: nothing will be written.[/]\n")
+
+    result = _asyncio.run(scan(limit=limit))
+
+    if result.error:
+        console.print(f"[red]Scan stopped.[/] {result.error}")
+        raise typer.Exit(code=1)
+
+    console.print(f"Scanned [bold]{result.scanned}[/] open sequences, "
+                  f"found [bold]{result.found}[/] new "
+                  f"{'reply' if result.found == 1 else 'replies'}"
+                  f"{f', skipped {result.skipped_seen} already seen' if result.skipped_seen else ''}.")
+    if not result.outcomes:
+        return
+
+    table = Table(box=box.SIMPLE, show_edge=False)
+    for column in ("Business", "Reply", "Read as", "Sure?", "What happened"):
+        table.add_column(column, overflow="fold")
+    for o in result.outcomes:
+        what = ("suppressed" if o.suppressed else
+                "closed" if o.closed else
+                "waiting for you" if o.parked else "still going")
+        confidence = ("auto" if o.classification.auto
+                      else f"{o.classification.confidence:.0%}")
+        table.add_row(_truncate(o.business_name, 24), _truncate(o.reply.excerpt, 46),
+                      o.intent.replace("_", " "), confidence, what)
+    console.print(table)
+
+    parked = [o for o in result.outcomes if o.parked]
+    if parked:
+        console.print(f"\n[yellow]{len(parked)} need a person to read them.[/] "
+                      "Nothing was suppressed on an unclear reply.")
+
+
+@app.command()
+def outcomes() -> None:
+    """Reply rate, and how far off the criteria doc's threshold you are.
+
+    Section 7: no automated sending until at least thirty have been hand sent
+    and a reply rate is known. This is that number.
+    """
+    from app.replies import reply_rate
+
+    stats = reply_rate()
+    sent, replied = stats["sent"], stats["replied"]
+
+    if not sent:
+        console.print("Nothing has been sent yet, so there is no rate to report. "
+                      "That is not a rate of zero.")
+        return
+
+    rate = stats["rate"]
+    console.print(f"\n[bold]{sent}[/] sent, [bold]{replied}[/] replied "
+                  f"([bold]{rate:.1%}[/])")
+
+    remaining = max(0, stats["threshold"] - sent)
+    if remaining:
+        console.print(f"[yellow]{remaining} more hand sent[/] before the rate means "
+                      "anything, per the outreach rules.")
+    else:
+        console.print("[green]Past the thirty the outreach rules ask for.[/] "
+                      "The rate above is the one that decides whether to automate.")
+
+    if stats["by_intent"]:
+        table = Table(box=box.SIMPLE, show_edge=False, title="How they answered")
+        table.add_column("Reply"); table.add_column("Count", justify="right")
+        for intent, count in sorted(stats["by_intent"].items(), key=lambda kv: -kv[1]):
+            table.add_row(intent.replace("_", " "), str(count))
+        console.print(table)
+
+    rows = [(s, v) for s, v in stats["by_segment"].items() if v["sent"]]
+    if len(rows) > 1:
+        table = Table(box=box.SIMPLE, show_edge=False, title="By opportunity type")
+        for column in ("Type", "Sent", "Replied", "Rate"):
+            table.add_column(column, justify="right" if column != "Type" else "left")
+        for segment, v in sorted(rows, key=lambda kv: -(kv[1]["replied"] / kv[1]["sent"])):
+            table.add_row(segment, str(v["sent"]), str(v["replied"]),
+                          f"{v['replied'] / v['sent']:.0%}")
+        console.print(table)
 
 
 if __name__ == "__main__":

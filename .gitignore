@@ -11,3 +11,4 @@ node_modules/
 !docs/architecture.png
 scripts/probe_*.py
 out/
+.gmail-token.json

@@ -661,12 +661,39 @@ def sequences_due(now: datetime | None = None, *, status: str = "active",
 def sequences_for_batch(batch_id: str) -> dict[str, dict[str, Any]]:
     """Every sequence belonging to a batch's audits, keyed by prospect id.
 
-    Read whole rather than per-row: the call list renders up to a hundred rows
-    and a lookup each would be a hundred round trips.
+    Fetched by document id rather than streamed and filtered. An outreach doc
+    is keyed by its prospect id, so this is an exact multi-get: the call list
+    renders up to a hundred rows and neither a lookup per row nor a scan of
+    every sequence ever opened is the right shape for that.
     """
-    wanted = {a.get("prospect_id") for a in audits_for_batch(batch_id)}
+    client = get_client()
+    wanted = [str(a.get("prospect_id")) for a in audits_for_batch(batch_id)
+              if a.get("prospect_id")]
+    if not wanted:
+        return {}
+
     out: dict[str, dict[str, Any]] = {}
-    for snap in get_client().collection(OUTREACH).stream():
-        if snap.id in wanted:
-            out[snap.id] = snap.to_dict() or {}
+    collection = client.collection(OUTREACH)
+    # get_all takes a bounded list; chunk so a large batch cannot outgrow it.
+    for start in range(0, len(wanted), 100):
+        refs = [collection.document(pid) for pid in wanted[start:start + 100]]
+        for snap in client.get_all(refs):
+            if snap.exists:
+                out[snap.id] = snap.to_dict() or {}
     return out
+
+
+def sequences_by_status(status: str, *, limit: int = 200) -> list[dict[str, Any]]:
+    """Every sequence in one state. Equality only, so no composite index."""
+    query = (
+        get_client()
+        .collection(OUTREACH)
+        .where(filter=firestore.FieldFilter("status", "==", status))
+        .limit(limit)
+    )
+    return [snap.to_dict() or {} for snap in query.stream()]
+
+
+def all_sequences() -> list[dict[str, Any]]:
+    """The whole ledger. Small by design: target volume is a hundred a month."""
+    return [snap.to_dict() or {} for snap in get_client().collection(OUTREACH).stream()]

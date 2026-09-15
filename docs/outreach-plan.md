@@ -17,7 +17,8 @@ Criteria doc §6 and §7 govern. Where this disagrees with them, they win.
 | 1A | Contact discovery and DNS verification | **Built.** 50% coverage on a live Colorado Springs sweep |
 | 1B | The four-touch ledger, hand-logged | **Built.** Cadence, parking, rewind, reply policy table |
 | Findings pool | Six ranked, three chosen, the rest held for follow-ups | **Built.** Section 6 now has material to send |
-| 1C | Reply ingestion and intent classification | Next |
+| 1C | Reply ingestion and intent classification | **Built.** Gmail read only, six intents, auto suppression on a no |
+| 1D | Outcome loop: reply rate by segment and intent | **Built.** `python -m app.cli outcomes` |
 | 2 | Console: CSV export, excluded tab, score history | Independent of the rest |
 | 3 | Sending, with open and click tracking | **Blocked on an entry condition.** See below |
 
@@ -77,6 +78,15 @@ the customer's domain rather than theirs.
 ### Read before write, and let Google enforce it
 
 **1C requests `gmail.readonly` and nothing more. Phase 3 widens the scope.**
+
+Built as specified. `app/tools/gmail.py` refuses to construct a client from a
+token carrying any other scope, and `gmail-connect` refuses to store one, so a
+credential that can send cannot enter the system even by accident. Three other
+properties are enforced there rather than intended: search is always scoped to
+addresses already held and an empty address list makes no API call at all, so
+there is no code path that lists a mailbox; and only an excerpt is stored,
+capped, with quoted history and signatures stripped before anything is written
+down.
 
 Reading replies transmits nothing and does not touch rule 4. Requesting only the
 read scope makes that structural rather than aspirational: a token that cannot
@@ -183,6 +193,14 @@ This also strengthens rule 7 rather than bending it. Approving a model's only
 three is closer to a rubber stamp than a selection; choosing three from six is
 the human act the rule describes. Neither the console nor the CLI has a default
 selection, and `approve --yes` with no `--pick` is an error.
+
+**Classification and consequence are separate.** `app/agents/classifier.py`
+returns an intent and a confidence and nothing else. `app/outreach.POLICIES`
+decides what an intent does. A model never suppresses anybody, and an operator
+can correct a label without the damage already being done. Below a confidence
+of 0.6, and on any model fault, the reply resolves to `other`, which parks the
+sequence for a person: suppressing a prospect on a coin flip is the one
+unrecoverable mistake in this path.
 
 **The reply policy table** lives in `app/outreach.py`. Two entries are worth
 restating because they are judgements rather than mechanics:
