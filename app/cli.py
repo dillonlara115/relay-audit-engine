@@ -1129,5 +1129,52 @@ def outcomes() -> None:
         console.print(table)
 
 
+@app.command()
+def smoke(
+    url: str = typer.Option(None, "--url", "-u",
+                            help="Base URL to test. Defaults to SMOKE_BASE_URL."),
+    slug: str = typer.Option(None, "--slug", "-s",
+                             help="A published report slug, to prove one renders."),
+    password: str = typer.Option(None, "--password",
+                                 help="Defaults to CONSOLE_PASSWORD."),
+) -> None:
+    """Check the deployed site from outside it. Run after every deploy.
+
+    The suite proves the app is right. This proves the deployment is, which is
+    a different question: Firebase Hosting, Cloud Run and a browser all sit
+    between the code and a person, and every login bug so far has lived in
+    that gap rather than in anything a unit test can reach.
+
+    Read only. Signs in, reads pages, changes nothing.
+    """
+    from app.smoke import run
+
+    cfg = get_config()
+    base = url or cfg.smoke_base_url
+    if not base:
+        console.print("[red]No URL.[/] Pass --url or set SMOKE_BASE_URL in .env.")
+        raise typer.Exit(code=2)
+    secret = password or cfg.console_password
+    if not secret:
+        console.print("[red]No password.[/] Pass --password or set CONSOLE_PASSWORD.")
+        raise typer.Exit(code=2)
+
+    console.print(f"Checking [bold]{base}[/]…\n")
+    result = run(base, secret, slug=slug)
+
+    for check in result.checks:
+        mark = "[green]ok  [/]" if check.ok else "[red]FAIL[/]"
+        console.print(f"  {mark} {check.name}")
+        if not check.ok and check.detail:
+            console.print(f"       [dim]{check.detail}[/]")
+
+    console.print()
+    if result.ok:
+        console.print(f"[green]All {len(result.checks)} checks passed.[/]")
+        return
+    console.print(f"[red]{len(result.failed)} of {len(result.checks)} failed.[/]")
+    raise typer.Exit(code=1)
+
+
 if __name__ == "__main__":
     app()

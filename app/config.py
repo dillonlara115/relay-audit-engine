@@ -118,6 +118,9 @@ class Config:
     # domain is actually pointed here.
     public_report_host: str = field(default_factory=lambda: _str("PUBLIC_REPORT_HOST"))
 
+    # Where `python -m app.cli smoke` points when no --url is given.
+    smoke_base_url: str = field(default_factory=lambda: _str("SMOKE_BASE_URL"))
+
     # Pub/Sub
     pubsub_audit_topic: str = field(
         default_factory=lambda: _str("PUBSUB_AUDIT_TOPIC", "run-audit")
@@ -172,6 +175,7 @@ _ENV_NAME = {
     "gmail_client_secrets": "GMAIL_CLIENT_SECRETS",
     "gmail_token_path": "GMAIL_TOKEN_PATH",
     "public_report_host": "PUBLIC_REPORT_HOST",
+    "smoke_base_url": "SMOKE_BASE_URL",
 }
 
 

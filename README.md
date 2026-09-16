@@ -292,6 +292,24 @@ python -m app.cli doctor
 This makes one real call each to Vertex, Firestore, and Places, and prints
 pass/fail for each rather than assuming.
 
+## After every deploy
+
+```bash
+python -m app.cli smoke --slug <a published report slug>
+```
+
+Signs in against the live URL, follows the session, confirms the console is
+gated and a report renders, and exits non-zero on anything unexpected. Sixteen
+checks, read only, about five seconds.
+
+It exists because the suite cannot see the seam. Firebase Hosting strips every
+cookie except `__session` on its way to Cloud Run, and the login worked
+perfectly in every test and against the Cloud Run URL while being broken on
+the real domain. Three bugs shipped green that way. This is the cheapest thing
+that catches them.
+
+Needs `SMOKE_BASE_URL` and `CONSOLE_PASSWORD`, or `--url` and `--password`.
+
 ## Running a sweep from the CLI
 
 ```bash
