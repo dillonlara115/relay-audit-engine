@@ -873,3 +873,56 @@ def test_f15_reports_the_most_complete_candidate_when_several_fall_short():
     res = run("F15", context(homepage_html=doc("", head=two)))
     assert res.status == FAIL
     assert res.observed["missing"] == ["an address"]
+
+
+# ── A comment box is not a lead form ──────────────────────────────────────────
+
+
+def test_a_wordpress_comment_form_is_not_a_lead_form():
+    """Red Diamond's crawl surfaced six of them, one per blog post, against a
+    single real contact form. They have the shape: name, email, free text."""
+    from app.checks.extract import FieldFacts, FormFacts
+    from app.checks.onpage import _is_comment_form
+
+    comment = FormFacts(
+        action="https://x.com/wp-comments-post.php", method="post", has_required=True,
+        fields=(FieldFacts("author", "text", True), FieldFacts("email", "email", True),
+                FieldFacts("url", "url", False), FieldFacts("comment", "textarea", True)),
+    )
+    assert _is_comment_form(comment) is True
+
+
+def test_a_comment_form_with_a_rewritten_action_is_still_caught():
+    from app.checks.extract import FieldFacts, FormFacts
+    from app.checks.onpage import _is_comment_form
+
+    form = FormFacts(
+        action="/leave-a-reply/", method="post", has_required=True,
+        fields=(FieldFacts("author", "text", True), FieldFacts("comment", "textarea", True)),
+    )
+    assert _is_comment_form(form) is True
+
+
+def test_a_real_contact_form_is_not_mistaken_for_a_comment_box():
+    from app.checks.extract import FieldFacts, FormFacts
+    from app.checks.onpage import _is_comment_form
+
+    gravity = FormFacts(
+        action="/contact-us/", method="post", has_required=True,
+        fields=(FieldFacts("input_1", "text", True), FieldFacts("input_5", "email", True),
+                FieldFacts("input_9", "tel", True), FieldFacts("input_12", "textarea", False)),
+    )
+    assert _is_comment_form(gravity) is False
+
+
+def test_a_form_asking_for_comments_about_your_roof_is_not_a_comment_box():
+    """"comment" alone is not the signal. The author/url/email pair is."""
+    from app.checks.extract import FieldFacts, FormFacts
+    from app.checks.onpage import _is_comment_form
+
+    form = FormFacts(
+        action="/estimate/", method="post", has_required=True,
+        fields=(FieldFacts("comment", "textarea", False),
+                FieldFacts("phone", "tel", True)),
+    )
+    assert _is_comment_form(form) is False

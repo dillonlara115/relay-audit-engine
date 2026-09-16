@@ -24,28 +24,53 @@ from app.config import get_config
 
 # Prioritized paths, in the order the engine spec lists them. A page whose path
 # contains one of these fragments is crawled before generic discovered links.
+# Ordered by what the checks need, not by topical relevance. The contact page
+# decides B2, C7 and C8; the storm and financing pages decide C14 and C15. A
+# page about roof replacement is interesting and decides nothing, so it sorts
+# last.
+#
+# It used to be the other way round, and "roof-replacement" sat at index 0
+# while "contact" sat at 11. On a site with two hundred sitemap URLs, twenty of
+# them blog posts with "roof-replacement" in the slug, the entire budget went
+# to blog posts and the contact page was never fetched. B2 then reported no
+# contact form anywhere on a site whose contact page carries a twelve field
+# one.
 PRIORITY_FRAGMENTS: tuple[str, ...] = (
-    "roof-replacement",
-    "roof-repair",
-    "repair",
-    "storm",
-    "hail",
+    "contact",
+    "about",
+    "financing",
+    "warranty",
     "insurance",
     "claim",
-    "financing",
-    "about",
-    "review",
-    "testimonial",
-    "contact",
+    "storm",
+    "hail",
     "service-area",
     "areas-we-serve",
     "locations",
+    "review",
+    "testimonial",
+    "team",
     "careers",
     "jobs",
-    "team",
     "gallery",
-    "warranty",
+    "roof-replacement",
+    "roof-repair",
+    "repair",
 )
+
+# Paths that are almost never what a check is looking for, however well they
+# match a fragment. These sort behind everything else rather than being
+# excluded: on a thin site they are still worth having, and content freshness
+# (F11) reads their dates.
+DEMOTED_PATH_PARTS: tuple[str, ...] = (
+    "/blog/", "/news/", "/category/", "/tag/", "/author/",
+    "/archive/", "/feed/", "/page/", "/wp-content/", "/wp-json/",
+)
+
+# How many pages one fragment may claim before the crawl moves on. Breadth
+# beats depth: four service-area pages tell us nothing a single one did not,
+# and they cost the contact page its place.
+MAX_PER_FRAGMENT = 3
 
 _SKIP_SUFFIXES = (
     ".pdf", ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".ico",
@@ -251,6 +276,47 @@ def _priority_rank(url: str, fragments: Sequence[str] = PRIORITY_FRAGMENTS) -> i
         if fragment in path:
             return index
     return len(fragments)
+
+
+def _is_demoted(url: str) -> bool:
+    path = urlparse(url).path.lower()
+    if not path.endswith("/"):
+        path += "/"
+    return any(part in path for part in DEMOTED_PATH_PARTS)
+
+
+def select_targets(candidates: Sequence[str], fragments: Sequence[str],
+                   budget: int, *, per_fragment: int = MAX_PER_FRAGMENT) -> list[str]:
+    """Which pages to spend the budget on: breadth first, then depth.
+
+    Two passes. The first takes up to `per_fragment` pages for each kind of
+    page, so one well-stocked section cannot crowd out every other. The second
+    spends whatever budget is left on the runners up, still in rank order, so a
+    thin site is not under-crawled just because it has few distinct sections.
+    """
+    if budget <= 0:
+        return []
+    ranked = sorted(candidates, key=lambda url: (_is_demoted(url),
+                                                 _priority_rank(url, fragments)))
+    chosen: list[str] = []
+    overflow: list[str] = []
+    taken: dict[int, int] = {}
+
+    for url in ranked:
+        rank = _priority_rank(url, fragments)
+        if taken.get(rank, 0) < per_fragment:
+            taken[rank] = taken.get(rank, 0) + 1
+            chosen.append(url)
+            if len(chosen) >= budget:
+                return chosen
+        else:
+            overflow.append(url)
+
+    for url in overflow:
+        if len(chosen) >= budget:
+            break
+        chosen.append(url)
+    return chosen[:budget]
 
 
 class Crawler:
@@ -473,9 +539,7 @@ class Crawler:
             crawl.sitemap_urls, crawl.sitemap_lastmod = await self._sitemap_urls(base_url)
             offer(crawl.sitemap_urls)
 
-        candidates.sort(key=lambda url: _priority_rank(url, priority_fragments))
-        budget_remaining = max(budget - 1, 0)
-        targets = candidates[:budget_remaining]
+        targets = select_targets(candidates, priority_fragments, max(budget - 1, 0))
 
         results = await asyncio.gather(*(self.fetch(url) for url in targets))
         for result in results:

@@ -144,3 +144,84 @@ def test_the_rendered_page_keeps_the_homepage_path_so_page_counts_hold():
     merged = with_rendered_homepage(site, _Render(text="Licensed and insured roofers here."))
     assert merged.pages[-1].path == "/"
     assert merged.all_paths.count("/") == 1, "deduped, not doubled"
+
+
+# ── What the crawl budget gets spent on ───────────────────────────────────────
+
+
+def test_the_contact_page_outranks_an_article_about_roof_replacement():
+    """The regression this exists for. "roof-replacement" used to sit at index
+    0 and "contact" at 11, so twenty blog posts with that slug took the whole
+    budget and B2 reported no contact form on a site that has a twelve field
+    one."""
+    from app.tools.crawl import _is_demoted, _priority_rank
+
+    contact = "https://x.com/contact-us/"
+    article = "https://x.com/blog/7-signs-you-need-a-roof-replacement/"
+
+    assert (_is_demoted(contact), _priority_rank(contact)) < \
+           (_is_demoted(article), _priority_rank(article))
+
+
+def test_the_pages_the_checks_need_come_first():
+    from app.tools.crawl import PRIORITY_FRAGMENTS
+
+    order = list(PRIORITY_FRAGMENTS)
+    for decisive in ("contact", "about", "financing", "warranty", "insurance"):
+        assert order.index(decisive) < order.index("roof-replacement"), decisive
+
+
+def test_an_article_section_cannot_eat_the_whole_budget():
+    from app.tools.crawl import PRIORITY_FRAGMENTS, select_targets
+
+    urls = [f"https://x.com/blog/roof-replacement-{i}/" for i in range(30)]
+    urls += ["https://x.com/contact-us/", "https://x.com/about/",
+             "https://x.com/services/finance/"]
+
+    chosen = select_targets(urls, PRIORITY_FRAGMENTS, budget=10)
+
+    assert "https://x.com/contact-us/" in chosen
+    assert "https://x.com/about/" in chosen
+    assert "https://x.com/services/finance/" in chosen
+
+
+def test_no_section_takes_a_fourth_page_while_another_has_none():
+    """The cap binds only while other kinds are still waiting. Once every kind
+    is represented, leftover budget goes back to the runners up, which is what
+    keeps a thin site from being under-crawled."""
+    from app.tools.crawl import PRIORITY_FRAGMENTS, select_targets
+
+    urls = [f"https://x.com/service-areas/city-{i}/" for i in range(20)]
+    urls += ["https://x.com/contact-us/", "https://x.com/about/",
+             "https://x.com/services/finance/", "https://x.com/warranty/"]
+
+    chosen = select_targets(urls, PRIORITY_FRAGMENTS, budget=7)
+
+    for needed in ("contact-us", "about", "finance", "warranty"):
+        assert any(needed in u for u in chosen), needed
+    assert sum("service-areas" in u for u in chosen) <= 3
+
+
+def test_a_thin_site_still_spends_its_whole_budget():
+    """Breadth first must not mean under-crawling a site with few sections."""
+    from app.tools.crawl import PRIORITY_FRAGMENTS, select_targets
+
+    urls = [f"https://x.com/service-areas/city-{i}/" for i in range(9)]
+    assert len(select_targets(urls, PRIORITY_FRAGMENTS, budget=8)) == 8
+
+
+def test_articles_are_demoted_not_excluded():
+    """F11 reads their dates, and a thin site has little else."""
+    from app.tools.crawl import PRIORITY_FRAGMENTS, select_targets
+
+    urls = ["https://x.com/blog/roof-warranty-covers/", "https://x.com/contact-us/"]
+    chosen = select_targets(urls, PRIORITY_FRAGMENTS, budget=5)
+
+    assert len(chosen) == 2
+    assert chosen[0] == "https://x.com/contact-us/"
+
+
+def test_no_budget_means_no_requests():
+    from app.tools.crawl import PRIORITY_FRAGMENTS, select_targets
+
+    assert select_targets(["https://x.com/contact/"], PRIORITY_FRAGMENTS, budget=0) == []

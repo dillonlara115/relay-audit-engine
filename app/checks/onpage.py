@@ -16,7 +16,7 @@ from datetime import timedelta
 from typing import Iterable
 
 from app.checks.base import AuditContext, CheckResult, check, result, skip
-from app.checks.extract import jsonld_types
+from app.checks.extract import jsonld_types, FormFacts
 from app.tools.phones import parse_phone, same_number
 
 # ── Thresholds, criteria doc section 1 and 2 ──────────────────────────────────
@@ -477,6 +477,22 @@ def c6_click_to_call(ctx: AuditContext) -> CheckResult:
                   **observed)
 
 
+def _is_comment_form(form: FormFacts) -> bool:
+    """A blog comment box is not a way to ask for a roof.
+
+    It has the shape of one: a name, an email, a free text box. One real crawl
+    surfaced six of them, one per blog post, against a single genuine contact
+    form. The action is unambiguous on a WordPress install, which is most of
+    this market, and the author/url pair is the fallback for anything that has
+    rewritten it.
+    """
+    action = (form.action or "").lower()
+    if "wp-comments-post" in action:
+        return True
+    names = {f.name.lower() for f in form.visible_fields}
+    return "comment" in names and bool({"author", "url", "email"} & names)
+
+
 def _primary_form(ctx: AuditContext):
     """The form a homeowner would actually fill in.
 
@@ -491,7 +507,7 @@ def _primary_form(ctx: AuditContext):
 
     for page in ordered:
         for form in page.forms:
-            if form.looks_like_search or form.field_count < 2:
+            if form.looks_like_search or form.field_count < 2 or _is_comment_form(form):
                 continue
             names = " ".join(f.name.lower() for f in form.visible_fields)
             kinds = {f.kind for f in form.visible_fields}
