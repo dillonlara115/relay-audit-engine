@@ -12,6 +12,8 @@ import json
 import re
 from typing import Any, Mapping, Sequence
 
+from app.console.auth import LOGIN_PATH
+
 
 # Segment chips, validated with the palette validator: worst adjacent pair CVD
 # delta E 12.8, normal vision 15.4. Identity is never colour alone, every chip
@@ -182,6 +184,10 @@ th[data-sort]:hover { color:var(--ember); }
 .tag.bad { background:#8d2f16; }
 .tag.dim { background:var(--line); color:var(--ink2); }
 .mail { word-break:break-all; font-size:.88rem; }
+.login { max-width:340px; margin:14vh auto 0; }
+.login h1 { font-size:2.4rem; margin-bottom:2px; }
+.login input[type=password] { width:100%; }
+.login button { width:100%; }
 .pick { display:flex; gap:10px; align-items:flex-start; cursor:pointer;
         font-size:1.02rem; line-height:1.45; }
 .pick input { margin-top:5px; width:17px; height:17px; flex:none; accent-color:var(--orange); }
@@ -259,6 +265,25 @@ _SHELL = """<!doctype html>
 </div>
 __SCRIPT__
 </body>
+</html>"""
+
+
+# The login page gets its own shell. The full one carries the wordmark, the
+# tagline and the whole nav, which between them say what the tool is, who it is
+# for and what pages exist. A trimmed report URL lands on this page too, so it
+# says nothing.
+_BARE_SHELL = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>__TITLE__</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans:wght@400;700&family=Work+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>__CSS__</style>
+</head>
+<body><main class="main">__BODY__</main></body>
 </html>"""
 
 
@@ -428,6 +453,37 @@ _CONTACT_TAG = {"valid": "ok", "risky": "warn", "invalid": "bad", "unknown": "di
 _CONTACT_LABEL = {
     "valid": "good", "risky": "check first", "invalid": "bad", "unknown": "unchecked",
 }
+
+
+def render_login(*, next_path: str = "/console", error: str | None = None) -> str:
+    """The password prompt.
+
+    Deliberately says nothing about what is behind it. Whoever is looking at
+    this either knows already or has no business finding out, and the same page
+    answers a trimmed report URL as answers a bookmark to the call list.
+    """
+    banner = f'<div class="banner">{esc(error)}</div>' if error else ""
+    body = f"""
+<div class="login">
+  <h1>Relay</h1>
+  <p class="muted">Enter the password to continue.</p>
+  {banner}
+  <form method="post" action="{esc(LOGIN_PATH)}">
+    <input type="hidden" name="next" value="{esc(next_path)}">
+    <label for="password">Password</label>
+    <input id="password" type="password" name="password" autocomplete="current-password"
+           autofocus required>
+    <button type="submit">Continue</button>
+  </form>
+</div>
+"""
+    # The stylesheet is commented throughout with notes about the call list,
+    # the contrast decisions and what each screen is for. Those are useful to
+    # whoever edits it and are nobody's business on the far side of a password.
+    return (_BARE_SHELL
+            .replace("__CSS__", re.sub(r"/\*.*?\*/", "", _CSS, flags=re.S))
+            .replace("__TITLE__", "Relay")
+            .replace("__BODY__", body))
 
 
 def contact_cell(contacts: Sequence[Mapping[str, Any]]) -> str:

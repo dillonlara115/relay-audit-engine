@@ -130,12 +130,13 @@ def test_mutating_routes_are_closed_to_a_stranger(client):
 def test_every_console_route_is_gated(client):
     """Structural: enumerate the router and prove none of them answer without
     a session. Catches a route added later whose author forgot the gate."""
+    from app.console.auth import LOGIN_PATH
     from app.console.routes import router
 
     for route in router.routes:
         path = getattr(route, "path", "")
-        if not path:
-            continue
+        if not path or path == LOGIN_PATH:
+            continue   # login is where the password is entered
         concrete = path.replace("{job_id}", "j1").replace("{batch_id}", "b1") \
                        .replace("{audit_id}", "a1")
         for method in sorted(getattr(route, "methods", set()) - {"HEAD", "OPTIONS"}):
@@ -1141,7 +1142,8 @@ def test_the_open_list_is_the_whole_public_surface(client):
     from app.worker import OPEN_PREFIXES
 
     assert set(OPEN_PREFIXES) == {
-        "/r/", "/health", "/healthz", "/robots.txt", "/pubsub/", "/tick",
+        "/r/", "/console/login", "/health", "/healthz",
+        "/robots.txt", "/pubsub/", "/tick",
     }
 
 
@@ -1369,3 +1371,128 @@ def test_the_root_is_not_an_open_path():
     from app.worker import is_open_path
 
     assert is_open_path("/") is False
+
+
+# ── The password prompt ───────────────────────────────────────────────────────
+
+
+def test_a_logged_out_visitor_gets_a_form_not_a_bare_401(client):
+    """No login URL to remember: the prompt is at the page you asked for."""
+    response = client.get("/console", follow_redirects=False)
+
+    assert response.status_code == 401
+    assert 'type="password"' in response.text
+    assert 'action="/console/login"' in response.text
+
+
+def test_the_prompt_does_not_trigger_the_browsers_own_dialog(client):
+    """A WWW-Authenticate header would replace the page with a basic-auth box."""
+    response = client.get("/console", follow_redirects=False)
+    assert "www-authenticate" not in {k.lower() for k in response.headers}
+
+
+def test_the_prompt_says_nothing_about_what_is_behind_it(client):
+    """A trimmed report URL lands here too, so the page describes nothing.
+
+    The word "console" survives in the form's own action and that is fine: a
+    path segment says nothing about what the tool does or who it is for. What
+    must not appear is the wordmark, the tagline, the nav, or any of the
+    explanatory comments in the stylesheet.
+    """
+    flat = client.get("/console", follow_redirects=False).text.lower()
+    for leak in ("audit", "prospect", "roofer", "call list", "dashboard",
+                 "find roofers", "leaky bucket", "segment"):
+        assert leak not in flat, leak
+
+
+def test_the_prompt_is_not_indexable(client):
+    response = client.get("/console", follow_redirects=False)
+    assert response.headers["X-Robots-Tag"] == "noindex, nofollow"
+    assert "no-store" in response.headers.get("Cache-Control", "")
+
+
+def test_the_right_password_starts_a_session(client):
+    response = client.post("/console/login", data={"password": SECRET, "next": "/console"},
+                           follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/console"
+    assert "relay_console" in response.cookies
+    assert "relay_csrf" in response.cookies
+
+
+def test_signing_in_lands_on_the_page_you_were_going_to(client):
+    response = client.post("/console/login",
+                           data={"password": SECRET, "next": "/console/batches"},
+                           follow_redirects=False)
+    assert response.headers["location"] == "/console/batches"
+
+
+def test_the_form_carries_the_page_you_were_going_to(client):
+    page = client.get("/console/batches", follow_redirects=False).text
+    assert 'name="next" value="/console/batches"' in page
+
+
+def test_a_wrong_password_returns_the_form_with_a_message(client):
+    response = client.post("/console/login", data={"password": "nope", "next": "/console"},
+                           follow_redirects=False)
+
+    assert response.status_code == 401
+    assert "not right" in response.text
+    assert "relay_console" not in response.cookies
+
+
+def test_an_empty_password_is_not_a_way_in(client):
+    for attempt in ("", "   "):
+        response = client.post("/console/login", data={"password": attempt},
+                               follow_redirects=False)
+        assert response.status_code == 401
+
+
+def test_login_cannot_be_turned_into_an_open_redirect(client):
+    """A login page that honours an arbitrary next= is how a phish gets built."""
+    from app.console.auth import safe_next
+
+    for hostile in ("//evil.com", "https://evil.com", "///evil.com",
+                    "/\\evil.com", "\\\\evil.com", None, ""):
+        assert safe_next(hostile) == "/console"
+
+    response = client.post("/console/login",
+                           data={"password": SECRET, "next": "//evil.com"},
+                           follow_redirects=False)
+    assert response.headers["location"] == "/console"
+
+
+def test_next_never_points_back_at_the_form(client):
+    from app.console.auth import safe_next
+
+    assert safe_next("/console/login") == "/console"
+
+
+def test_the_key_in_the_url_still_works_for_a_bookmark(client):
+    response = client.get(f"/console?key={SECRET}", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/console"
+
+
+def test_a_wrong_key_in_the_url_shows_the_form(client):
+    response = client.get("/console?key=nope", follow_redirects=False)
+    assert response.status_code == 401
+    assert 'type="password"' in response.text
+
+
+def test_a_failed_attempt_is_logged_without_a_raw_ip(client, caplog):
+    """Guardrail 5. Seeing one source hammer the form must not mean storing it."""
+    import logging as _logging
+
+    with caplog.at_level(_logging.WARNING):
+        client.post("/console/login", data={"password": "nope"},
+                    headers={"X-Forwarded-For": "203.0.113.9"})
+
+    logged = " ".join(r.getMessage() for r in caplog.records)
+    assert "203.0.113.9" not in logged
+    assert "login failed" in logged
+
+
+def test_the_login_copy_carries_no_em_dash():
+    assert not contains_forbidden_dash(views.render_login())

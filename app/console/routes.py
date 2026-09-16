@@ -22,19 +22,35 @@ move while nothing in this codebase can send. It transmits nothing.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Form, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from app import jobs
+from app.config import get_config
 from app.console import views
+from app.console import auth
 from app.console.auth import check_csrf, csrf_token
 from app.markets import known_markets
 from app.store import firestore as store
 from app.tools.pubsub import publish_job
 
 router = APIRouter(prefix="/console")
+
+log = logging.getLogger("relay.console")
+
+
+def _caller_fingerprint(request: Request) -> str:
+    """Guardrail 5: never store or log a raw IP. Salted hash, first 12 chars,
+    which is enough to see one source hammering the form and nothing more."""
+    raw = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    salt = get_config().report_ip_salt
+    if not raw:
+        return "unknown"
+    return hashlib.sha256(f"{salt}:{raw}".encode()).hexdigest()[:12]
 
 _HTML_HEADERS = {"X-Robots-Tag": "noindex, nofollow", "Cache-Control": "private, no-store"}
 
@@ -62,6 +78,23 @@ async def _start(request: Request, csrf: str | None, kind: str, params: dict[str
 
 
 # ── Run ───────────────────────────────────────────────────────────────────────
+
+
+@router.post("/login", include_in_schema=False)
+async def login(request: Request, password: str = Form(""),
+                next: str = Form("/console")) -> Response:
+    """Accept the password and start a session.
+
+    The one console route that answers without one, which is what login means.
+    A wrong password costs a second before it says so.
+    """
+    if auth.password_matches(password):
+        return auth.grant(request, next)
+
+    await asyncio.sleep(auth.FAILED_ATTEMPT_DELAY_SECONDS)
+    log.warning("console login failed from %s", _caller_fingerprint(request))
+    return auth.login_response(request, error="That password is not right.",
+                               next_path=next)
 
 
 @router.get("")

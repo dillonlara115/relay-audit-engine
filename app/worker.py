@@ -53,6 +53,7 @@ app.include_router(console_router)
 # because a push subscription cannot log in to anything.
 OPEN_PREFIXES = (
     "/r/",          # the pre-move report path, now a redirect. See REPORT_SLUG.
+    "/console/login",   # where the password is entered, which cannot require one
     "/health",
     "/healthz",
     "/robots.txt",
