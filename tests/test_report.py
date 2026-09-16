@@ -394,3 +394,16 @@ def test_a_pool_with_no_valid_selection_cannot_build_a_report():
     with _pytest.raises(ValueError):
         build_public_report({}, {"business_name": "Peak"}, _doc(6, selected=[9, 10, 11]),
                             slug="s1")
+
+
+def test_hosting_config_adds_no_redirect_of_its_own():
+    """Firebase redirects apply to every hostname the site serves, so a rule
+    here cannot be limited to one. The app decides what / does instead."""
+    import json
+    import pathlib
+
+    config = json.loads((pathlib.Path(__file__).resolve().parent.parent
+                         / "firebase.json").read_text())
+    hosting = config["hosting"]
+    assert "redirects" not in hosting
+    assert hosting["rewrites"][0]["run"]["serviceId"] == "audit-worker"

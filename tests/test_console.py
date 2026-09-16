@@ -1353,3 +1353,19 @@ def test_several_hostnames_can_be_listed_however_they_are_separated(monkeypatch,
 
     monkeypatch.setattr(worker, "get_config", lambda: Config(public_report_host=raw))
     assert worker.public_hosts() == {"reports.relayforroofers.com", "report.example.com"}
+
+
+def test_the_bare_hostname_gives_nothing_away(public_client):
+    """Trimming a report URL down to / lands on the same 404 as any other
+    non-report path. It used to 302 to the marketing site, which told a visitor
+    whose domain this was before they had any business knowing."""
+    response = public_client.get("/", follow_redirects=False)
+
+    assert response.status_code == 404
+    assert "location" not in {k.lower() for k in response.headers}
+
+
+def test_the_root_is_not_an_open_path():
+    from app.worker import is_open_path
+
+    assert is_open_path("/") is False
