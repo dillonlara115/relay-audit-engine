@@ -202,3 +202,97 @@ def test_worker_ids_differ_between_calls(monkeypatch):
 def test_worker_id_can_be_pinned_by_env(monkeypatch):
     monkeypatch.setenv("WORKER_ID", "fixed-1")
     assert worker_id() == "fixed-1"
+
+
+# ── Re-running a finished batch ───────────────────────────────────────────────
+
+
+class _ResetDoc:
+    def __init__(self, data):
+        self.data = data
+        self.writes = []
+
+
+class _ResetClient:
+    """Enough Firestore to watch what reset_tasks writes."""
+
+    def __init__(self):
+        self.written: dict[str, dict] = {}
+
+    def collection(self, _name):
+        return self
+
+    def document(self, doc_id):
+        self._id = doc_id
+        return doc_id
+
+    def batch(self):
+        return self
+
+    def set(self, ref, payload, merge=False):
+        self.written[ref] = payload
+
+    def commit(self):
+        pass
+
+
+def _patch(monkeypatch, tasks):
+    from app import leases
+
+    client = _ResetClient()
+    monkeypatch.setattr(leases.store, "get_client", lambda: client)
+    monkeypatch.setattr(leases, "tasks_for_batch", lambda b: tasks)
+    return client
+
+
+def test_a_finished_batch_can_be_put_back_to_pending(monkeypatch):
+    """A check that was wrong needs its whole batch re-run, and seed_tasks
+    refuses to do that on purpose."""
+    from app.leases import DONE, FAILED, PENDING, reset_tasks
+
+    client = _patch(monkeypatch, [
+        {"prospect_id": "p1", "status": DONE},
+        {"prospect_id": "p2", "status": FAILED},
+    ])
+
+    reset, running = reset_tasks("b1")
+
+    assert (reset, running) == (2, 0)
+    assert all(w["status"] == PENDING for w in client.written.values())
+    assert all(w["attempts"] == 0 for w in client.written.values())
+
+
+def test_a_task_a_worker_holds_is_left_alone(monkeypatch):
+    """Stealing its place would put two workers on the same audit."""
+    from app.leases import DONE, RUNNING, reset_tasks
+
+    client = _patch(monkeypatch, [
+        {"prospect_id": "p1", "status": RUNNING},
+        {"prospect_id": "p2", "status": DONE},
+    ])
+
+    reset, running = reset_tasks("b1")
+
+    assert (reset, running) == (1, 1)
+    assert len(client.written) == 1
+
+
+def test_resetting_clears_the_stale_lease_and_error(monkeypatch):
+    from google.cloud import firestore as gfirestore
+
+    from app.leases import DONE, reset_tasks
+
+    client = _patch(monkeypatch, [{"prospect_id": "p1", "status": DONE}])
+    reset_tasks("b1")
+
+    payload = next(iter(client.written.values()))
+    for field in ("lease_expires_at", "worker", "error"):
+        assert payload[field] is gfirestore.DELETE_FIELD
+
+
+def test_resetting_an_empty_batch_writes_nothing(monkeypatch):
+    from app.leases import reset_tasks
+
+    client = _patch(monkeypatch, [])
+    assert reset_tasks("b1") == (0, 0)
+    assert client.written == {}

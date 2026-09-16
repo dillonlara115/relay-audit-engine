@@ -508,6 +508,8 @@ def dispatch(
     batch_id: str = typer.Argument(..., help="Batch to fan out."),
     market: str = typer.Option(..., "--market", "-m", help="Metro whose gated prospects to audit."),
     limit: int = typer.Option(0, "--limit", "-n", help="0 means every eligible prospect."),
+    force: bool = typer.Option(False, "--force",
+                               help="Re-audit prospects already done, after a check changed."),
 ) -> None:
     """Publish one audit message per gated prospect.
 
@@ -531,6 +533,13 @@ def dispatch(
 
     console.print(f"Publishing [bold]{len(eligible)}[/] audits for batch [cyan]{batch_id}[/]…")
     ids = [p["place_id"] for p in eligible]
+    if force:
+        from app.leases import reset_tasks
+
+        reset, running = reset_tasks(batch_id)
+        console.print(f"  reset {reset} finished tasks back to pending"
+                      + (f", left {running} alone because a worker holds them" if running else ""))
+
     seeded = seed_tasks(batch_id, ids)
     console.print(f"  seeded {seeded} pending tasks in the ledger")
     published = publish_batch(batch_id, ids)

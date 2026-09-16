@@ -302,6 +302,44 @@ def release_task(batch_id: str, prospect_id: str, *, worker: str, reason: str) -
     run(client.transaction())
 
 
+def reset_tasks(batch_id: str) -> tuple[int, int]:
+    """Put a finished batch's ledger back to pending so it can run again.
+
+    seed_tasks refuses to do this on purpose: a resumption that knocked a
+    running task back to pending would double-audit a prospect. But a check
+    that was wrong needs its whole batch re-run, and without this there is no
+    way to ask for that short of editing Firestore by hand.
+
+    Only done and failed tasks are reset. A task a worker currently holds is
+    left alone and counted, because stealing its place would produce two
+    workers writing the same audit.
+
+    Returns (reset, skipped_because_running).
+    """
+    client = store.get_client()
+    now = store.utcnow()
+    batch = client.batch()
+    reset = 0
+    running = 0
+    for task in tasks_for_batch(batch_id):
+        if task.get("status") not in (DONE, FAILED):
+            running += 1
+            continue
+        ref = client.collection(AUDIT_TASKS).document(
+            task_id(batch_id, str(task["prospect_id"])))
+        batch.set(ref, {"status": PENDING, "attempts": 0, "updated_at": now,
+                        "lease_expires_at": firestore.DELETE_FIELD,
+                        "worker": firestore.DELETE_FIELD,
+                        "error": firestore.DELETE_FIELD}, merge=True)
+        reset += 1
+        if reset % 400 == 0:
+            batch.commit()
+            batch = client.batch()
+    if reset % 400:
+        batch.commit()
+    return reset, running
+
+
 def seed_tasks(batch_id: str, prospect_ids: list[str]) -> int:
     """Write a pending ledger doc per prospect, before anything is published.
 
