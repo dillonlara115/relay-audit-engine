@@ -14,3 +14,7 @@ out/
 .gmail-token.json
 client_secret*.json
 *-client-secret.json
+client_secret.json
+firebase-debug.log
+firestore-debug.log
+.firebase/

@@ -1340,10 +1340,16 @@ def test_spoofing_the_header_only_ever_tells_an_attacker_less(public_client):
     assert forged.status_code == 404
 
 
-def test_several_hostnames_can_be_listed(monkeypatch):
+@pytest.mark.parametrize("raw", [
+    "reports.relayforroofers.com,report.example.com:8080",
+    "reports.relayforroofers.com report.example.com:8080",   # gcloud-safe, no comma
+    "reports.relayforroofers.com; report.example.com:8080",
+    "  reports.relayforroofers.com ,  report.example.com:8080  ",
+])
+def test_several_hostnames_can_be_listed_however_they_are_separated(monkeypatch, raw):
+    """gcloud splits --update-env-vars on commas, so a space separated list has
+    to work or every deploy needs the ^delimiter^ escape."""
     import app.worker as worker
 
-    monkeypatch.setattr(worker, "get_config",
-                        lambda: Config(public_report_host=
-                                       " reports.relayforroofers.com , report.example.com:8080 "))
+    monkeypatch.setattr(worker, "get_config", lambda: Config(public_report_host=raw))
     assert worker.public_hosts() == {"reports.relayforroofers.com", "report.example.com"}

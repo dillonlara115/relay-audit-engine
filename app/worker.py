@@ -75,8 +75,16 @@ def is_open_path(path: str) -> bool:
 
 
 def public_hosts() -> frozenset[str]:
+    """The contractor-facing hostnames.
+
+    Separated by whitespace, commas or semicolons, all three accepted. gcloud
+    splits --update-env-vars on commas itself, so a comma separated list here
+    has to be escaped at the shell with its ^delimiter^ syntax every single
+    deploy. Accepting spaces means the obvious thing works instead.
+    """
     raw = get_config().public_report_host
-    return frozenset(h.strip().lower().split(":")[0] for h in raw.split(",") if h.strip())
+    return frozenset(part.strip().lower().split(":")[0]
+                     for part in re.split(r"[,;\s]+", raw) if part.strip())
 
 
 def request_host(request: Request) -> str:
