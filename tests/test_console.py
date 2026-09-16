@@ -37,7 +37,9 @@ def client(monkeypatch):
 def sign_in(client: TestClient) -> str:
     """Establish a session and return the CSRF token the server would embed."""
     client.get(f"/console?key={SECRET}", follow_redirects=False)
-    return client.cookies.get("relay_csrf")
+    from app.console.auth import SESSION_COOKIE, unpack
+
+    return unpack(client.cookies.get(SESSION_COOKIE))[1]
 
 
 # ── The gate ──────────────────────────────────────────────────────────────────
@@ -51,14 +53,14 @@ def test_the_console_is_closed_without_a_key(client):
 
 def test_a_wrong_key_is_refused(client):
     assert client.get("/console?key=nope").status_code == 401
-    assert "relay_console" not in client.cookies
+    assert "__session" not in client.cookies
 
 
 def test_the_key_becomes_a_session_and_leaves_the_url(client):
     first = client.get(f"/console?key={SECRET}", follow_redirects=False)
     assert first.status_code == 303
     assert first.headers["location"] == "/console"
-    assert "relay_console" in first.cookies and "relay_csrf" in first.cookies
+    assert "__session" in first.cookies
 
     page = client.get("/console")
     assert page.status_code == 200
@@ -1417,8 +1419,12 @@ def test_the_right_password_starts_a_session(client):
 
     assert response.status_code == 303
     assert response.headers["location"] == "/console"
-    assert "relay_console" in response.cookies
-    assert "relay_csrf" in response.cookies
+    # One cookie, because Firebase Hosting forwards exactly one.
+    from app.console.auth import unpack
+
+    assert "__session" in response.cookies
+    session, csrf = unpack(response.cookies["__session"])
+    assert session and csrf
 
 
 def test_signing_in_lands_on_the_page_you_were_going_to(client):
@@ -1439,7 +1445,7 @@ def test_a_wrong_password_returns_the_form_with_a_message(client):
 
     assert response.status_code == 401
     assert "not right" in response.text
-    assert "relay_console" not in response.cookies
+    assert "__session" not in response.cookies
 
 
 def test_an_empty_password_is_not_a_way_in(client):
@@ -1496,3 +1502,40 @@ def test_a_failed_attempt_is_logged_without_a_raw_ip(client, caplog):
 
 def test_the_login_copy_carries_no_em_dash():
     assert not contains_forbidden_dash(views.render_login())
+
+
+def test_the_session_rides_in_the_one_cookie_hosting_forwards():
+    """Firebase Hosting strips every cookie except __session on its way to
+    Cloud Run. A pair of nicely named cookies works against the Cloud Run URL
+    and is silently dropped through Hosting, which looks like a login form that
+    takes the right password and then asks again."""
+    from app.console.auth import SESSION_COOKIE
+
+    assert SESSION_COOKIE == "__session"
+
+
+def test_the_two_values_survive_the_round_trip():
+    from app.console.auth import pack, unpack
+
+    session, csrf = unpack(pack("a" * 64, "tok-en_123"))
+    assert (session, csrf) == ("a" * 64, "tok-en_123")
+
+
+@pytest.mark.parametrize("raw", [None, "", "no-dot-here", ".", "...", "onlysession."])
+def test_a_malformed_cookie_signs_nobody_in(raw, monkeypatch):
+    from app.console import auth
+
+    monkeypatch.setattr(auth, "get_config", lambda: Config(console_password=SECRET))
+
+    class FakeRequest:
+        cookies = {"__session": raw} if raw is not None else {}
+
+    assert auth.signed_in(FakeRequest()) is False
+
+
+def test_one_cookie_is_set_not_two(client):
+    response = client.post("/console/login", data={"password": SECRET},
+                           follow_redirects=False)
+    set_cookies = [v for k, v in response.headers.items() if k.lower() == "set-cookie"]
+    assert len(set_cookies) == 1
+    assert set_cookies[0].startswith("__session=")

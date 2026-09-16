@@ -22,10 +22,20 @@ latter authenticates Pub/Sub's server to server pushes and is a generated
 token nobody types; this one is what a person enters, so it can be a password
 the operator picked and remembers.
 
-CSRF: a random token in a second HttpOnly cookie, echoed into every mutating
-form by the server. An attacker's page can submit a form to us but cannot read
-our cookie, so it cannot produce a matching field. SameSite=Lax closes the
-rest.
+CSRF: a random token echoed into every mutating form by the server. An
+attacker's page can submit a form to us but cannot read our cookie, so it
+cannot produce a matching field. SameSite=Lax closes the rest.
+
+Both live in one cookie, and its name is not ours to choose. Firebase Hosting
+strips cookies from requests it forwards to Cloud Run so that responses stay
+cacheable, and permits exactly one through: `__session`. A pair of nicely named
+cookies works perfectly against the Cloud Run URL and is silently dropped on
+the way through Hosting, which presents as a login form that accepts the right
+password and then asks for it again.
+
+So the session hash and the CSRF token are packed into `__session`, separated
+by a dot, which neither of them can contain. Hosting makes that cookie part of
+the CDN cache key, so no two sessions can be served each other's pages.
 """
 
 from __future__ import annotations
@@ -39,8 +49,9 @@ from fastapi.responses import RedirectResponse
 
 from app.config import get_config
 
-SESSION_COOKIE = "relay_console"
-CSRF_COOKIE = "relay_csrf"
+# Not a name we picked. See the module docstring: Firebase Hosting forwards
+# this cookie and drops every other one.
+SESSION_COOKIE = "__session"
 SESSION_HOURS = 12
 
 LOGIN_PATH = "/console/login"
@@ -62,11 +73,24 @@ def _https(request: Request) -> bool:
     return (request.headers.get("x-forwarded-proto") or request.url.scheme) == "https"
 
 
+def pack(session: str, csrf: str) -> str:
+    return f"{session}.{csrf}"
+
+
+def unpack(raw: str | None) -> tuple[str, str]:
+    """The session hash and the CSRF token out of one cookie.
+
+    A sha256 hex digest and a token_urlsafe string can neither of them contain
+    a dot, so one split is unambiguous. A malformed cookie yields two empty
+    strings and fails every comparison that follows.
+    """
+    session, _, csrf = (raw or "").partition(".")
+    return session, csrf
+
+
 def _set_cookies(response: Response, request: Request, csrf: str) -> None:
-    secure = _https(request)
-    response.set_cookie(SESSION_COOKIE, session_token(), httponly=True, secure=secure,
-                        max_age=SESSION_HOURS * 3600, samesite="lax")
-    response.set_cookie(CSRF_COOKIE, csrf, httponly=True, secure=secure,
+    response.set_cookie(SESSION_COOKIE, pack(session_token(), csrf),
+                        httponly=True, secure=_https(request),
                         max_age=SESSION_HOURS * 3600, samesite="lax")
 
 
@@ -100,7 +124,8 @@ def signed_in(request: Request) -> bool:
     expected = session_token()
     if not expected:
         return True  # no secret configured: local development
-    return hmac.compare_digest(request.cookies.get(SESSION_COOKIE) or "", expected)
+    session, _ = unpack(request.cookies.get(SESSION_COOKIE))
+    return bool(session) and hmac.compare_digest(session, expected)
 
 
 def login_response(request: Request, *, error: str | None = None,
@@ -132,12 +157,12 @@ def authorize(request: Request) -> Response | None:
 
 
 def csrf_token(request: Request) -> str:
-    return request.cookies.get(CSRF_COOKIE) or ""
+    return unpack(request.cookies.get(SESSION_COOKIE))[1]
 
 
 def check_csrf(request: Request, submitted: str | None) -> bool:
     """Double submit: the form field must match the cookie."""
     if not get_config().console_password:
         return True
-    cookie = request.cookies.get(CSRF_COOKIE) or ""
+    cookie = csrf_token(request)
     return bool(cookie) and bool(submitted) and hmac.compare_digest(cookie, submitted)

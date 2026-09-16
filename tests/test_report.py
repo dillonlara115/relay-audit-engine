@@ -233,7 +233,7 @@ def test_the_key_becomes_a_cookie_and_leaves_the_url(dash_client, monkeypatch):
     first = dash_client.get("/dashboard?key=dash-secret", follow_redirects=False)
     assert first.status_code == 303
     assert first.headers["location"] == "/dashboard"
-    assert "relay_console" in first.cookies  # shared with /console
+    assert "__session" in first.cookies  # shared with /console
 
     page = dash_client.get("/dashboard")  # cookie persisted by the client
     assert page.status_code == 200
