@@ -117,7 +117,7 @@ _FINDING = """<div class="finding">
 
 _SCREENSHOT = """<h2>What we found</h2>
   <p>This is your homepage exactly as a homeowner sees it on a phone.</p>
-  <img class="shot" src="{url}" alt="Your homepage on a phone">
+  <img class="shot" src="{url}" alt="Your site on a phone">
   <div class="shot-caption">Captured during the review. Nothing was altered.</div>"""
 
 _COMPETITOR = """<h2>What good looks like</h2>

@@ -135,6 +135,22 @@ class SiteFacts:
             self.html = " ".join(p.html for p in self.pages)
 
     @property
+    def landing_is_root(self) -> bool:
+        """Whether the page we judged is the site's front door.
+
+        Google often advertises a deep page. Red Diamond's listing points at
+        /service-areas/fort-collins-roofer/, and that is the page a homeowner
+        clicking the listing actually lands on, so it is the right page to
+        judge. It is the wrong page to call a homepage.
+        """
+        return (self.homepage.path if self.homepage else "/") in ("", "/")
+
+    @property
+    def landing_noun(self) -> str:
+        """What to call the judged page in a note somebody reads."""
+        return "homepage" if self.landing_is_root else "landing page"
+
+    @property
     def paths(self) -> tuple[str, ...]:
         return tuple(p.path for p in self.pages)
 

@@ -1100,6 +1100,19 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                 f"<table><tr><th>Code</th><th>What we looked at</th>"
                 f"<th>Result</th><th>Points</th><th>What we found</th></tr>{rows}</table>")
 
+    landing = audit.get("landing_url")
+    landing_note = ""
+    if landing:
+        from urllib.parse import urlparse
+
+        path = urlparse(landing).path or "/"
+        if path not in ("", "/"):
+            landing_note = (
+                f'<div class="banner">Scored against <a href="{esc(landing)}" '
+                f'target="_blank" rel="noopener noreferrer">{esc(path)}</a>, not the '
+                "front page. That is where their Google listing sends people, so it "
+                "is what a homeowner actually sees first.</div>")
+
     findings_block = ""
     if findings:
         state = findings.get("status")
@@ -1235,6 +1248,7 @@ the most work and explain each in plain language. You pick the three he reads.</
 {tiles([("found", scores.get("found", 0)), ("chosen", scores.get("chosen", 0)),
         ("booked", scores.get("booked", 0)), ("total", scores.get("total", 0)),
         ("band", audit.get("band") or ""), ("segment", audit.get("segment") or "incomplete")])}
+{landing_note}
 {warnings}
 
 <div class="card">

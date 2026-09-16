@@ -318,6 +318,8 @@ async def audit_via_graph(
             definitions=definitions, crawl_error=crawl_error,
             pages_crawled=len(holder["site_facts"].pages),
             render=holder.get("render"),
+            landing_url=(holder["site_facts"].homepage.url
+                         if holder["site_facts"].homepage else None),
         )
 
     return AuditOutcome(

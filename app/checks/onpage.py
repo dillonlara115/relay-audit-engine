@@ -473,7 +473,8 @@ def c6_click_to_call(ctx: AuditContext) -> CheckResult:
                           "links are often added on load, so this was not checked.",
                     **observed)
     return result("C6", False,
-                  "The phone number on the homepage cannot be tapped to call on a phone.",
+                  f"The phone number on the {ctx.site.landing_noun} cannot be tapped "
+                  "to call on a phone.",
                   **observed)
 
 
@@ -555,7 +556,7 @@ def c10_reviews_on_page(ctx: AuditContext) -> CheckResult:
 
     page = ctx.site.homepage
     if page is None:
-        return skip("C10", "No homepage could be read.")
+        return skip("C10", f"No {ctx.site.landing_noun} could be read.")
 
     schema = bool({t for block in page.jsonld for t in jsonld_types(block)} & REVIEW_SCHEMA_TYPES)
     phrase = _any_in(page.text, TESTIMONIAL_TERMS)
@@ -585,7 +586,7 @@ def c10_reviews_on_page(ctx: AuditContext) -> CheckResult:
 
     return result(
         "C10", ok,
-        f"Customer reviews appear on the homepage, shown by {evidence}." if ok
+        f"Customer reviews appear on the {ctx.site.landing_noun}, shown by {evidence}." if ok
         else "No customer reviews appear on the homepage.",
         schema=schema or None, phrase=phrase, widget=widget,
         quotes=quotes[:3] or None, attributions=attributions or None,

@@ -523,6 +523,7 @@ async def persist_audit(
     crawl_error: str | None,
     pages_crawled: int,
     render: RenderResult | None = None,
+    landing_url: str | None = None,
 ) -> str:
     """One write path for an audit, whoever ran it. The ADK graph and the plain
     pipeline must be indistinguishable in Firestore, or resumption and ranking
@@ -574,6 +575,11 @@ async def persist_audit(
             "partial_sections": list(score.partial_sections),
             "crawl_error": crawl_error,
             "pages_crawled": pages_crawled,
+            # Which page the render checks actually judged. Google often
+            # advertises a deep page, and that is the page a homeowner lands
+            # on, so it is the right one to score and the wrong one to leave
+            # unnamed.
+            "landing_url": landing_url,
             "finished_at": store.utcnow(),
         },
     )
@@ -651,6 +657,7 @@ async def audit_one(
             prospect=prospect, batch_id=batch_id, score=score, results=results,
             definitions=definitions, crawl_error=crawl_error,
             pages_crawled=len(ctx.site.pages), render=render_result,
+            landing_url=_canonical_homepage(crawl) if crawl is not None else None,
         )
 
     return AuditOutcome(

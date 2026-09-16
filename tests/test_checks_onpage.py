@@ -926,3 +926,31 @@ def test_a_form_asking_for_comments_about_your_roof_is_not_a_comment_box():
                 FieldFacts("phone", "tel", True)),
     )
     assert _is_comment_form(form) is False
+
+
+# ── Calling the judged page what it is ────────────────────────────────────────
+
+
+def test_a_deep_landing_page_is_not_called_a_homepage():
+    """A finding that says "your homepage has no reviews" is wrong and
+    forwardable when the page judged was a service area page."""
+    from app.checks.extract import PageFacts, SiteFacts
+
+    deep = SiteFacts(homepage=PageFacts(url="https://x.com/service-areas/fort-collins-roofer/",
+                                        path="/service-areas/fort-collins-roofer/",
+                                        title="", text="", html=""))
+    assert deep.landing_noun == "landing page"
+
+
+def test_the_front_page_is_still_called_the_homepage():
+    from app.checks.extract import PageFacts, SiteFacts
+
+    root = SiteFacts(homepage=PageFacts(url="https://x.com/", path="/", title="",
+                                        text="", html=""))
+    assert root.landing_noun == "homepage"
+
+
+def test_a_site_with_nothing_readable_does_not_invent_a_noun():
+    from app.checks.extract import SiteFacts
+
+    assert SiteFacts(homepage=None).landing_noun == "homepage"

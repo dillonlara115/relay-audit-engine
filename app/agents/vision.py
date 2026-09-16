@@ -28,7 +28,8 @@ MAX_OUTPUT_TOKENS = 600
 # and the "do not comment on design taste" line are the load bearing parts: a
 # model asked to look at a website will grade the web design otherwise, and web
 # design is not what we are selling.
-PROMPT = """Given this mobile screenshot of a roofing contractor's homepage, answer as JSON:
+PROMPT = """Given this mobile screenshot of the page a homeowner lands on from a roofing
+contractor's Google listing, answer as JSON:
 {"stock_photos": bool, "stock_reason": str,
  "trust_verdict": "strong"|"adequate"|"weak", "trust_reason": str}
 

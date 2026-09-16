@@ -31,10 +31,11 @@ def c3_mobile_speed(ctx: AuditContext) -> CheckResult:
         return skip("C3", "Page speed returned no performance score.")
 
     ok = score >= MIN_PERFORMANCE_SCORE
+    noun = ctx.site.landing_noun
     return result(
         "C3", ok,
-        f"The homepage scores {score} out of 100 for speed on a phone." if ok
-        else f"The homepage scores {score} out of 100 for speed on a phone, "
+        f"The {noun} scores {score} out of 100 for speed on a phone." if ok
+        else f"The {noun} scores {score} out of 100 for speed on a phone, "
              f"under the {MIN_PERFORMANCE_SCORE} mark.",
         performance_score=score,
     )

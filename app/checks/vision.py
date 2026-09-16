@@ -15,9 +15,9 @@ ACCEPTABLE_TRUST = ("strong", "adequate")
 def _needs_vision(ctx: AuditContext, code: str) -> CheckResult | None:
     vision = ctx.vision
     if vision is None:
-        return skip(code, "The homepage was not looked at, so this was not checked.")
+        return skip(code, "The page was not looked at, so this was not checked.")
     if not getattr(vision, "ok", False):
-        return skip(code, "The homepage could not be assessed.",
+        return skip(code, "The page could not be assessed.",
                     error=getattr(vision, "error", None))
     return None
 

@@ -1568,3 +1568,38 @@ def test_signing_in_from_the_bare_domain_lands_on_the_console(client):
     response = client.post("/console/login", data={"password": SECRET, "next": "/"},
                            follow_redirects=False)
     assert response.headers["location"] == "/console"
+
+
+# ── Which page was judged ─────────────────────────────────────────────────────
+
+
+def _audit_screen(**audit):
+    return views.render_audit(
+        audit={"audit_id": "a1", "scores": {}, "batch_id": "b1", **audit},
+        prospect={"business_name": "Red Diamond"}, checks=[], definitions={},
+        findings=None, evidence=[], csrf="t",
+    )
+
+
+def test_a_deep_landing_page_is_named_on_the_audit_screen():
+    """Google advertises /service-areas/fort-collins-roofer/ for this prospect,
+    so that is the page scored. Saying so beats letting a reader assume the
+    front page was judged."""
+    page = _audit_screen(landing_url="https://reddiamondroof.com/service-areas/fort-collins-roofer/")
+
+    assert "/service-areas/fort-collins-roofer/" in page
+    assert "not the front page" in page
+
+
+def test_a_normal_homepage_needs_no_explanation():
+    page = _audit_screen(landing_url="https://reddiamondroof.com/")
+    assert "not the front page" not in page
+
+
+def test_an_audit_from_before_this_was_recorded_still_renders():
+    assert "not the front page" not in _audit_screen()
+
+
+def test_the_landing_note_carries_no_em_dash():
+    page = _audit_screen(landing_url="https://x.com/locations/denver/")
+    assert not contains_forbidden_dash(page)
