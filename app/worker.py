@@ -169,6 +169,17 @@ def _defs() -> list:
     return _definitions
 
 
+@app.get("/", include_in_schema=False)
+def root() -> Response:
+    """The bare hostname, for somebody who is signed in.
+
+    Gated like everything else, so a logged out visitor sees the password form
+    here and a contractor who trimmed his report URL finds nothing. Whoever
+    gets past that typed the domain without a path and wants the console.
+    """
+    return RedirectResponse("/console", status_code=303)
+
+
 @app.get("/health")
 @app.get("/healthz")
 def health() -> dict:

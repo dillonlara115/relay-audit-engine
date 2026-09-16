@@ -102,8 +102,11 @@ def safe_next(raw: str | None, default: str = "/console") -> str:
     login page is how a convincing phish gets built.
     """
     candidate = (raw or "").strip()
-    if (not candidate or not candidate.startswith("/") or candidate.startswith("//")
-            or "\\" in candidate or candidate.startswith(LOGIN_PATH)):
+    if (not candidate or candidate == "/" or not candidate.startswith("/")
+            or candidate.startswith("//") or "\\" in candidate
+            or candidate.startswith(LOGIN_PATH)):
+        # "/" is where somebody lands typing the bare domain. Sending them back
+        # there after signing in costs a second redirect for no reason.
         return default
     return candidate
 

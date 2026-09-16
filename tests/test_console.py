@@ -1539,3 +1539,32 @@ def test_one_cookie_is_set_not_two(client):
     set_cookies = [v for k, v in response.headers.items() if k.lower() == "set-cookie"]
     assert len(set_cookies) == 1
     assert set_cookies[0].startswith("__session=")
+
+
+def test_the_bare_domain_takes_a_signed_in_operator_to_the_console(client):
+    """Typing reports.relayforroofers.com with no path is the normal way in."""
+    sign_in(client)
+    response = client.get("/", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/console"
+
+
+def test_the_bare_domain_still_asks_a_stranger_for_the_password(client):
+    response = client.get("/", follow_redirects=False)
+    assert response.status_code == 401
+    assert 'type="password"' in response.text
+
+
+def test_signing_in_from_the_bare_domain_lands_on_the_console(client):
+    """It used to hand back next=/ and 404 there, which is what a user saw."""
+    from app.console.auth import safe_next
+
+    assert safe_next("/") == "/console"
+
+    page = client.get("/", follow_redirects=False).text
+    assert 'name="next" value="/console"' in page
+
+    response = client.post("/console/login", data={"password": SECRET, "next": "/"},
+                           follow_redirects=False)
+    assert response.headers["location"] == "/console"
