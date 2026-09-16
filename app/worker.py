@@ -74,6 +74,35 @@ def is_open_path(path: str) -> bool:
     return path.startswith(OPEN_PREFIXES) or bool(REPORT_SLUG.match(path))
 
 
+def public_hosts() -> frozenset[str]:
+    raw = get_config().public_report_host
+    return frozenset(h.strip().lower().split(":")[0] for h in raw.split(",") if h.strip())
+
+
+def request_host(request: Request) -> str:
+    """The hostname the caller actually asked for.
+
+    X-Forwarded-Host first, because Firebase Hosting and a load balancer both
+    proxy to Cloud Run with Host rewritten to the run.app name and the original
+    put here. Falls back to Host for a direct hit or a Cloud Run domain mapping.
+    """
+    forwarded = (request.headers.get("x-forwarded-host") or "").split(",")[0]
+    host = forwarded.strip() or request.headers.get("host") or ""
+    return host.split(":")[0].strip().lower()
+
+
+def on_public_host(request: Request) -> bool:
+    """Whether this request arrived on the contractor-facing hostname.
+
+    Both headers are caller-controlled, and that is fine here because the only
+    thing spoofing one buys is a 404 where a 401 would otherwise be: it tells
+    an attacker strictly less. The operator entrance is the Cloud Run URL,
+    which is not in this set and therefore still answers with a login.
+    """
+    hosts = public_hosts()
+    return bool(hosts) and request_host(request) in hosts
+
+
 @app.middleware("http")
 async def console_gate(request: Request, call_next):
     """Close the whole service except the few paths that must answer publicly.
@@ -88,6 +117,12 @@ async def console_gate(request: Request, call_next):
     report names one contractor's problems and is his to share or not.
     """
     if not is_open_path(request.url.path):
+        # On the contractor-facing hostname the console does not exist. A 401
+        # is a locked door, and a locked door tells whoever trimmed the URL
+        # that there is a room behind it.
+        if on_public_host(request):
+            return Response(status_code=404,
+                            headers={"X-Robots-Tag": "noindex, nofollow"})
         gate = _console_authorize(request)
         if gate is not None:
             gate.headers["X-Robots-Tag"] = "noindex, nofollow"

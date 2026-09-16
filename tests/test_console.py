@@ -1260,3 +1260,90 @@ def test_a_junk_slug_on_the_old_path_is_not_an_open_redirect():
 
     for hostile in ("//evil.com", "..%2f..%2fadmin", "a" * 40):
         assert not REPORT_SLUG.match(f"/{hostile}")
+
+
+# ── The console does not exist on the contractor's hostname ───────────────────
+
+
+PUBLIC_HOST = "reports.relayforroofers.com"
+
+
+@pytest.fixture()
+def public_client(monkeypatch):
+    """A client whose requests look like they arrived via Firebase Hosting."""
+    import app.console.auth as auth
+    import app.console.routes as routes
+    import app.worker as worker
+
+    monkeypatch.setattr(auth, "get_config", lambda: Config(console_password=SECRET))
+    monkeypatch.setattr(worker, "get_config",
+                        lambda: Config(console_password=SECRET,
+                                       public_report_host=PUBLIC_HOST))
+    monkeypatch.setattr(routes, "publish_job", lambda *a, **k: "msg-1")
+    monkeypatch.setattr(routes.jobs, "active", lambda: [])
+    monkeypatch.setattr(routes.jobs, "recent", lambda n=40: [])
+    monkeypatch.setattr(routes.store, "batch_overview", lambda days=14: [])
+
+    from app.worker import app
+
+    return TestClient(app, raise_server_exceptions=False,
+                      headers={"X-Forwarded-Host": PUBLIC_HOST})
+
+
+def test_the_console_does_not_exist_on_the_public_hostname(public_client):
+    """A contractor who trims the slug off the URL must not find a login box."""
+    for path in ("/console", "/dashboard", "/export", "/admin"):
+        response = public_client.get(path, follow_redirects=False)
+        assert response.status_code == 404, path
+        assert "password" not in response.text.lower()
+
+
+def test_the_report_still_answers_on_the_public_hostname(public_client, monkeypatch):
+    monkeypatch.setattr("app.report.publish.render_by_slug", lambda slug: "<html>ok</html>")
+    monkeypatch.setattr("app.report.publish.log_view", lambda *a, **k: None)
+    assert public_client.get("/abcdefghijklmnop").status_code == 200
+
+
+def test_the_operator_entrance_still_answers_with_a_login(client):
+    """The Cloud Run URL is not in the public host set, so it is unchanged."""
+    assert client.get("/console", follow_redirects=False).status_code == 401
+
+
+def test_the_host_header_is_used_when_there_is_no_proxy(monkeypatch):
+    import app.console.auth as auth
+    import app.worker as worker
+
+    monkeypatch.setattr(auth, "get_config", lambda: Config(console_password=SECRET))
+    monkeypatch.setattr(worker, "get_config",
+                        lambda: Config(console_password=SECRET,
+                                       public_report_host=PUBLIC_HOST))
+    from app.worker import app
+
+    direct = TestClient(app, raise_server_exceptions=False,
+                        headers={"Host": f"{PUBLIC_HOST}:443"})
+    assert direct.get("/console", follow_redirects=False).status_code == 404
+
+
+def test_an_unset_public_host_changes_nothing(client):
+    """Inert until the domain is actually pointed here."""
+    from app.worker import public_hosts
+
+    assert public_hosts() == frozenset()
+    assert client.get("/console", follow_redirects=False).status_code == 401
+
+
+def test_spoofing_the_header_only_ever_tells_an_attacker_less(public_client):
+    """Both headers are caller controlled. The only thing a forged one buys is
+    a 404 where a 401 would have been, which is strictly less information."""
+    forged = public_client.get("/console", headers={"X-Forwarded-Host": PUBLIC_HOST},
+                               follow_redirects=False)
+    assert forged.status_code == 404
+
+
+def test_several_hostnames_can_be_listed(monkeypatch):
+    import app.worker as worker
+
+    monkeypatch.setattr(worker, "get_config",
+                        lambda: Config(public_report_host=
+                                       " reports.relayforroofers.com , report.example.com:8080 "))
+    assert worker.public_hosts() == {"reports.relayforroofers.com", "report.example.com"}

@@ -12,3 +12,5 @@ node_modules/
 scripts/probe_*.py
 out/
 .gmail-token.json
+client_secret*.json
+*-client-secret.json

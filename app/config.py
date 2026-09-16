@@ -112,6 +112,12 @@ class Config:
     gmail_client_secrets: str = field(default_factory=lambda: _str("GMAIL_CLIENT_SECRETS"))
     gmail_token_path: str = field(default_factory=lambda: _str("GMAIL_TOKEN_PATH"))
 
+    # The contractor-facing hostname, comma separated if there is more than one.
+    # On it, the service serves the report and behaves as though nothing else
+    # exists. Blank leaves the behaviour unchanged, so this is inert until the
+    # domain is actually pointed here.
+    public_report_host: str = field(default_factory=lambda: _str("PUBLIC_REPORT_HOST"))
+
     # Pub/Sub
     pubsub_audit_topic: str = field(
         default_factory=lambda: _str("PUBSUB_AUDIT_TOPIC", "run-audit")
@@ -165,6 +171,7 @@ _ENV_NAME = {
     "console_password": "CONSOLE_PASSWORD",
     "gmail_client_secrets": "GMAIL_CLIENT_SECRETS",
     "gmail_token_path": "GMAIL_TOKEN_PATH",
+    "public_report_host": "PUBLIC_REPORT_HOST",
 }
 
 

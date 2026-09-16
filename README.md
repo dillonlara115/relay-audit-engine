@@ -149,6 +149,7 @@ gcloud services enable \
   aiplatform.googleapis.com firestore.googleapis.com run.googleapis.com \
   pubsub.googleapis.com cloudscheduler.googleapis.com storage.googleapis.com \
   secretmanager.googleapis.com places.googleapis.com pagespeedonline.googleapis.com \
+  gmail.googleapis.com \
   cloudbuild.googleapis.com artifactregistry.googleapis.com iamcredentials.googleapis.com \
   billingbudgets.googleapis.com
 ```
@@ -340,11 +341,16 @@ RENDERER_URL=$(gcloud run services describe renderer --region "$REGION" --format
 # is closed by default: see OPEN_PREFIXES in app/worker.py for the whole public
 # surface, which is the report, the health checks, robots.txt and the two
 # token-gated machine endpoints. Every response carries noindex.
+#
+# Set PUBLIC_REPORT_HOST to the contractor-facing hostname once DNS points at
+# it. On that hostname the console 404s rather than 401s, so trimming the slug
+# off a report URL finds nothing instead of a login box. The Cloud Run URL is
+# not in that set and stays the operator entrance.
 gcloud run deploy audit-worker --source . --region "$REGION" \
   --service-account relay-worker@$PROJECT_ID.iam.gserviceaccount.com \
   --memory 1Gi --cpu 1 --min-instances 0 --max-instances 3 --concurrency 2 --timeout 900 \
   --allow-unauthenticated \
-  --set-env-vars "GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_LOCATION=$REGION,VERTEX_MODEL_LOCATION=global,GEMINI_MODEL=gemini-3.5-flash,RENDERER_URL=$RENDERER_URL,PUBSUB_AUDIT_TOPIC=run-audit,PUBSUB_JOB_TOPIC=run-job,GCS_EVIDENCE_BUCKET=$PROJECT_ID-evidence" \
+  --set-env-vars "GOOGLE_GENAI_USE_VERTEXAI=TRUE,GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GOOGLE_CLOUD_LOCATION=$REGION,VERTEX_MODEL_LOCATION=global,GEMINI_MODEL=gemini-3.5-flash,RENDERER_URL=$RENDERER_URL,PUBSUB_AUDIT_TOPIC=run-audit,PUBSUB_JOB_TOPIC=run-job,GCS_EVIDENCE_BUCKET=$PROJECT_ID-evidence,PUBLIC_REPORT_HOST=reports.relayforroofers.com" \
   --set-secrets "GOOGLE_PLACES_API_KEY=places-api-key:latest,PAGESPEED_API_KEY=places-api-key:latest,RENDERER_SHARED_SECRET=renderer-shared-secret:latest,WORKER_SHARED_SECRET=worker-shared-secret:latest,REPORT_IP_SALT=report-ip-salt:latest,CONSOLE_PASSWORD=console-password:latest,DATAFORSEO_LOGIN=dataforseo-login:latest,DATAFORSEO_PASSWORD=dataforseo-password:latest"
 
 WORKER_URL=$(gcloud run services describe audit-worker --region "$REGION" --format='value(status.url)')
