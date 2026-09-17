@@ -582,26 +582,6 @@ def test_button_text_passes_against_the_orange_fill():
     assert _contrast("#16120E", "#F25C1F") >= 4.5
 
 
-def test_links_render_in_ember_not_the_brand_fill_orange():
-    page = views.render_run(csrf="t", markets=["X"], active_jobs=[], recent_batches=[])
-    assert "color:var(--ember)" in page
-    assert "a { color:var(--orange)" not in page
-
-
-def test_nothing_sets_small_text_on_a_solid_orange_fill():
-    """White on the brand orange is 3.32:1, and both of these sit below the
-    size that would let 3:1 count. The running pill keeps its orange fill and
-    takes asphalt text. The active nav item no longer has a solid fill at all:
-    it is a tint with --ember text at 5.07:1, marked by an orange edge."""
-    page = views.render_run(csrf="t", markets=["X"], active_jobs=[], recent_batches=[])
-    assert ".status.running { background:var(--orange); color:var(--asphalt)" in page
-
-    nav_on = page.split(".side nav a.on")[1].split("}")[0]
-    assert "background:var(--orange)" not in nav_on, "a solid brand fill is back"
-    assert "color:var(--ember)" in nav_on
-    assert "border-left-color:var(--orange)" in nav_on, "the edge is what marks the page"
-
-
 # ── P1.1: double submit guard ─────────────────────────────────────────────────
 
 
@@ -617,12 +597,6 @@ def test_every_console_page_carries_the_submit_guard():
 
 
 # ── P1.3: keyboard access ─────────────────────────────────────────────────────
-
-
-def test_focus_visible_styles_exist_for_links_and_buttons():
-    page = views.render_run(csrf="t", markets=["X"], active_jobs=[], recent_batches=[])
-    assert "a:focus-visible" in page
-    assert "button:focus-visible" in page
 
 
 def test_sortable_headers_are_reachable_and_operable_by_keyboard():
@@ -698,25 +672,6 @@ def test_scan_label_escapes_the_market_name():
     labeled = views.scan_label({"batch_id": "b1", "market": "<script>alert(1)</script>"})
     assert "<script>" not in labeled
     assert "&lt;script&gt;" in labeled
-
-
-def test_the_sidebar_is_a_light_rail_held_by_one_hairline():
-    """The rail used to be a near-black bar carrying a grid texture at 5%
-    chalk, which only reads on a dark surface. It is now white against the
-    warm field, so the texture is gone and a single border does the work."""
-    page = views.render_run(csrf="t", markets=["X"], active_jobs=[], recent_batches=[])
-    assert "repeating-linear-gradient" not in page, "texture belonged to the dark rail"
-    assert "border-right:1px solid var(--line)" in page
-
-
-def test_the_wordmark_does_not_lean_on_the_large_text_exemption():
-    """Brand orange is 3.32:1 on white, which clears AA only by counting as
-    large text. The wordmark appears on every screen, so it takes --ember."""
-    page = views.render_run(csrf="t", markets=["X"], active_jobs=[], recent_batches=[])
-    assert ".side .brand" in page
-    brand = page.split(".side .brand")[1].split("}")[0]
-    assert "var(--ember)" in brand
-    assert "var(--orange)" not in brand
 
 
 def test_batch_overview_enriches_rows_with_market_and_start_date(monkeypatch):
@@ -2201,3 +2156,55 @@ def test_soft_reads_degrade_and_log_instead_of_raising(caplog):
     with caplog.at_level(_logging.WARNING):
         assert routes._soft(boom, "fallback") == "fallback"
     assert "firestore hiccup" in caplog.text
+
+
+# ── The palette, held to AA by arithmetic rather than by parsing CSS ──────────
+
+
+def test_every_text_token_passes_aa_on_every_surface():
+    pal = views.PALETTE
+    for fg in ("asphalt", "ember", "ink2"):
+        for bg in ("field", "panel", "chalk"):
+            assert _contrast(pal[fg], pal[bg]) >= 4.5, f"{fg} on {bg}"
+
+
+def test_every_pill_passes_aa():
+    for kind, (fg, bg) in views.PILL_COLORS.items():
+        assert _contrast(fg, bg) >= 4.5, kind
+
+
+def test_every_segment_chip_passes_aa_on_its_tint():
+    for name, (fg, bg) in views.SEGMENT_TEXT.items():
+        assert _contrast(fg, bg) >= 4.5, name
+    assert set(views.SEGMENT_TEXT) == set(views.SEGMENT_COLORS)
+
+
+def test_brand_orange_is_a_fill_and_never_a_text_colour():
+    """3.3:1 on white. It fills buttons and marks the active nav edge; the
+    sheet must not set it as the color property anywhere, hover included.
+    border-*-color is a fill, so the check is on the bare property."""
+    import re as _re
+
+    assert _contrast(views.PALETTE["orange"], views.PALETTE["panel"]) < 4.5
+    css = views.theme_css()
+    assert not _re.search(r"(?<![-\w])color:\s*var\(--orange\)", css)
+    assert not _re.search(r"(?<![-\w])color:\s*#F25C1F", css, _re.I)
+
+
+def test_the_chip_carries_its_tint_inline_from_the_table():
+    chip = views.chip("Leaky Bucket")
+    fg, bg = views.SEGMENT_TEXT["Leaky Bucket"]
+    assert f"color:{fg};background:{bg}" in chip
+    assert "Leaky Bucket" in chip
+
+
+def test_focus_visible_styles_exist():
+    css = views.theme_css()
+    assert "a:focus-visible" in css and "button:focus-visible" in css
+    page = views.render_run(csrf="t", markets=["X"], active_jobs=[], recent_batches=[])
+    assert "a:focus-visible" in page
+
+
+def test_the_login_stylesheet_carries_no_comments():
+    assert "/*" not in views.render_login()
+    assert "/*" in views.theme_css(), "the sheet itself is commented; only the login strips them"

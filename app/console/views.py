@@ -36,6 +36,32 @@ SEGMENT_COLORS = {
     "incomplete": "#7A746C",
 }
 
+# Text colour and tint for each segment chip, checked by the palette tests at
+# 4.5:1. The swatch dot keeps SEGMENT_COLORS; the words sit on the tint.
+SEGMENT_TEXT = {
+    "Leaky Bucket": ("#B0400E", "#FDEBE4"),
+    "Invisible Pro": ("#1A56C4", "#E6EEFD"),
+    "Both Broken": ("#5B3F92", "#EFEAF7"),
+    "Dialed": ("#25683F", "#E3F1E8"),
+    "incomplete": ("#5d564d", "#EEEBE6"),
+}
+
+# Every text-on-surface pair the console uses. The tests hold each to AA.
+PALETTE = {
+    "asphalt": "#16120E", "ember": "#B0400E", "ink2": "#5d564d",
+    "field": "#F7F5F2", "panel": "#ffffff", "chalk": "#ECE6DC",
+    "orange": "#F25C1F", "line": "#E6E2DC",
+}
+PILL_COLORS = {
+    "ok": ("#1E5F3A", "#E3F1E8"),
+    "warn": ("#7A4A00", "#FBEBD0"),
+    "bad": ("#8d2f16", "#F9E3DC"),
+    "dim": ("#5d564d", "#EEEBE6"),
+    "tint": ("#B0400E", "#FDEBE4"),
+    "info": ("#1A56C4", "#E6EEFD"),
+    "running": ("#16120E", "#F25C1F"),
+}
+
 
 TEMPLATES = Path(__file__).parent / "templates"
 
@@ -184,8 +210,10 @@ def csrf_field(token: str) -> str:
 def chip(segment: str | None) -> str:
     name = segment or "incomplete"
     color = SEGMENT_COLORS.get(name, SEGMENT_COLORS["incomplete"])
+    text, tint = SEGMENT_TEXT.get(name, SEGMENT_TEXT["incomplete"])
     label = "Incomplete" if name == "incomplete" else name
-    return f'<span class="chip"><i style="background:{color}"></i>{esc(label)}</span>'
+    return (f'<span class="chip" style="color:{text};background:{tint}">'
+            f'<i style="background:{color}"></i>{esc(label)}</span>')
 
 
 def progress_bar(done: int, total: int) -> str:
