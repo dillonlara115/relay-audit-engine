@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% from "_components.html" import page_header, kpi, table_wrap, empty_row %}
+{% block body %}
+{{ page_header("Overview",
+               "Sweeps, audits and jobs at a glance. Nothing here contacts anyone.",
+               primary_html='<a class="btn" href="#run">Run sweep</a>'|safe) }}
+
+<div class="kpis">
+  {% for label, value, context in kpis %}{{ kpi(label, value, context) }}{% endfor %}
+</div>
+
+<div class="grid2">
+  <div class="card" id="run">
+    <h3>Run sweep</h3>
+    <p class="muted">Finds and gates prospects only. Audits start from the job
+    page once the sweep finishes, so this step is quick and cheap.</p>
+    <form method="post" action="/console/sweep">
+      {{ csrf_field(csrf) }}
+      <label for="market">Market</label>
+      <input id="market" name="market" type="text" list="known-markets"
+             value="Colorado Springs, CO" autocomplete="off"
+             placeholder="Colorado Springs, CO">
+      <datalist id="known-markets">{% for m in markets %}<option value="{{ m }}, CO">{% endfor %}</datalist>
+      <p class="hint">Type any market. The suggested four have their surrounding
+      towns mapped, so a prospect based two counties away is ruled out. Anywhere
+      else, the local-operator check says "not sure" instead of excluding, so
+      expect a few extra companies to reach the call list.</p>
+      <label for="limit">Prospects at most</label>
+      <input id="limit" type="number" name="limit" value="100" min="1" max="300">
+      <button type="submit">Run sweep</button>
+    </form>
+    <details class="legend">
+      <summary>How a sweep works</summary>
+      <div class="inner">
+        <p><strong>1. Find prospects.</strong> A search for roofing companies in
+        the market, then a gate that rules out the ones not worth a call:
+        commercial only, too few reviews, no real local address, or a storm
+        chaser passing through.</p>
+        <p><strong>2. Audit their sites.</strong> Each prospect that passes gets
+        its site opened on a simulated phone, timed, and checked against about
+        thirty things a homeowner would notice. We visit slowly and politely and
+        never fill in or send anything.</p>
+        <p><strong>3. Rank the call list.</strong> Not by score. The best call is
+        a prospect customers already find but whose leads slip away, because the
+        problem is real and the fix is quick.</p>
+        <p><strong>4. Draft findings.</strong> For the prospects you choose, the
+        model ranks the problems costing them the most work, in plain language.
+        A person picks the three the owner reads before anything becomes a
+        report.</p>
+      </div>
+    </details>
+  </div>
+
+  <div class="card">
+    <h3>Describe a job</h3>
+    <p class="muted">Same work, described in a sentence instead of clicked
+    through step by step. The coordinator finds the prospects, audits their
+    sites, waits for that to finish, retries anything that got stuck, and hands
+    back the call list.</p>
+    <p class="muted"><strong>Worth using when</strong> the job takes several
+    steps and you would rather not sit and watch it, especially a large market
+    that runs for an hour. <strong>Use the buttons on the left instead</strong>
+    when you know the one thing you want.</p>
+    <p class="muted">It can only use the same steps you can. Every number it
+    reports came from an actual check, it cannot make one up, and it cannot
+    contact anybody.</p>
+    <form method="post" action="/console/agent">
+      {{ csrf_field(csrf) }}
+      <label for="prompt">Describe the job in a sentence</label>
+      <textarea id="prompt" name="prompt">Find roofing companies in Colorado Springs, audit the sites of the 20 best ones, and show me who to call first.</textarea>
+      <button type="submit">Run coordinator</button>
+    </form>
+  </div>
+</div>
+
+{% if jobs %}
+<h2>Jobs running</h2>
+{% call table_wrap() %}
+<tr><th>Job</th><th>Status</th><th>Latest line</th></tr>
+{% for j in jobs %}
+<tr><td><a href="/console/jobs/{{ j.job_id }}">{{ j.label }}</a></td>
+<td>{{ status_pill(j.status) }}</td>
+<td class="muted">{{ j.latest }}</td></tr>
+{% endfor %}
+{% endcall %}
+{% endif %}
+
+<div class="pagehead" style="margin-top:26px">
+  <h2>Recent sweeps</h2>
+  <div class="primary"><a href="/console/batches">All sweeps</a></div>
+</div>
+{% call table_wrap() %}
+<tr><th>Sweep</th><th>Prospects</th><th>Audited</th><th>Progress</th><th>Last activity</th></tr>
+{% for b in sweeps %}
+<tr><td><a href="/console/batches/{{ b.batch_id }}">{{ b.label }}</a></td>
+<td class="num">{{ b.total }}</td><td class="num">{{ b.done }}</td>
+<td>{{ b.bar }}</td><td class="muted">{{ b.latest }}</td></tr>
+{% else %}
+{{ empty_row(5, "No sweeps yet. Run one above.") }}
+{% endfor %}
+{% endcall %}
+{% endblock %}

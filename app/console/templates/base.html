@@ -1,0 +1,52 @@
+{#- The one layout every operator screen renders through. The login page
+    uses bare.html instead, because a trimmed report URL lands there and the
+    wordmark, tagline and nav between them say what this tool is. -#}
+{% from "_scripts.html" import submit_guard %}
+{% from "_components.html" import notice_banner %}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>{{ title }}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans:wght@400;700&family=Work+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>{{ theme_css }}</style>
+</head>
+<body {{ body_attrs }}>
+{% include "_icons.svg" %}
+<input type="checkbox" id="nav-open" class="nav-open" aria-hidden="true">
+<header class="topnav">
+  <a class="brand-sm" href="/console">Relay</a>
+  <label for="nav-open" class="burger" aria-label="Menu">{{ icon("menu") }}</label>
+</header>
+<div class="layout">
+  <aside class="side">
+    <a class="brand" href="/console">Relay<br>Audit Engine</a>
+    <span class="tag">Find roofers worth calling</span>
+    <nav>
+      {% for group, items in nav_groups %}
+      <div class="navgroup">{{ group }}</div>
+      {% for href, key, label, icon_name in items %}
+      <a href="{{ href }}" class="{{ 'on' if key == active else '' }}">{{ icon(icon_name) }}<span>{{ label }}</span>{% if badges.get(key) %}<b class="badge">{{ badges[key] }}</b>{% endif %}</a>
+      {% endfor %}
+      {% endfor %}
+    </nav>
+    <div class="foot">Everything here is internal. Reports are written by a
+    model, checked by you, and never sent automatically.
+    {% if csrf %}
+    <form method="post" action="/console/logout" class="signout">
+      {{ csrf_field(csrf) }}<button class="ghost" type="submit">Sign out</button>
+    </form>
+    {% endif %}
+    </div>
+  </aside>
+  <main class="main">
+    {% if notice %}{{ notice_banner(notice) }}{% endif %}
+    {% block body %}{{ body }}{% endblock %}
+  </main>
+</div>
+{{ submit_guard() }}{{ script }}
+</body>
+</html>

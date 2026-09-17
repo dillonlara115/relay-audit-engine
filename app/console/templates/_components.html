@@ -1,0 +1,32 @@
+{#- Shared pieces. Macros return safe markup; anything passed in as a plain
+    string is escaped once by autoescape. -#}
+
+{% macro page_header(title, lede=None, primary_html=None, crumbs=None) -%}
+{% if crumbs %}<div class="crumbs">{% for href, label in crumbs %}{% if href %}<a href="{{ href }}">{{ label }}</a>{% else %}{{ label }}{% endif %}{% if not loop.last %}<span>&rsaquo;</span>{% endif %}{% endfor %}</div>{% endif %}
+<div class="pagehead">
+  <div><h1>{{ title }}</h1>{% if lede %}<p class="lede">{{ lede }}</p>{% endif %}</div>
+  {% if primary_html %}<div class="primary">{{ primary_html }}</div>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro kpi(label, value, context=None) -%}
+<div class="kpi"><div class="l">{{ label }}</div><div class="n">{{ value }}</div>{% if context %}<div class="c">{{ context }}</div>{% endif %}</div>
+{%- endmacro %}
+
+{% macro pill(kind, text) -%}
+<span class="pill {{ kind }}">{{ text }}</span>
+{%- endmacro %}
+
+{#- The wrapper and the table open on the same line on purpose: a test pins
+    the adjacency so no screen can quietly lose its scroll box. -#}
+{% macro table_wrap() -%}
+<div class="table-wrap"><table>{{ caller() }}</table></div>
+{%- endmacro %}
+
+{% macro empty_row(colspan, html) -%}
+<tr><td colspan="{{ colspan }}" class="muted">{{ html }}</td></tr>
+{%- endmacro %}
+
+{% macro notice_banner(notice) -%}
+<div class="banner"><strong>{{ notice[0] }}</strong>{% if notice[1] %} {{ notice[1] }}{% endif %}</div>
+{%- endmacro %}

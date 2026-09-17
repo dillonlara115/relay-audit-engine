@@ -97,6 +97,17 @@ async def login(request: Request, password: str = Form(""),
                                next_path=next)
 
 
+@router.post("/logout", include_in_schema=False)
+async def logout(request: Request, csrf: str = Form(None)) -> Response:
+    """Sign out. A POST with CSRF like every other mutating route, so a page
+    somebody else controls cannot log the operator out with an image tag."""
+    if not check_csrf(request, csrf):
+        return Response(status_code=403, content="stale form, reload the page")
+    response = _redirect("/console")
+    auth.clear_session(response, request)
+    return response
+
+
 @router.get("")
 @router.get("/")
 async def run_screen(request: Request) -> Response:

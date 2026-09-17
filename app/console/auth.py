@@ -111,6 +111,13 @@ def safe_next(raw: str | None, default: str = "/console") -> str:
     return candidate
 
 
+def clear_session(response: Response, request: Request) -> None:
+    """Sign out. Deleting the cookie is the whole of it: the session is a hash
+    the browser holds, and there is nothing server side to revoke."""
+    response.delete_cookie(SESSION_COOKIE, httponly=True, secure=_https(request),
+                           samesite="lax")
+
+
 def grant(request: Request, next_path: str) -> Response:
     """A signed-in session, landing on the page they were trying to reach."""
     response = RedirectResponse(url=safe_next(next_path), status_code=303)

@@ -1,0 +1,16 @@
+{#- The shell for the one page a stranger can reach: the password prompt.
+    No sprite, no nav, no wordmark, and the stylesheet arrives with its
+    comments stripped. Nothing here may name what the tool is for. -#}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>{{ title }}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=PT+Sans:wght@400;700&family=Work+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>{{ theme_css }}</style>
+</head>
+<body><main class="main">{% block body %}{% endblock %}</main></body>
+</html>

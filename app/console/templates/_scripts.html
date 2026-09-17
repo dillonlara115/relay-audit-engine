@@ -1,0 +1,22 @@
+{#- Inline scripts, carried over verbatim. No build step, no framework. -#}
+
+{#- Runs on every console page. A slow redirect after a sweep or dispatch left
+    the button live, and a second click started a second identical job,
+    spending real Places or Vertex quota twice. Disabling on submit does not
+    cancel the submission in flight, only a second one; a form can opt out
+    with data-no-guard for the rare case where re-submitting is intentional. -#}
+{% macro submit_guard() -%}
+<script>
+(function () {
+  document.addEventListener('submit', function (e) {
+    var form = e.target;
+    if (form.hasAttribute('data-no-guard')) return;
+    var button = form.querySelector('button[type="submit"], button:not([type])');
+    if (!button || button.disabled) return;
+    button.disabled = true;
+    button.dataset.label = button.textContent;
+    button.textContent = button.dataset.loading || 'Working…';
+  });
+})();
+</script>
+{%- endmacro %}

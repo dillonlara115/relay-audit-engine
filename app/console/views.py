@@ -1,16 +1,21 @@
 """Console HTML. Pure functions from plain data to a page.
 
-Placeholder substitution rather than str.format, because the CSS is full of
-braces and escaping every one of them is how a template starts lying about
-what it renders.
+Screens render through Jinja templates in ./templates, one base layout and one
+file per screen. Inside a template the HTML helpers arrive wrapped as Markup,
+so nothing is marked safe by hand and everything else is escaped exactly once.
 """
 
 from __future__ import annotations
 
+import functools
 import html as html_escape
 import json
 import re
+from pathlib import Path
 from typing import Any, Mapping, Sequence
+
+from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
+from markupsafe import Markup
 
 from app.console.auth import LOGIN_PATH
 
@@ -31,277 +36,80 @@ SEGMENT_COLORS = {
     "incomplete": "#7A746C",
 }
 
-_CSS = """
-:root { --asphalt:#16120E; --field:#F7F5F2; --chalk:#ECE6DC; --orange:#F25C1F;
-        --line:#E6E2DC; --ink2:#5d564d; --panel:#fff; --rail-hover:#F2EFEA;
-        /* The page field is a near-white with a trace of warmth left in it,
-           not the beige it used to be. Lightening it cost nothing and paid
-           for itself in contrast: asphalt went 15.01 to 17.12, ember 4.72 to
-           5.38, ink2 5.83 to 6.65, all measured against the new field.
 
-           --orange is the brand fill and nothing else: the active nav item
-           and the primary button. As text it is 3.05:1 on this field and
-           3.32:1 on white, both under the 4.5 floor, so every link and every
-           other text-orange uses --ember, a darker step on the same hue at
-           5.38:1 on the field and 5.86:1 on white. Two roles for one brand
-           color, not one color doing both. */
-        --ember:#B0400E;
-        --shadow: 0 1px 2px rgba(22,18,14,.04), 0 4px 14px rgba(22,18,14,.05);
-        --shadow-soft: 0 1px 2px rgba(22,18,14,.03), 0 2px 8px rgba(22,18,14,.04);
-        --focus-ring: 0 0 0 3px rgba(176,64,14,.35); }
-* { margin:0; padding:0; box-sizing:border-box; }
-body { background:var(--field); color:var(--asphalt);
-       font-family:'Work Sans',sans-serif; font-size:16px; line-height:1.55; }
-a { color:var(--ember); text-decoration:none; }
-a:hover { text-decoration:underline; color:var(--orange); }
-h1,h2,h3,h4 { font-family:'PT Sans',sans-serif; letter-spacing:normal; font-weight:700; }
-h1 { font-size:2rem; line-height:1.15; }
-h2 { font-size:1.35rem; margin:34px 0 4px; }
-h3 { font-size:1.1rem; margin:0 0 6px; }
-.lede { color:var(--ink2); margin-bottom:20px; max-width:70ch; }
-.muted { color:var(--ink2); }
+TEMPLATES = Path(__file__).parent / "templates"
 
-/* shell */
-.layout { display:flex; min-height:100vh; }
-/* The rail reads as an edge of the page rather than a slab laid on top of
-   it: white against the warm field, held by one hairline. It used to be a
-   full height near-black bar carrying a grid texture, which put the heaviest
-   thing on screen next to the lightest and made every screen feel darker
-   than its content actually was. */
-.side { width:232px; flex:0 0 232px; background:var(--panel); color:var(--asphalt);
-        padding:22px 16px; position:sticky; top:0; height:100vh;
-        border-right:1px solid var(--line); }
-.side .brand { display:block; font-family:'PT Sans',sans-serif; font-weight:700;
-               font-size:1.35rem; letter-spacing:.04em; color:var(--ember);
-               text-transform:uppercase; line-height:1.1; margin-bottom:4px; }
-/* --ember, not --orange. At 21.6px semibold the brand orange is 3.32:1 on
-   white, which clears AA only by counting as large text. The wordmark is the
-   one piece of type on every screen, so it takes the colour that passes
-   outright rather than the one that passes on a technicality. */
-.side .brand:hover { text-decoration:none; opacity:.85; }
-/* The tagline is not one of the status pills. Without this reset the global
-   .tag rule paints a black lozenge under the wordmark, since .side .tag only
-   ever overrode the colour and let the background through. */
-.side .tag { font-size:.78rem; color:var(--ink2); margin-bottom:22px; display:block;
-             background:none; padding:0; border-radius:0; }
-.side nav a { display:block; padding:9px 12px; border-radius:8px; color:var(--asphalt);
-              font-size:.95rem; margin-bottom:2px; border-left:3px solid transparent; }
-.side nav a:hover { background:var(--rail-hover); text-decoration:none; }
-/* A solid safety-orange block 232px wide was the loudest thing on a page whose
-   whole point is to be quiet, and it competed with the buttons, which are the
-   only things anyone should be drawn to click. The current page is marked with
-   a tint and a solid orange edge instead: same colour, a tenth of the area.
-   Text is --ember on the tint at 5.07:1, and the mark is never colour alone,
-   since the label is also the only one set in semibold. */
-.side nav a.on { background:#FDEBE4; color:var(--ember); font-weight:600;
-                 border-left-color:var(--orange); }
-.side .foot { position:absolute; bottom:20px; left:16px; right:16px;
-              font-size:.76rem; color:var(--ink2); line-height:1.4; }
-.main { flex:1; min-width:0; padding:26px 30px 70px; }
-.topbar { display:flex; justify-content:space-between; align-items:baseline;
-          gap:16px; margin-bottom:6px; flex-wrap:wrap; }
-
-/* pieces */
-.card { background:var(--panel); border:1px solid var(--line); border-radius:12px;
-        padding:18px 20px; margin-bottom:14px; box-shadow:var(--shadow); }
-.grid2 { display:grid; grid-template-columns:repeat(auto-fit,minmax(330px,1fr)); gap:14px; }
-.tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
-         gap:10px; margin:14px 0; }
-.tile { background:var(--panel); border:1px solid var(--line); border-radius:11px;
-        padding:13px 15px; box-shadow:var(--shadow-soft); }
-.tile .n { font-family:'PT Sans',sans-serif; font-weight:700; font-size:1.75rem;
-           line-height:1; }
-.tile .l { font-size:.79rem; color:var(--ink2); margin-top:3px; }
-
-label { display:block; font-size:.85rem; color:var(--ink2); margin:12px 0 4px; font-weight:600; }
-input[type=text], input[type=number], textarea, select {
-  width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:9px;
-  font-family:'Work Sans',sans-serif; font-size:16px; background:#fff;
-  color:var(--asphalt); box-shadow:inset 0 1px 2px rgba(22,18,14,.04); }
-input:focus, textarea:focus, select:focus {
-  outline:none; border-color:var(--orange);
-  box-shadow:0 0 0 3px rgba(242,92,31,.18); }
-a:focus-visible, button:focus-visible, th[data-sort]:focus-visible,
-summary:focus-visible {
-  outline:none; border-radius:4px; box-shadow:var(--focus-ring); }
-.side nav a:focus-visible { box-shadow:inset var(--focus-ring); }
-textarea { min-height:86px; resize:vertical; }
-button { font-family:'PT Sans',sans-serif; font-weight:700; letter-spacing:.01em;
-         font-size:1.02rem; background:var(--orange); color:var(--asphalt); border:0;
-         border-radius:9px; padding:10px 20px; cursor:pointer; margin-top:14px;
-         box-shadow:var(--shadow-soft); }
-/* The orange glow that used to sit under every button read as a third
-   brand colour spilling onto the field. The button is already the only
-   orange object on most screens; it does not need a halo to be found. */
-button:hover { filter:brightness(1.05); }
-button:disabled { filter:none; opacity:.6; cursor:not-allowed;
-                  box-shadow:var(--shadow-soft); }
-button.ghost, form.inline button { box-shadow:var(--shadow-soft); }
-button.ghost { background:transparent; color:var(--asphalt); border:1px solid var(--line); }
-button.danger { background:#8d2f16; color:#fff; }
-form.inline { display:inline; }
-form.inline button { margin-top:0; padding:5px 12px; font-size:.85rem; }
-.hint { font-size:.83rem; color:var(--ink2); margin-top:6px; }
-
-/* A 10 column call list at a phone width has no room to shrink into. The
-   table keeps a working minimum width and lives inside .table-wrap, which is
-   the thing that actually scrolls, so a phone pans the table without
-   dragging the rest of the page sideways with it. */
-.table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch;
-              border:1px solid var(--line); border-radius:12px;
-              box-shadow:var(--shadow); margin-bottom:14px; }
-table { width:100%; min-width:640px; border-collapse:separate; border-spacing:0;
-        background:var(--panel); }
-/* A header row set in the field colour with dark type, rather than a solid
-   black bar. On a call list of forty companies the bar was the first thing
-   the eye landed on, and the names are the thing worth reading. */
-th { font-family:'PT Sans',sans-serif; font-weight:700; text-align:left;
-     font-size:.9rem; letter-spacing:.01em; padding:11px 12px;
-     background:var(--field); color:var(--asphalt);
-     border-bottom:1px solid var(--line); }
-th .sub { display:block; font-family:'Work Sans',sans-serif; font-weight:400;
-          font-size:.71rem; color:var(--ink2); letter-spacing:0; margin-top:1px; }
-td { padding:9px 12px; border-top:1px solid var(--line); vertical-align:top; font-size:.95rem; }
-td.num { text-align:right; font-variant-numeric:tabular-nums; }
-td.tel { white-space:nowrap; }
-tr:hover td { background:var(--field); }
-th[data-sort] { cursor:pointer; user-select:none; }
-th[data-sort]:hover { color:var(--ember); }
-
-.windows { margin:0 0 14px; font-size:.9rem; color:var(--ink2); }
-.windows a { display:inline-block; padding:3px 10px; margin-left:6px;
-             border:1px solid var(--line); border-radius:999px; background:var(--panel); }
-.windows a.on { background:var(--orange); color:var(--asphalt); font-weight:600;
-                border-color:var(--orange); }
-.windows a:hover { text-decoration:none; border-color:var(--ember); }
-
-.chip { display:inline-flex; align-items:center; gap:6px; white-space:nowrap; }
-.chip i { width:10px; height:10px; border-radius:3px; display:inline-block; }
-.tag { font-size:.75rem; padding:1px 8px; border-radius:10px;
-       background:var(--asphalt); color:var(--chalk); white-space:nowrap; }
-.tag.warn { background:#8a5a00; }
-.tag.ok { background:#2E7D4F; }
-.tag.bad { background:#8d2f16; }
-.tag.dim { background:var(--line); color:var(--ink2); }
-.mail { word-break:break-all; font-size:.88rem; }
-.login { max-width:340px; margin:14vh auto 0; }
-.login h1 { font-size:2.4rem; margin-bottom:2px; }
-.login input[type=password] { width:100%; }
-.login button { width:100%; }
-.pick { display:flex; gap:10px; align-items:flex-start; cursor:pointer;
-        font-size:1.02rem; line-height:1.45; }
-.pick input { margin-top:5px; width:17px; height:17px; flex:none; accent-color:var(--orange); }
-/* The fill is 2.57:1 against its own track, under the 3:1 a non-text control
-   wants, and the two cannot be pulled further apart without taking the track
-   off the panel entirely. The hairline gives the track an edge instead, so
-   the empty part of the bar is still a visible object. */
-.bar { height:8px; border-radius:4px; background:var(--line); overflow:hidden;
-       min-width:80px; box-shadow:inset 0 0 0 1px rgba(22,18,14,.10); }
-.bar i { display:block; height:100%; background:var(--orange); }
-.bar.done i { background:#2E7D4F; }  /* a glance tells finished from still running */
-
-pre.log { background:var(--asphalt); color:#e8e2d6; border-radius:12px; padding:15px;
-          box-shadow:var(--shadow);
-          font-size:.85rem; line-height:1.5; max-height:440px; overflow:auto;
-          white-space:pre-wrap; word-break:break-word; }
-.status { display:inline-block; font-family:'PT Sans',sans-serif; font-weight:700;
-          letter-spacing:.01em; padding:2px 11px; border-radius:11px; background:var(--line); }
-.status.running { background:var(--orange); color:var(--asphalt); }  /* white on this orange is 3.32:1, below AA; green/red pills already pass */
-.status.done { background:#2E7D4F; color:#fff; }
-.status.failed { background:#8d2f16; color:#fff; }
-
-.finding { border:1px solid var(--line); border-left:5px solid var(--orange);
-           background:var(--panel); padding:15px 17px;
-           border-radius:10px; margin-bottom:12px; box-shadow:var(--shadow-soft); }
-.pass { color:#2E7D4F; font-weight:600; } .fail { color:#8d2f16; font-weight:600; }
-.skip { color:var(--ink2); }
-.banner { background:#fff3e6; border:1px solid #f2ddc4; border-left:5px solid var(--orange);
-          padding:13px 15px; border-radius:10px; margin-bottom:14px; font-size:.95rem;
-          box-shadow:var(--shadow-soft); }
-.evidence-shot { max-width:340px; width:100%; border:1px solid var(--line);
-                 border-radius:10px; display:block; box-shadow:var(--shadow); }
-.evidence-cap { margin-top:6px; font-size:.85rem; }
-abbr[title] { text-decoration:underline dotted; cursor:help; }
-details.legend { background:var(--panel); border:1px solid var(--line);
-  border-radius:12px; margin:14px 0; box-shadow:var(--shadow-soft); }
-details.legend summary { cursor:pointer; padding:13px 17px;
-  font-family:'PT Sans',sans-serif; font-weight:700; font-size:1.05rem; }
-details.legend .inner { padding:2px 17px 15px; }
-details.legend h4 { font-size:1rem; margin:12px 0 2px; }
-details.legend p { margin:0 0 5px; font-size:.93rem; }
-.filterbar { margin-bottom:14px; }
-.filterrow { display:grid; grid-template-columns:repeat(auto-fit,minmax(165px,1fr));
-             gap:12px; align-items:end; }
-.filterrow label { margin:0 0 4px; }
-@media (max-width:860px) {
-  .layout { display:block; }
-  .side { width:auto; height:auto; position:static; }
-  .side .foot { position:static; margin-top:16px; }
-  .main { padding:20px 16px 60px; }
-}
-"""
-
-_SHELL = """<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex,nofollow">
-<title>__TITLE__</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=PT+Sans:wght@400;700&family=Work+Sans:wght@400;600&display=swap" rel="stylesheet">
-<style>__CSS__</style>
-</head>
-<body>
-<div class="layout">
-  <aside class="side">
-    <a class="brand" href="/console">Relay<br>Audit Engine</a>
-    <span class="tag">Find roofers worth calling</span>
-    <nav>__NAV__</nav>
-    <div class="foot">Everything here is internal. Reports are written by a
-    model, checked by you, and never sent automatically.</div>
-  </aside>
-  <main class="main">__BODY__</main>
-</div>
-__SCRIPT__
-</body>
-</html>"""
+# Every screen renders through one base layout. The stylesheet is handed to
+# the templates as an already-marked string rather than included as a
+# template, so Jinja never has to parse a sheet full of braces.
+_env = Environment(
+    loader=FileSystemLoader(str(TEMPLATES)),
+    autoescape=select_autoescape(["html", "svg"], default=True),
+    undefined=StrictUndefined,
+    trim_blocks=True,
+    lstrip_blocks=True,
+)
+_env.filters["mon_d"] = lambda dt: dt.strftime("%b %d") if dt else ""
 
 
-# The login page gets its own shell. The full one carries the wordmark, the
-# tagline and the whole nav, which between them say what the tool is, who it is
-# for and what pages exist. A trimmed report URL lands on this page too, so it
-# says nothing.
-_BARE_SHELL = """<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex,nofollow">
-<title>__TITLE__</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=PT+Sans:wght@400;700&family=Work+Sans:wght@400;600&display=swap" rel="stylesheet">
-<style>__CSS__</style>
-</head>
-<body><main class="main">__BODY__</main></body>
-</html>"""
+def theme_css() -> str:
+    """The one stylesheet, raw. The palette tests read it from here."""
+    return (TEMPLATES / "_theme.css").read_text(encoding="utf-8")
+
+
+def _theme_css_stripped() -> str:
+    """The sheet without its comments, for the page that must say nothing."""
+    return re.sub(r"/\*.*?\*/", "", theme_css(), flags=re.S)
+
+
+# One vocabulary for the rail: Overview, Sweeps, Jobs. Icon names are sprite
+# symbol ids without the i- prefix.
+NAV_GROUPS = [
+    ("Prospecting", [("/console", "overview", "Overview", "home"),
+                     ("/console/batches", "batches", "Sweeps", "list")]),
+    ("System", [("/console/jobs", "jobs", "Jobs", "activity")]),
+]
+
+# Older call sites still say active="console" or "dashboard".
+_ACTIVE_ALIASES = {"console": "overview", "dashboard": "overview"}
+
+
+def _markup(fn: Any) -> Any:
+    @functools.wraps(fn)
+    def wrapped(*args: Any, **kwargs: Any) -> Markup:
+        return Markup(fn(*args, **kwargs))
+    return wrapped
+
+
+def icon(name: str) -> Markup:
+    return Markup(f'<svg class="ic" aria-hidden="true"><use href="#i-{esc(name)}"></use></svg>')
+
+
+def _render(template: str, **ctx: Any) -> str:
+    """Render one screen with the shared context every template expects."""
+    ctx.setdefault("theme_css", Markup(theme_css()))
+    ctx.setdefault("badges", {})
+    ctx.setdefault("nav_groups", NAV_GROUPS)
+    ctx.setdefault("csrf", None)
+    ctx.setdefault("script", Markup(""))
+    ctx.setdefault("body_attrs", Markup(""))
+    ctx.setdefault("notice", None)
+    # Helpers build HTML with esc() inside them. Templates get them wrapped as
+    # Markup so autoescape leaves the result alone; the Python callers still
+    # on shell() get plain str, because str + Markup escapes the str and a
+    # screen that concatenates its body would lose its own tags.
+    ctx.setdefault("icon", icon)
+    for name in ("csrf_field", "status_pill", "chip", "tiles", "progress_bar",
+                 "scan_label", "score_headers", "score_legend", "contact_cell",
+                 "outreach_cell"):
+        ctx.setdefault(name, _markup(globals()[name]))
+    active = ctx.get("active", "overview")
+    ctx["active"] = _ACTIVE_ALIASES.get(active, active)
+    return _env.get_template(template).render(**ctx)
 
 
 def esc(value: Any) -> str:
     return html_escape.escape(str(value if value is not None else ""))
-
-
-def _nav(active: str) -> str:
-    """Plain labels. "Batches" and "Jobs" meant nothing to anyone who had not
-    read the source, so the nav says what each screen is for."""
-    items = [("/console", "console", "Start a scan"),
-             ("/console/batches", "batches", "Results"),
-             ("/console/jobs", "jobs", "Activity"),
-             ("/dashboard", "dashboard", "Overview")]
-    return "".join(
-        f'<a href="{href}" class="{"on" if key == active else ""}">{label}</a>'
-        for href, key, label in items
-    )
 
 
 # Runs on every console page. A slow redirect after a sweep or dispatch left
@@ -335,12 +143,13 @@ def _wrap_tables(body: str) -> str:
 
 
 def shell(title: str, body: str, *, active: str = "console", script: str = "") -> str:
-    return (_SHELL
-            .replace("__CSS__", _CSS)
-            .replace("__TITLE__", esc(title))
-            .replace("__NAV__", _nav(active))
-            .replace("__BODY__", _wrap_tables(body))
-            .replace("__SCRIPT__", _SUBMIT_GUARD + script))
+    """Wrapper for screens not yet on their own template.
+
+    The body is trusted HTML the caller built, wrapped the way the old shell
+    did it. Each screen leaves this behind as it gets a template.
+    """
+    return _render("base.html", title=title, body=Markup(_wrap_tables(body)),
+                   active=active, script=Markup(script))
 
 
 def csrf_field(token: str) -> str:
@@ -460,30 +269,12 @@ def render_login(*, next_path: str = "/console", error: str | None = None) -> st
 
     Deliberately says nothing about what is behind it. Whoever is looking at
     this either knows already or has no business finding out, and the same page
-    answers a trimmed report URL as answers a bookmark to the call list.
+    answers a trimmed report URL as answers a bookmark to the call list. So it
+    renders on the bare shell, with the stylesheet stripped of its comments.
     """
-    banner = f'<div class="banner">{esc(error)}</div>' if error else ""
-    body = f"""
-<div class="login">
-  <h1>Relay</h1>
-  <p class="muted">Enter the password to continue.</p>
-  {banner}
-  <form method="post" action="{esc(LOGIN_PATH)}">
-    <input type="hidden" name="next" value="{esc(next_path)}">
-    <label for="password">Password</label>
-    <input id="password" type="password" name="password" autocomplete="current-password"
-           autofocus required>
-    <button type="submit">Continue</button>
-  </form>
-</div>
-"""
-    # The stylesheet is commented throughout with notes about the call list,
-    # the contrast decisions and what each screen is for. Those are useful to
-    # whoever edits it and are nobody's business on the far side of a password.
-    return (_BARE_SHELL
-            .replace("__CSS__", re.sub(r"/\*.*?\*/", "", _CSS, flags=re.S))
-            .replace("__TITLE__", "Relay")
-            .replace("__BODY__", body))
+    return _env.get_template("login.html").render(
+        theme_css=Markup(_theme_css_stripped()), next_path=next_path,
+        error=error, login_path=LOGIN_PATH)
 
 
 def contact_cell(contacts: Sequence[Mapping[str, Any]]) -> str:
@@ -546,112 +337,35 @@ def outreach_cell(sequence: Mapping[str, Any] | None, *, prospect_id: str,
 
 def render_run(*, csrf: str, markets: Sequence[str], active_jobs: Sequence[Mapping[str, Any]],
                recent_batches: Sequence[Mapping[str, Any]]) -> str:
-    # A datalist rather than a select: the four mapped metros are suggestions,
-    # not a limit. resolve_market already understands "City, ST" for anywhere
-    # else, so restricting the UI to a dropdown was the only thing stopping an
-    # operator sweeping a market we have not enumerated yet.
-    options = "".join(f'<option value="{esc(m)}, CO">' for m in markets)
+    """The Overview: what is running, what has run, and the two ways to start."""
+    recent = [dict(b) for b in recent_batches]
 
-    running = ""
-    if active_jobs:
-        rows = "".join(
-            f'<tr><td><a href="/console/jobs/{esc(j["job_id"])}">{esc(j.get("label"))}</a></td>'
-            f'<td>{status_pill(j.get("status", ""))}</td>'
-            f'<td class="muted">{esc((j.get("log") or [{}])[-1].get("line", ""))}</td></tr>'
-            for j in active_jobs
-        )
-        running = ("<h2>Happening right now</h2><table><tr><th>Job</th><th>Status</th>"
-                   f"<th>Latest update</th></tr>{rows}</table>")
+    def total(key: str) -> int:
+        return sum(int(b.get(key) or 0) for b in recent)
 
-    batch_rows = "".join(
-        f'<tr><td><a href="/console/batches/{esc(b["batch_id"])}">{scan_label(b)}</a></td>'
-        f'<td class="num">{b.get("total", 0)}</td><td class="num">{b.get("done", 0)}</td>'
-        f'<td>{progress_bar(b.get("done", 0), b.get("total", 0))}</td>'
-        f'<td class="muted">{esc(b.get("latest") or "")}</td></tr>'
-        for b in recent_batches[:6]
-    )
-
-    body = f"""
-<div class="topbar"><h1>Start a scan</h1></div>
-<p class="lede">Pick a city and we will find the roofing companies there, screen
-out the ones that are not a fit, then check each survivor's website the way a
-customer would. Nothing is sent to anyone: this only looks.</p>
-
-<details class="legend">
-  <summary>What happens when I run this?</summary>
-  <div class="inner">
-    <p><strong>1. We find the companies.</strong> We search Google for roofing
-    companies in the city you name, then screen each one out if they are not
-    worth your time: commercial only, too few reviews, no real local address,
-    or a storm chaser passing through.</p>
-    <p><strong>2. We check their websites.</strong> Each company that survives
-    gets its site opened on a simulated phone, timed for speed, and checked
-    against about 30 things a customer would notice. We visit slowly and
-    politely, and we never fill in or send anything.</p>
-    <p><strong>3. We put them in call order.</strong> Not by score. The best
-    call is a company that customers already find but whose leads slip away,
-    because the problem is real and the fix is quick.</p>
-    <p><strong>4. You get talking points.</strong> For the companies you choose,
-    we draft the three problems costing them the most work, in plain language.
-    You read and approve them before anything becomes a report you could send.</p>
-  </div>
-</details>
-
-<div class="grid2">
-  <div class="card">
-    <h3>Find companies in a city</h3>
-    <p class="muted">This step only looks them up and screens them. Websites are
-    checked in the next step, so this is quick and cheap.</p>
-    <form method="post" action="/console/sweep">
-      {csrf_field(csrf)}
-      <label for="market">Which city?</label>
-      <input id="market" name="market" type="text" list="known-markets"
-             value="Colorado Springs, CO" autocomplete="off"
-             placeholder="Colorado Springs, CO">
-      <datalist id="known-markets">{options}</datalist>
-      <p class="hint">Type any city. The four suggestions have their surrounding
-      towns mapped, so we can rule out a company based two counties away.
-      Anywhere else works the same, except that one check says "not sure"
-      instead of ruling someone out, so expect a few extra companies to come
-      through.</p>
-      <label for="limit">How many companies at most?</label>
-      <input id="limit" type="number" name="limit" value="100" min="1" max="300">
-      <button type="submit">Find companies</button>
-    </form>
-  </div>
-
-  <div class="card">
-    <h3>Or just describe what you want</h3>
-    <p class="muted">Same work, but you describe the whole job in a sentence
-    instead of clicking each step. It finds the companies, checks their
-    websites, waits for that to finish, retries anything that got stuck, and
-    hands back the call list.</p>
-    <p class="muted"><strong>Worth using when</strong> the job takes several
-    steps and you would rather not sit and watch it, especially a large city
-    that runs for an hour. <strong>Use the buttons on the left instead</strong>
-    when you know the one thing you want.</p>
-    <p class="muted">It can only use the same steps you can. Every number it
-    tells you came from an actual check, it cannot make one up, and it cannot
-    contact anybody.</p>
-    <form method="post" action="/console/agent">
-      {csrf_field(csrf)}
-      <label for="prompt">Describe the job in a sentence</label>
-      <textarea id="prompt" name="prompt">Find roofing companies in Colorado Springs, check the websites of the 20 best ones, and show me who to call first.</textarea>
-      <button type="submit">Run the coordinator</button>
-    </form>
-  </div>
-</div>
-
-{running}
-
-<h2>Recent scans</h2>
-<table><tr><th>Scan</th><th>Companies</th><th>Checked</th><th>Progress</th><th>Last activity</th></tr>
-{batch_rows or '<tr><td colspan="5" class="muted">No scans yet. Start one above.</td></tr>'}</table>
-"""
-    return shell("Relay console", body, active="console")
-
-
-# ── Job screen ────────────────────────────────────────────────────────────────
+    kpis = [
+        ("Jobs running", len(active_jobs), "queued or running"),
+        ("Sweeps", len(recent), "last two weeks"),
+        ("Audits finished", total("done"), "across those sweeps"),
+        ("Audits waiting", total("running") + total("pending"), "queued or running"),
+        ("Audits failed", total("failed"), "worth a look"),
+    ]
+    jobs_vm = [{
+        "job_id": j.get("job_id"), "label": j.get("label") or j.get("kind") or "",
+        "status": j.get("status", ""),
+        "latest": (j.get("log") or [{}])[-1].get("line", ""),
+    } for j in active_jobs]
+    # Helper output built here, in Python, is already escaped once. Mark it so
+    # the template does not escape it again.
+    sweeps_vm = [{
+        "batch_id": b.get("batch_id"), "label": Markup(scan_label(b)),
+        "total": b.get("total", 0), "done": b.get("done", 0),
+        "bar": Markup(progress_bar(b.get("done", 0), b.get("total", 0))),
+        "latest": b.get("latest") or "",
+    } for b in recent[:6]]
+    return _render("overview.html", title="Overview", active="overview", csrf=csrf,
+                   badges={"jobs": len(active_jobs)} if active_jobs else {},
+                   markets=list(markets), kpis=kpis, jobs=jobs_vm, sweeps=sweeps_vm)
 
 
 _POLL = """<script>

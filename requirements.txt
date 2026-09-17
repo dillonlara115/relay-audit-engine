@@ -14,6 +14,7 @@ phonenumbers
 dnspython
 python-dotenv
 pydantic
+jinja2>=3.1
 typer
 rich
 pytest

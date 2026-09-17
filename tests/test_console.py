@@ -1603,3 +1603,96 @@ def test_an_audit_from_before_this_was_recorded_still_renders():
 def test_the_landing_note_carries_no_em_dash():
     page = _audit_screen(landing_url="https://x.com/locations/denver/")
     assert not contains_forbidden_dash(page)
+
+
+# ── The templated shell: overview, login, sign out ────────────────────────────
+
+
+def _overview(**kw):
+    base = dict(csrf="t", markets=["Colorado Springs"], active_jobs=[], recent_batches=[])
+    base.update(kw)
+    return views.render_run(**base)
+
+
+def test_the_jobs_badge_shows_how_many_are_running():
+    job = {"job_id": "j1", "label": "Sweep Pueblo", "status": "running", "log": []}
+    page = _overview(active_jobs=[job, job, job])
+    assert 'class="badge">3<' in page
+
+
+def test_no_badge_when_nothing_is_running():
+    assert 'class="badge"' not in _overview()
+
+
+def test_the_overview_speaks_the_new_vocabulary():
+    page = _overview()
+    for present in ("Run sweep", "Recent sweeps", "Run coordinator", "Overview"):
+        assert present in page, present
+    for gone in ("Start a scan", "Recent scans", "Find companies", "Happening right now",
+                 "Results", "Activity</a>"):
+        assert gone not in page, gone
+
+
+def test_the_login_shell_carries_no_nav_and_no_sprite():
+    """The page a stranger reaches must not list the screens behind it."""
+    page = views.render_login()
+    assert "<nav" not in page
+    assert "<symbol" not in page
+    assert "/console/logout" not in page
+
+
+def test_every_nav_icon_exists_in_the_sprite():
+    from pathlib import Path
+
+    sprite = (Path(views.__file__).parent / "templates" / "_icons.svg").read_text()
+    page = _overview()
+    for _group, items in views.NAV_GROUPS:
+        for _href, _key, _label, icon_name in items:
+            assert f'id="i-{icon_name}"' in sprite, icon_name
+            assert f'href="#i-{icon_name}"' in page, icon_name
+
+
+def test_a_hostile_market_name_is_escaped_exactly_once():
+    batch = {"batch_id": "b1", "market": "<script>alert(1)</script>",
+             "total": 1, "done": 0, "running": 0, "pending": 1, "failed": 0, "latest": ""}
+    page = _overview(recent_batches=[batch])
+    assert "<script>alert(1)" not in page
+    assert "&lt;script&gt;" in page
+    assert "&amp;lt;" not in page, "helper output was escaped twice"
+
+
+def test_the_sign_out_form_needs_a_session_token_to_render():
+    assert "/console/logout" in _overview()
+    assert "/console/logout" not in views.shell("t", "<p>x</p>")
+
+
+def test_signing_out_clears_the_session(client):
+    csrf = sign_in(client)
+    assert client.get("/console", follow_redirects=False).status_code == 200
+
+    response = client.post("/console/logout", data={"csrf": csrf}, follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/console"
+    set_cookie = response.headers.get("set-cookie", "")
+    assert "__session=" in set_cookie and ("max-age=0" in set_cookie.lower()
+                                            or "expires=" in set_cookie.lower())
+    assert client.get("/console", follow_redirects=False).status_code == 401
+
+
+def test_signing_out_needs_csrf(client):
+    """A page somebody else controls must not be able to log the operator out."""
+    sign_in(client)
+    assert client.post("/console/logout", data={"csrf": "wrong"}).status_code == 403
+    assert client.get("/console", follow_redirects=False).status_code == 200
+
+
+def test_legacy_shell_screens_keep_their_tables_and_tags():
+    """Helpers hand templates Markup but Python callers plain str, because
+    str + Markup escapes the str. This is the dashboard failure, pinned."""
+    from app.console.views import tiles
+
+    body = "<h2>Before</h2>" + tiles([("scans", 1)]) + "<table><tr><td>x</td></tr></table>"
+    page = views.shell("t", body)
+    assert "<h2>Before</h2>" in page
+    assert '<div class="table-wrap"><table' in page

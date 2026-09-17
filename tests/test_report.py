@@ -290,7 +290,7 @@ def test_the_dashboard_and_console_share_one_shell():
     batch = dashboard.render_batch("b1", [], {})
     for page in (overview, batch):
         assert 'class="side"' in page, "sidebar present"
-        assert "Start a scan" in page, "nav links back to the console"
+        assert "Overview" in page, "nav links back to the console"
     # read only: the dashboard renders no way to change anything
     for page in (overview, batch):
         assert "<form" not in page
