@@ -347,6 +347,12 @@ Full plan, including the sending phase and the decisions behind it:
 - Reply ingestion uses `gmail.readonly` and no wider scope. Reading transmits
   nothing, and a token that cannot send enforces rule 4 harder than a test can.
 
+  **Changed Sep 17, 2026.** The console sends now, one email at a time, from the
+  operator's mailbox, when they press Send on a message they have read. Rule 4
+  was amended in the same commit; the token carries `gmail.readonly` and
+  `gmail.send` and nothing wider; `gmail.send_message` has one caller, the send
+  route, and a test holds it to that. See `docs/outreach-plan.md`, Phase 3.
+
 ---
 
 ## 10. Testing

@@ -420,10 +420,38 @@ https://<worker-url>/console?key=<CONSOLE_PASSWORD>
 ```
 
 Visiting once converts the key into a session cookie and redirects to a clean URL,
-so the password never sits in browser history after the first visit. From there:
-**Start a scan** → **Results** (the ranked call list, filterable by any check) →
-open a company → **Write talking points** → a human approves → **Create the
-shareable report**. `/dashboard` redirects to the console; the overview lives there now.
+so the password never sits in browser history after the first visit. Without the
+key, every console URL shows a password form. From there: **Run sweep** on the
+Overview, then the sweep's **Call list**, open a prospect, **Draft findings**,
+choose the three the owner reads, **Publish report**, then on the same page read
+and edit the next email and press **Send email**. **Call notes** on that page
+are what to say if you phone instead. `/dashboard` redirects to the console.
+
+### Connecting the mailbox (once)
+
+The console sends from your own Google Workspace mailbox, one email at a time,
+when you press Send on a message you have read (hard rule 4, as amended on
+Sep 17, 2026). The same grant reads replies for `python -m app.cli replies`.
+The scopes are `gmail.readonly` and `gmail.send`; the code refuses anything wider.
+
+```bash
+# 1. Authorize in a browser, signed in as hello@relayforroofers.com. Writes .gmail-token.json.
+python -m app.cli gmail-connect --force
+
+# 2. Put the token where Cloud Run can read it, and point the service at it.
+gcloud secrets create gmail-token --data-file=.gmail-token.json        # first time
+gcloud secrets versions add gmail-token --data-file=.gmail-token.json  # after a reconnect
+gcloud run services update audit-worker --region "$REGION" \
+  --update-secrets=/secrets/gmail-token.json=gmail-token:latest \
+  --update-env-vars=GMAIL_TOKEN_PATH=/secrets/gmail-token.json,OUTREACH_MAILBOX=hello@relayforroofers.com,OUTREACH_SENDER_NAME=Dillon
+```
+
+The OAuth client's consent screen must be in production status, or of user type
+Internal, or Google expires the refresh token after seven days. Until the token
+is mounted, Send shows "Email not sent. The mailbox is not connected" and
+records nothing; **Mark as sent** and the mail-client link still work.
+`OUTREACH_DAILY_CAP` (default 40) stops the console after that many sends in a
+UTC day. Email wording is edited under **Email templates** with `{{variables}}`.
 
 Long jobs (a sweep, a coordinator run) are backed by Pub/Sub the same way audits
 are: the browser starts a job and polls it, so a slow sweep survives closing the
@@ -451,6 +479,11 @@ those are named for what they regression-test, not just what they assert.
   `None` rather than writing `null`); nothing defaults to zero.
 - **Suppression is checked before every outreach action**, draft generation
   included, matched on place id, domain, phone, and email.
+- **A person sends every email.** One route sends, one function behind it, and a
+  test greps the package so a second caller is a visible edit. The route runs
+  only from the Send button on one prospect's page after the confirm names the
+  recipient; jobs, the pipeline and the CLI cannot reach it. Nothing sends on a
+  schedule or in bulk, and a daily cap backs that up.
 - **Findings are exactly three, and a human approves them before a report can
   exist** — enforced by a runtime assertion and a Firestore status field the
   publish path checks, not just by convention.
