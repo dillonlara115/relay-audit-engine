@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app.tools import gmail
-from app.tools.gmail import READONLY_SCOPE, SCOPES, Reply, fetch_replies, parse_message, strip_quoted
+from app.tools.gmail import READONLY_SCOPE, SCOPES, SEND_SCOPE, Reply, fetch_replies, parse_message, strip_quoted
 
 
 def b64(text: str) -> str:
@@ -69,10 +69,16 @@ SINCE = datetime(2026, 9, 1, tzinfo=timezone.utc)
 # ── The guarantees ────────────────────────────────────────────────────────────
 
 
-def test_the_only_scope_is_read_only():
-    assert SCOPES == (READONLY_SCOPE,)
-    assert "readonly" in READONLY_SCOPE
-    assert "send" not in READONLY_SCOPE and "compose" not in READONLY_SCOPE
+def test_the_scopes_are_read_and_send_and_nothing_wider():
+    """Rule 4 as amended Sep 17: the console may send one email a person has
+    read. Read plus send is the whole grant; compose, modify and full mail
+    access would let code do things a person never looked at."""
+    assert SCOPES == (READONLY_SCOPE, SEND_SCOPE)
+    assert "readonly" in READONLY_SCOPE and SEND_SCOPE.endswith("gmail.send")
+    for wider in ("gmail.compose", "gmail.modify", "mail.google.com"):
+        assert all(wider not in scope for scope in SCOPES)
+    assert frozenset({READONLY_SCOPE}) in gmail.ACCEPTED_SCOPE_SETS
+    assert frozenset(SCOPES) in gmail.ACCEPTED_SCOPE_SETS
 
 
 def test_no_addresses_means_no_api_call_at_all():
@@ -130,14 +136,101 @@ def test_a_token_carrying_send_scope_is_refused(monkeypatch, tmp_path):
     monkeypatch.setattr(gmail, "token_path", lambda: path)
 
     class Creds:
-        scopes = [READONLY_SCOPE, "https://www.googleapis.com/auth/gmail.send"]
+        scopes = [READONLY_SCOPE, SEND_SCOPE, "https://www.googleapis.com/auth/gmail.modify"]
         valid = True
 
     monkeypatch.setattr("google.oauth2.credentials.Credentials.from_authorized_user_file",
                         classmethod(lambda cls, *a, **k: Creds()))
     with pytest.raises(gmail.GmailUnavailable) as exc:
         gmail._credentials()
-    assert "gmail.readonly" in str(exc.value)
+    assert "gmail.readonly with gmail.send" in str(exc.value)
+
+
+def test_a_read_only_token_still_reads_but_cannot_send(monkeypatch, tmp_path):
+    path = tmp_path / "token.json"
+    path.write_text("{}")
+    monkeypatch.setattr(gmail, "token_path", lambda: path)
+
+    class Creds:
+        scopes = [READONLY_SCOPE]
+        valid = True
+
+    monkeypatch.setattr("google.oauth2.credentials.Credentials.from_authorized_user_file",
+                        classmethod(lambda cls, *a, **k: Creds()))
+    assert gmail._credentials() is not None
+    with pytest.raises(gmail.GmailUnavailable) as exc:
+        gmail._credentials(require_send=True)
+    assert "read only and cannot send" in str(exc.value)
+    assert "gmail-connect --force" in str(exc.value)
+
+
+# ── Sending: one message, one address, threaded under the first ───────────────
+
+
+class FakeSender:
+    def __init__(self):
+        self.sent: list[dict] = []
+
+    def users(self):
+        return self
+
+    def messages(self):
+        return self
+
+    def send(self, userId, body):
+        self.sent.append(body)
+        return _Exec({"id": f"m{len(self.sent)}", "threadId": body.get("threadId") or "t-new"})
+
+
+def _decode_raw(raw: str):
+    import email
+    from email import policy
+    return email.message_from_bytes(base64.urlsafe_b64decode(raw), policy=policy.default)
+
+
+def test_send_message_builds_one_plain_text_email():
+    api = FakeSender()
+    out = gmail.send_message(to="dave@roofs.com", subject="Whitaker Roofing: three things",
+                             body="Hi Dave,\r\n\r\nHere it is.\r\n", service=api)
+    assert out.message_id == "m1" and out.thread_id == "t-new"
+    assert len(api.sent) == 1 and "threadId" not in api.sent[0]
+    msg = _decode_raw(api.sent[0]["raw"])
+    assert msg["To"] == "dave@roofs.com"
+    assert msg["Subject"] == "Whitaker Roofing: three things"
+    assert msg.get_content_type() == "text/plain"
+    assert "Here it is." in msg.get_content()
+
+
+def test_a_follow_up_threads_under_the_first_email():
+    api = FakeSender()
+    out = gmail.send_message(to="dave@roofs.com", subject="Re: x", body="One more thing.",
+                             thread_id="t1", in_reply_to="<abc@mail.gmail.com>", service=api)
+    assert out.thread_id == "t1" and api.sent[0]["threadId"] == "t1"
+    msg = _decode_raw(api.sent[0]["raw"])
+    assert msg["In-Reply-To"] == "<abc@mail.gmail.com>"
+
+
+@pytest.mark.parametrize("to", ["", "dave", "a@b.com, c@d.com", "a@b.com;c@d.com", "a@b.com c@d.com"])
+def test_send_message_takes_exactly_one_address(to):
+    with pytest.raises(ValueError):
+        gmail.send_message(to=to, subject="x", body="y", service=FakeSender())
+
+
+def test_send_message_needs_the_send_scope(monkeypatch, tmp_path):
+    """No service handed in means the real client, which asks for a token that
+    can send. A read-only token is refused before any network call."""
+    path = tmp_path / "token.json"
+    path.write_text("{}")
+    monkeypatch.setattr(gmail, "token_path", lambda: path)
+
+    class Creds:
+        scopes = [READONLY_SCOPE]
+        valid = True
+
+    monkeypatch.setattr("google.oauth2.credentials.Credentials.from_authorized_user_file",
+                        classmethod(lambda cls, *a, **k: Creds()))
+    with pytest.raises(gmail.GmailUnavailable):
+        gmail.send_message(to="dave@roofs.com", subject="x", body="y")
 
 
 # ── Reading what the person actually typed ────────────────────────────────────

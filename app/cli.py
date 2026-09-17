@@ -996,11 +996,16 @@ def _draft_top(rows) -> None:
 def gmail_connect(
     force: bool = typer.Option(False, "--force", help="Replace an existing token."),
 ) -> None:
-    """Authorize reading replies from your own mailbox. Read only.
+    """Authorize your own mailbox for reading replies and sending one email at a time.
 
-    Opens a browser once and stores a refresh token. The only scope requested
-    is gmail.readonly, so the credential this produces cannot send. That is
-    hard rule 4 enforced by Google rather than by a test in this repo.
+    Opens a browser once and stores a refresh token carrying gmail.readonly and
+    gmail.send, nothing wider. The console's Send button uses it; nothing else
+    does. For production, put the token in Secret Manager and mount it:
+
+      gcloud secrets create gmail-token --data-file=.gmail-token.json
+      gcloud run services update audit-worker --region us-central1 \\
+        --update-secrets=/secrets/gmail-token.json=gmail-token:latest \\
+        --update-env-vars=GMAIL_TOKEN_PATH=/secrets/gmail-token.json
     """
     import json as _json
 
@@ -1025,20 +1030,22 @@ def gmail_connect(
                       "pip install -r requirements.txt")
         raise typer.Exit(code=1)
 
-    console.print(f"Requesting [bold]{SCOPES[0]}[/] and nothing else.")
+    console.print("Requesting [bold]" + "[/] and [bold]".join(SCOPES) + "[/], nothing wider.")
     flow = InstalledAppFlow.from_client_secrets_file(cfg.gmail_client_secrets, list(SCOPES))
     creds = flow.run_local_server(port=0)
 
     granted = set(creds.scopes or ())
     if granted != set(SCOPES):
         console.print(f"[red]Refusing to store this token.[/] Google granted "
-                      f"{sorted(granted)}, which is not read only.")
+                      f"{sorted(granted)}, not exactly read plus send.")
         raise typer.Exit(code=1)
 
     path.write_text(creds.to_json())
     path.chmod(0o600)
     console.print(f"[green]Connected.[/] Token stored at {path}. "
-                  "Scan with: [dim]python -m app.cli replies[/]")
+                  "Scan with: [dim]python -m app.cli replies[/]. For the console's Send "
+                  "button in production, upload it: [dim]gcloud secrets create gmail-token "
+                  f"--data-file={path}[/] (or [dim]versions add[/] if it exists).")
 
 
 @app.command()

@@ -84,7 +84,11 @@ touches Firestore or Vertex.
 2. **Respect robots.txt.** Disallowed means the check is skipped and noted. Never
    spoof the user agent.
 3. **Suppression is checked before every outreach action**, drafts included.
-4. **No automated sending.** Drafts only. No email API in the outreach path.
+4. **A person sends every email.** The console sends one email at a time from the
+   operator's own mailbox, after the operator has read that message and pressed
+   Send on it. Nothing sends on a schedule, in bulk, or from a job, and nothing
+   sends without a click for that one email. (Amended Sep 17, 2026; it read
+   "drafts only" before the console could send.)
 5. **No invented numbers.** Unknown means the field is absent. Not zero, not an
    estimate.
 6. **Crawl politely.** 2 req/sec per host, 25 pages max, honest user agent.

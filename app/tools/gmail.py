@@ -1,15 +1,16 @@
-"""Reading replies out of the operator's own mailbox. Read only, by construction.
+"""The operator's own mailbox: reading replies, and sending one email at a time.
 
-Criteria section 6 needs to know whether a touch was answered, and hard rule 4
-says nothing in this codebase sends. Reading satisfies both: a reply is an
-observation, not an outreach action.
+Criteria section 6 needs to know whether a touch was answered, so replies are
+read here. Hard rule 4, as amended on Sep 17, 2026, lets the console send an
+email a person has read and pressed Send on, so sending lives here too, in
+one function, with the scope to match.
 
-Three things are enforced here rather than asked for:
+Four things are enforced here rather than asked for:
 
-1. **The scope is `gmail.readonly` and the module refuses to build a client on
-   anything wider.** A token that cannot send means no code path can send,
-   including code nobody has written yet. That is a stronger guarantee than the
-   import check in the console tests, which is a string match.
+1. **The scopes are `gmail.readonly` and `gmail.send`, and the module refuses
+   to build a client on anything wider.** A token from before the amendment,
+   read only, still reads; asking it to send fails with a sentence saying to
+   reconnect. Nothing else (compose, modify, full mail) is ever accepted.
 
 2. **Search is always scoped to addresses we already hold.** There is no code
    path that lists a mailbox, and a caller that passes no addresses gets an
@@ -19,6 +20,10 @@ Three things are enforced here rather than asked for:
 3. **Only an excerpt is stored.** The classifier needs enough to judge intent
    and the console needs enough to recognise the message. Neither needs the
    whole thread, so the whole thread is never written down.
+
+4. **`send_message` sends exactly one message to the addresses it is given.**
+   No list, no loop, no schedule. The console route is its only caller, and a
+   test greps the package so a second one is a visible edit.
 """
 
 from __future__ import annotations
@@ -32,10 +37,14 @@ from typing import Any, Iterable, Sequence
 
 from app.config import REPO_ROOT, get_config
 
-# The only scope this module will accept. Widening it is a rule 4 amendment and
-# should be a visible edit here, not a config value someone can flip.
+# The scopes this module will accept, and no others. Widening this further is
+# a rule 4 amendment and should be a visible edit here, not a config value.
 READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
-SCOPES = (READONLY_SCOPE,)
+SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
+SCOPES = (READONLY_SCOPE, SEND_SCOPE)
+# A token stored before the Sep 17 amendment carries only the read scope. It
+# keeps working for what it could always do.
+ACCEPTED_SCOPE_SETS = (frozenset({READONLY_SCOPE}), frozenset(SCOPES))
 
 EXCERPT_CHARS = 1200
 
@@ -81,12 +90,12 @@ def token_path() -> Path:
     return Path(cfg.gmail_token_path or (REPO_ROOT / ".gmail-token.json"))
 
 
-def _credentials() -> Any:
+def _credentials(*, require_send: bool = False) -> Any:
     """Load the stored refresh token and assert its scope.
 
-    Raises rather than downgrading: a credential with send scope attached is a
-    rule 4 problem, and continuing with it because reading still works would
-    leave the capability sitting in the process.
+    Raises rather than downgrading: a credential carrying a scope outside the
+    accepted sets is refused outright, because continuing with it while it
+    still reads would leave the extra capability sitting in the process.
     """
     try:
         from google.auth.transport.requests import Request
@@ -102,28 +111,84 @@ def _credentials() -> Any:
 
     creds = Credentials.from_authorized_user_file(str(path), list(SCOPES))
 
-    granted = set(creds.scopes or ())
-    if granted != set(SCOPES):
+    granted = frozenset(creds.scopes or ())
+    if granted not in ACCEPTED_SCOPE_SETS:
         raise GmailUnavailable(
             f"the stored token carries {sorted(granted) or 'no scopes'}, and this "
-            f"module only accepts {READONLY_SCOPE}. Delete {path} and reconnect."
+            f"module only accepts gmail.readonly with gmail.send (or gmail.readonly "
+            f"alone, for reading). Delete {path} and reconnect."
+        )
+    if require_send and SEND_SCOPE not in granted:
+        raise GmailUnavailable(
+            "the stored Gmail token is read only and cannot send. Reconnect with: "
+            "python -m app.cli gmail-connect --force"
         )
 
     if not creds.valid:
         if creds.expired and creds.refresh_token:
             creds.refresh(Request())
-            path.write_text(creds.to_json())
+            try:
+                path.write_text(creds.to_json())
+            except OSError:
+                # A Secret Manager mount on Cloud Run is read only. The refresh
+                # token is unchanged, so the next process refreshes again.
+                pass
         else:
             raise GmailUnavailable("the stored Gmail token cannot be refreshed. Reconnect.")
     return creds
 
 
-def _service() -> Any:
+def _service(*, require_send: bool = False) -> Any:
     try:
         from googleapiclient.discovery import build
     except ImportError as exc:  # pragma: no cover - dependency is declared
         raise GmailUnavailable(f"google-api-python-client is not installed: {exc}") from exc
-    return build("gmail", "v1", credentials=_credentials(), cache_discovery=False)
+    return build("gmail", "v1", credentials=_credentials(require_send=require_send),
+                 cache_discovery=False)
+
+
+@dataclass(frozen=True)
+class SentMessage:
+    message_id: str
+    thread_id: str
+
+
+def build_raw(*, to: str, subject: str, body: str, in_reply_to: str | None = None) -> str:
+    """One plain-text RFC 5322 message, base64url as the API wants it. Plain
+    text on purpose: cold email with markup and images is what filters learn
+    to catch, and the report link is the only thing that needs to be clickable."""
+    from email.message import EmailMessage
+
+    msg = EmailMessage()
+    msg["To"] = to
+    msg["Subject"] = " ".join(subject.split())
+    if in_reply_to:
+        msg["In-Reply-To"] = in_reply_to
+        msg["References"] = in_reply_to
+    msg.set_content(body.replace("\r\n", "\n"))
+    return base64.urlsafe_b64encode(msg.as_bytes()).decode()
+
+
+def send_message(*, to: str, subject: str, body: str, thread_id: str | None = None,
+                 in_reply_to: str | None = None, service: Any = None) -> SentMessage:
+    """Send one email from the connected mailbox to one address, now.
+
+    Called from exactly one place, the console route behind the Send button,
+    after suppression, the sequence state, the copy checks and the daily cap
+    have all passed. It does not loop and takes no list. `thread_id` puts a
+    follow-up under the first email in the recipient's client.
+    """
+    to = (to or "").strip()
+    if not to or "@" not in to or any(c in to for c in " ,;\n"):
+        raise ValueError(f"send_message needs one address, got {to!r}")
+    api = service or _service(require_send=True)
+    payload: dict[str, Any] = {"raw": build_raw(to=to, subject=subject, body=body,
+                                                in_reply_to=in_reply_to)}
+    if thread_id:
+        payload["threadId"] = thread_id
+    sent = api.users().messages().send(userId="me", body=payload).execute()
+    return SentMessage(message_id=str(sent.get("id") or ""),
+                       thread_id=str(sent.get("threadId") or thread_id or ""))
 
 
 def strip_quoted(body: str) -> str:

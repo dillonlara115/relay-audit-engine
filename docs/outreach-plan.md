@@ -26,6 +26,37 @@ Criteria doc §6 and §7 govern. Where this disagrees with them, they win.
 
 ## Phase 3: sending
 
+### Decided Sep 17, 2026: the console sends, a person presses Send
+
+The owner asked for what Swokei has on screen: the email drafted from the
+findings, editable before it goes, variables to insert, and a Send button. Not
+what Swokei has behind it: nothing here sends on a schedule or to a list.
+
+Hard rule 4 was amended in the same commit, as this document said it should be.
+It no longer reads "drafts only". It reads: a person sends every email, one at
+a time, after reading it. The criteria's thirty-hand-sent gate (§7) is about
+*automated* sending and is untouched; an email a person reads and sends from
+the console is a hand send and counts toward the thirty.
+
+What that looks like in the code:
+
+- `app/tools/gmail.py` requests `gmail.readonly` and `gmail.send`, nothing
+  wider, and refuses any token carrying more. A read-only token from before
+  still reads; sending with it fails with a sentence saying to reconnect.
+- One function sends, `gmail.send_message`, and one route calls it,
+  `POST /console/outreach/{prospect_id}/send`. A test greps the package so a
+  second caller is a visible edit. Jobs, the pipeline and the CLI never call it.
+- Suppression is checked first (rule 3), the sequence has to be open, the body
+  is checked for internal vocabulary and forbidden dashes before it leaves, and
+  a daily cap (`OUTREACH_DAILY_CAP`, default 40) stops a bad morning.
+- Every send is recorded as a touch with the Gmail message id and thread id,
+  so follow-ups thread under the first email and the reply scanner can match
+  them. "Mark as sent" stays, for an email sent from somewhere else.
+- Templates for the four emails live in Firestore and are edited in the
+  console with `{{variables}}`; the defaults are the drafts this document
+  already specified.
+
+
 ### The entry condition is not a date
 
 Criteria §7: *"No automated sending until at least thirty have been hand-sent and

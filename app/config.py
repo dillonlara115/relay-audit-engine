@@ -125,6 +125,13 @@ class Config:
     # by hand; this is the company line.
     outreach_signature: str = field(
         default_factory=lambda: _str("OUTREACH_SIGNATURE", "Relay for Roofers"))
+    # The address the console sends from, shown beside the Send button so the
+    # operator knows whose mailbox it leaves. Display only; Gmail sets the real
+    # From header from the connected account.
+    outreach_mailbox: str = field(default_factory=lambda: _str("OUTREACH_MAILBOX"))
+    # Emails the console will send in one UTC day before refusing. Criteria
+    # section 7 puts target volume near a hundred a month.
+    outreach_daily_cap: int = field(default_factory=lambda: _int("OUTREACH_DAILY_CAP", 40))
 
     # Pub/Sub
     pubsub_audit_topic: str = field(
@@ -182,6 +189,8 @@ _ENV_NAME = {
     "public_report_host": "PUBLIC_REPORT_HOST",
     "smoke_base_url": "SMOKE_BASE_URL",
     "outreach_signature": "OUTREACH_SIGNATURE",
+    "outreach_mailbox": "OUTREACH_MAILBOX",
+    "outreach_daily_cap": "OUTREACH_DAILY_CAP",
 }
 
 
