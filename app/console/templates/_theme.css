@@ -345,3 +345,7 @@ th.pick::after { content:none; }
 .tpl select.insert-var { width:auto; font-size:.85rem; padding:4px 8px; margin:0 0 4px; }
 .tpl textarea { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.9rem; line-height:1.45; }
 .tpl h3 .muted { font-weight:400; font-size:.85rem; margin-left:8px; }
+#outreach .row { display:flex; justify-content:space-between; align-items:end; gap:12px; }
+#outreach select.insert-var { width:auto; font-size:.85rem; padding:4px 8px; margin:0 0 4px; }
+#outreach textarea { font-size:.95rem; line-height:1.5; }
+#outreach form button + a.btn.ghost { margin-left:8px; }

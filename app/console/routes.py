@@ -13,10 +13,11 @@ Nothing long runs inside a request. Cloud Run throttles CPU once a response is
 sent, so a sweep started in a handler would be killed halfway; instead the job
 goes over Pub/Sub to a worker, which is the same path audits already take.
 
-There is no send route. Rule 4 is drafts only, and a button is how that rule
-would erode. `log-touch` is not one: it records that a human already sent
-something from their own mailbox, which is the only way the sequence clock can
-move while nothing in this codebase can send. It transmits nothing.
+There is one send route, `outreach/{prospect_id}/send`, and it sends one email
+a person has read and pressed Send on, from their own mailbox (rule 4 as
+amended Sep 17, 2026). It is the only caller of `gmail.send_message` in the
+package and a test holds it to that. `log-touch` records a send made from
+somewhere else so the sequence clock moves; it transmits nothing.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ import asyncio
 import hashlib
 import logging
 import re
-from typing import Any
+from typing import Any, Mapping
 from urllib.parse import parse_qsl, urlencode, urlparse
 
 from fastapi import APIRouter, Form, Request, Response
@@ -487,6 +488,7 @@ async def audit_screen(audit_id: str, request: Request) -> Response:
         signature=get_config().outreach_signature,
         sender_name=get_config().outreach_sender_name,
         templates=templates,
+        mailbox=get_config().outreach_mailbox,
     ))
 
 
@@ -637,6 +639,134 @@ async def save_templates(request: Request, csrf: str = Form(None)) -> Response:
                                       " ".join(problems)))
     await asyncio.to_thread(store.save_email_templates, templates)
     return _redirect(_with_notice("/console/templates", "templates_saved", ""))
+
+
+# ── Sending ───────────────────────────────────────────────────────────────────
+
+
+def _send_checks(prospect_id: str, prospect: Mapping[str, Any], to: str) -> str | None:
+    """Everything that must be true before a byte leaves. Suppression first
+    (rule 3), then the address, then the daily cap. A sentence when blocked."""
+    from datetime import datetime, timezone
+
+    hit = store.suppression_hit(
+        store.load_suppressions(),
+        place_id=prospect_id,
+        domain=prospect.get("domain"),
+        phone=prospect.get("gbp_phone"),
+        email=to or prospect.get("owner_email"),
+    )
+    if hit:
+        return f"This prospect is suppressed ({hit})."
+    if not to or "@" not in to or any(c in to for c in " ,;"):
+        return "The To field needs one email address."
+    cap = get_config().outreach_daily_cap
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if store.daily_sends(today) >= cap:
+        return (f"The daily limit of {cap} emails has been reached. It resets at midnight UTC "
+                "(OUTREACH_DAILY_CAP).")
+    return None
+
+
+@router.post("/outreach/{prospect_id}/send")
+async def send_email(prospect_id: str, request: Request, audit_id: str = Form(None),
+                     to: str = Form(""), subject: str = Form(""), body: str = Form(""),
+                     csrf: str = Form(None)) -> Response:
+    """Send the one email on the form, now, from the operator's mailbox.
+
+    This is the one place in the package that sends. It runs only when a
+    person has pressed Send on this message after reading it, which the form's
+    confirm restates. In order: CSRF, suppression, the address, the daily cap,
+    the sequence state, the copy checks (internal vocabulary, forbidden
+    dashes, unknown variables), then one call to gmail.send_message, then the
+    ledger. A failure at any step sends nothing and says why.
+    """
+    if not check_csrf(request, csrf):
+        return Response(status_code=403, content="stale form, reload the page")
+
+    from app import outreach
+    from app import outreach_templates as tpl
+    from app.copy_rules import sanitize
+    from app.report.data import forbidden_terms_in
+    from app.tools import gmail
+
+    to = (to or "").strip()
+
+    def send() -> tuple[str | None, str]:
+        prospect = store.get_prospect(prospect_id) or {}
+        blocked = _send_checks(prospect_id, prospect, to)
+        if blocked:
+            return blocked, ""
+
+        row = store.get_sequence(prospect_id)
+        findings_doc = store.get_draft_findings(audit_id) if audit_id else None
+        if row:
+            seq = outreach.Sequence.from_dict(row)
+        else:
+            pool = len((findings_doc or {}).get("findings") or [])
+            seq = outreach.open_sequence(prospect_id, audit_id=audit_id,
+                                         max_touches=outreach.touches_supported(pool) or 1)
+        if not seq.is_open:
+            return "This outreach sequence is finished.", ""
+        ordinal = seq.touch_count + 1
+
+        cfg = get_config()
+        values = tpl.values_for(ordinal=ordinal, prospect=prospect,
+                                report_url=_report_url(request, (store.get_audit(audit_id) or {}).get("report_slug")) if audit_id else "",
+                                findings_doc=findings_doc, sender_name=cfg.outreach_sender_name,
+                                signature=cfg.outreach_signature)
+        subj, unknown_s = tpl.render(tpl.clean(subject), values)
+        text, unknown_b = tpl.render(tpl.clean(body), values)
+        unknown = unknown_s + [u for u in unknown_b if u not in unknown_s]
+        if unknown:
+            return ("Not a variable: " + ", ".join("{{" + u + "}}" for u in unknown)
+                    + ". Fix or remove it."), ""
+        subj = " ".join(subj.split())
+        text, _ = sanitize(text)
+        if not subj or not text.strip():
+            return "The subject and body cannot be empty.", ""
+        leaked = forbidden_terms_in(subj + " " + text)
+        if leaked:
+            return ("The email names internal vocabulary a contractor should never read: "
+                    + ", ".join(leaked) + ". Edit it and try again."), ""
+
+        earlier = store.touches_for(prospect_id)
+        first = next((t for t in earlier if t.get("thread_id")), None)
+        try:
+            sent = gmail.send_message(
+                to=to, subject=subj, body=text,
+                thread_id=(first or {}).get("thread_id") if ordinal > 1 else None,
+                in_reply_to=(first or {}).get("rfc_message_id") if ordinal > 1 else None,
+            )
+        except gmail.GmailUnavailable as exc:
+            return f"The mailbox is not connected: {exc}", ""
+
+        sent_at = store.utcnow()
+        advanced = outreach.advance(seq, sent_at=sent_at)
+        store.add_touch(prospect_id, {
+            "ordinal": advanced.touch_count,
+            "sent_at": sent_at,
+            "audit_id": audit_id or seq.audit_id,
+            "channel": "email",
+            "logged_via": "console",
+            "sent_via": "console",
+            "to": to,
+            "subject": subj,
+            "body": text,
+            "message_id": sent.message_id,
+            "thread_id": sent.thread_id,
+        })
+        store.save_sequence(advanced)
+        from datetime import datetime, timezone
+        store.bump_daily_sends(datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+        return None, f"Email {advanced.touch_count} of {advanced.max_touches} to {to}."
+
+    blocked, detail = await asyncio.to_thread(send)
+    back = _back(request, f"/console/audits/{audit_id}" if audit_id else "/console/batches")
+    target = _with_notice(back, "not_sent" if blocked else "sent", blocked or detail)
+    if back.startswith("/console/audits/"):
+        target += "#outreach"
+    return _redirect(target)
 
 
 # ── Suppression ───────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
-{#- The Outreach card. Three steps a person cannot misread: compose the
-    email in their own mail client, record that they sent it, and see where
-    the sequence stands. Nothing here sends; the sentence saying so is fixed
-    and appears twice on purpose. -#}
+{#- The Outreach card. Three steps a person cannot misread: read and edit
+    the next email and press Send on it, or mark one sent from elsewhere,
+    and see where the sequence stands. The one sentence about what sends
+    and when is fixed and appears beside the button on purpose. -#}
 {% from "_components.html" import pill %}
 
 {% macro outreach_card(o, csrf, prospect_id, audit_id) -%}
@@ -9,45 +9,63 @@
   <div class="pagehead">
     <h2>Outreach {{ pill(o.state[0], o.state[1]) }}</h2>
   </div>
-  <p class="muted">Email leaves your own mailbox. Nothing is sent from here.</p>
+  <p class="muted">Sends from {{ o.mailbox }} when you press Send on an email you have read. Nothing goes out on its own.</p>
 
   {% if o.step1.mode != "hidden" %}
   <div class="step">
-    <h4>1. Compose email</h4>
+    <h4>1. Read, edit, send</h4>
     {% if o.step1.mode == "unpublished" %}
-      <span class="btn disabled">Compose email</span>
+      <span class="btn disabled">Send email</span>
       <p class="muted">Publish the report first. The email carries its link.</p>
     {% else %}
-      <a class="btn" href="{{ o.step1.href }}">Compose email</a>
-      {% if o.step1.mode == "no_address" %}
-        {{ pill("warn", "No address on record") }}
-        <p class="muted">Find an address, then paste it into the To field.</p>
-      {% else %}
-        <p class="muted">{{ o.step1.note }}</p>
-      {% endif %}
-      {% for w in o.step1.warnings %}{{ pill("warn", w) }}{% endfor %}
-      <p class="hint">Replace {Your name} before it goes out.</p>
-      <details>
-        <summary>Copy the text instead</summary>
-        <label for="draft-subject">Subject</label>
-        <input id="draft-subject" type="text" readonly value="{{ o.step1.subject }}">
-        <label for="draft-body">Body</label>
-        <textarea id="draft-body" readonly rows="10">{{ o.step1.body }}</textarea>
-      </details>
+      <form method="post" action="/console/outreach/{{ prospect_id }}/send" id="send-form"
+            onsubmit="{{ o.step1.confirm }}">
+        {{ csrf_field(csrf) }}
+        <input type="hidden" name="audit_id" value="{{ audit_id }}">
+        <input type="hidden" name="ordinal" value="{{ o.step1.ordinal }}">
+        <label for="send-to">To</label>
+        <input id="send-to" name="to" type="email" value="{{ o.step1.to }}" required
+               placeholder="owner@their-domain.com">
+        {% if o.step1.mode == "no_address" %}
+          {{ pill("warn", "No address on record") }}
+          <p class="muted">Find an address and type it in. It is kept with the record of the send.</p>
+        {% endif %}
+        <div class="row">
+          <label for="send-subject">Subject</label>
+          <select class="insert-var" data-target="send-subject" aria-label="Insert a variable into the subject">
+            <option value="">Insert variable</option>
+            {% for name, what in o.variables %}<option value="{{ name }}">{{ name }}</option>{% endfor %}
+          </select>
+        </div>
+        <input id="send-subject" name="subject" type="text" value="{{ o.step1.subject }}" maxlength="120" required>
+        <div class="row">
+          <label for="send-body">Body</label>
+          <select class="insert-var" data-target="send-body" aria-label="Insert a variable into the body">
+            <option value="">Insert variable</option>
+            {% for name, what in o.variables %}<option value="{{ name }}">{{ name }}</option>{% endfor %}
+          </select>
+        </div>
+        <textarea id="send-body" name="body" rows="16" required>{{ o.step1.body }}</textarea>
+        {% for w in o.step1.warnings %}<p>{{ pill("warn", w) }}</p>{% endfor %}
+        <p class="muted">Email {{ o.step1.ordinal }} of {{ o.step1.max }}. {{ o.step1.note }} Variables you type are filled in when it sends.</p>
+        <button type="submit">Send email</button>
+        <a class="btn ghost" href="{{ o.step1.href }}">Open in my mail client instead</a>
+      </form>
+      <p class="hint">Sending records it below and schedules the next one: day 3, day 7, day 14. Edit the wording for every prospect under <a href="/console/templates">Email templates</a>.</p>
     {% endif %}
   </div>
   {% endif %}
 
   {% if o.step2.show %}
   <div class="step">
-    <h4>2. Mark as sent</h4>
+    <h4>2. Sent it from somewhere else?</h4>
     <form class="inline" method="post" action="/console/outreach/{{ prospect_id }}/log-touch"
           onsubmit="{{ o.step2.confirm }}">
       {{ csrf_field(csrf) }}
       <input type="hidden" name="audit_id" value="{{ audit_id }}">
       <button class="ghost" type="submit">Mark as sent</button>
     </form>
-    <p class="muted">Records the send and schedules the next one: day 3, day 7, day 14.</p>
+    <p class="muted">Records a send you made from your own mail client, so the sequence clock moves. Nothing is sent from here.</p>
   </div>
   {% endif %}
 

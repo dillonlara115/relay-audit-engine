@@ -621,6 +621,20 @@ def save_email_templates(templates: Mapping[str, Any]) -> None:
         {**_plain(dict(templates)), "updated_at": utcnow()})
 
 
+SEND_LOG_DOC = "send_log"
+
+
+def daily_sends(day: str) -> int:
+    """How many emails the console has sent on this UTC day (YYYY-MM-DD)."""
+    snap = get_client().collection(SETTINGS).document(SEND_LOG_DOC).get()
+    return int(((snap.to_dict() or {}) if snap.exists else {}).get(day) or 0)
+
+
+def bump_daily_sends(day: str) -> None:
+    get_client().collection(SETTINGS).document(SEND_LOG_DOC).set(
+        {day: firestore.Increment(1), "updated_at": utcnow()}, merge=True)
+
+
 def get_sequence(prospect_id: str) -> dict[str, Any] | None:
     snap = get_client().collection(OUTREACH).document(prospect_id).get()
     return snap.to_dict() if snap.exists else None

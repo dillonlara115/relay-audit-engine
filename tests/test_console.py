@@ -150,28 +150,43 @@ def test_every_console_route_is_gated(client):
 # ── The rules a web app could erode ───────────────────────────────────────────
 
 
-# The ledger route records a touch a human already sent from their own mailbox.
-# It is the one path allowed to mention outreach, and it is spelled out here so
-# that adding a second one is a deliberate edit to this list.
-LEDGER_ROUTES = {"/console/outreach/{prospect_id}/log-touch"}
+# The two paths allowed to touch outreach, spelled out so that adding a third
+# is a deliberate edit to this list. The send route sends one email a person
+# has read and pressed Send on (rule 4 as amended Sep 17, 2026). The ledger
+# route records a send made from somewhere else and transmits nothing.
+SEND_ROUTE = "/console/outreach/{prospect_id}/send"
+LEDGER_ROUTES = {"/console/outreach/{prospect_id}/log-touch", SEND_ROUTE}
 
 
-def test_there_is_no_send_route(client):
-    """Rule 4: drafts only, no automated sending. A button is how that erodes."""
+def test_the_send_route_is_the_only_route_that_sends(client):
+    """Rule 4 as amended: one route, one email, one click. Nothing else in the
+    console may look like a send, and nothing may send in bulk or on a timer."""
     from app.console.routes import router
 
-    paths = " ".join(getattr(r, "path", "") for r in router.routes).lower()
-    for word in ("send", "email", "message", "deliver", "campaign"):
-        assert word not in paths, f"a {word} route exists in the console"
+    paths = [getattr(r, "path", "") for r in router.routes]
+    for word in ("send", "email", "message", "deliver", "campaign", "bulk", "schedule"):
+        hits = [p for p in paths if word in p.lower()]
+        assert hits in ([], [SEND_ROUTE]), f"{word}: {hits}"
 
 
-def test_the_ledger_is_the_only_route_that_touches_outreach(client):
-    """A path may say 'outreach' only if it is on the list above."""
+def test_the_ledger_and_send_routes_are_the_only_ones_that_touch_outreach(client):
     from app.console.routes import router
 
     named = {getattr(r, "path", "") for r in router.routes
              if "outreach" in getattr(r, "path", "").lower()}
     assert named == LEDGER_ROUTES
+
+
+def test_only_the_send_route_calls_the_one_function_that_sends():
+    """gmail.send_message is defined once and called from one place. A job, the
+    pipeline or the CLI calling it would be automated sending."""
+    import pathlib as _pl
+
+    root = _pl.Path(__file__).resolve().parent.parent / "app"
+    callers = sorted(str(p.relative_to(root)) for p in root.rglob("*.py")
+                     if "send_message(" in p.read_text())
+    assert callers == ["console/routes.py", "tools/gmail.py"], callers
+    assert "def send_message(" in (root / "tools" / "gmail.py").read_text()
 
 
 def test_nothing_in_the_app_can_transmit_mail():
@@ -2028,8 +2043,12 @@ def test_compose_opens_the_mail_client_with_the_report_and_the_three_findings():
     assert 'href="mailto:dave@apexroofingusa.com?subject=' in page
     assert "body=" in page
     assert "reports.relayforroofers.com%2Fabcdefghijklmnop" in page
-    assert "Nothing is sent from here" in page
+    assert "Nothing goes out on its own" in page
     assert "for dave@apexroofingusa.com" in page
+    assert 'action="/console/outreach/p1/send"' in page
+    assert 'name="to" type="email" value="dave@apexroofingusa.com"' in page
+    assert "Send email 1 of 4 to dave@apexroofingusa.com? It leaves your mailbox now." in page
+    assert ">Send email</button>" in page and "Open in my mail client instead" in page
 
 
 def test_without_an_address_compose_still_opens_but_says_so():
@@ -2037,12 +2056,13 @@ def test_without_an_address_compose_still_opens_but_says_so():
                           report_url="https://x/abc")
     assert 'href="mailto:?subject=' in page
     assert "No address on record" in page
-    assert "paste it into the To field" in page
+    assert "Find an address and type it in" in page
+    assert 'name="to" type="email" value=""' in page
 
 
 def test_without_a_published_report_there_is_nothing_to_compose_or_mark():
     page = _prospect_page(findings=_approved())
-    assert "mailto:" not in page
+    assert "mailto:" not in page and "/send" not in page
     assert "Publish the report first" in page
     assert "log-touch" not in page
 
@@ -2089,7 +2109,7 @@ def test_a_closed_sequence_shows_why_and_offers_nothing():
     page = _prospect_page(findings=_approved(), audit={"report_slug": "abcdefghijklmnop"},
                           report_url="https://x/abc", sequence=seq.to_dict())
     assert "Closed: Not interested" in page
-    assert "mailto:" not in page and "log-touch" not in page
+    assert "mailto:" not in page and "log-touch" not in page and "/send" not in page
 
 
 def test_a_parked_sequence_points_at_the_cli():
@@ -2619,3 +2639,159 @@ def test_the_templates_screen_is_gated_and_survives_a_missing_store(client, monk
     sign_in(client)
     response = client.get("/console/templates")
     assert response.status_code == 200 and "Email templates" in response.text
+
+
+# ── Sending from the prospect page ────────────────────────────────────────────
+
+
+def _send_store(monkeypatch, *, suppressions=None, sequence=None, sent_today=0, gmail_error=None):
+    import app.console.routes as routes
+    from app.tools import gmail
+
+    written = _ledger_store(monkeypatch, suppressions=suppressions, sequence=sequence)
+    written["sent"] = []
+    written["bumps"] = 0
+    monkeypatch.setattr(routes.store, "get_audit", lambda aid: {"report_slug": "abcdefghijklmnop"})
+    monkeypatch.setattr(routes.store, "touches_for", lambda pid: [])
+    monkeypatch.setattr(routes.store, "daily_sends", lambda day: sent_today)
+
+    def bump(day):
+        written["bumps"] += 1
+    monkeypatch.setattr(routes.store, "bump_daily_sends", bump)
+
+    def fake_send(**kw):
+        if gmail_error:
+            raise gmail_error
+        written["sent"].append(kw)
+        return gmail.SentMessage(message_id="m1", thread_id="t1")
+    monkeypatch.setattr(gmail, "send_message", fake_send)
+    return written
+
+
+def _send(client, csrf, **over):
+    data = {"csrf": csrf, "audit_id": "a1", "to": "dave@whitakerroofing.com",
+            "subject": "{{business}}: three things", "body": "Hi {{first_name}},\nSee {{report_url}}"}
+    data.update(over)
+    return client.post("/console/outreach/p1/send", data=data, follow_redirects=False,
+                       headers={"referer": "http://testserver/console/audits/a1"})
+
+
+def test_send_sends_one_email_and_records_it(client, monkeypatch):
+    written = _send_store(monkeypatch)
+    csrf = sign_in(client)
+    response = _send(client, csrf)
+    assert response.status_code == 303
+    assert "notice=sent" in response.headers["location"]
+    assert response.headers["location"].endswith("#outreach")
+    assert len(written["sent"]) == 1
+    sent = written["sent"][0]
+    assert sent["to"] == "dave@whitakerroofing.com"
+    assert sent["subject"] == "your business: three things", "variables filled at send time"
+    assert "Hi there," in sent["body"] and "abcdefghijklmnop" in sent["body"]
+    assert sent["thread_id"] is None, "the first email starts the thread"
+    touch = written["touches"][0][1]
+    assert touch["ordinal"] == 1 and touch["sent_via"] == "console"
+    assert touch["message_id"] == "m1" and touch["thread_id"] == "t1"
+    assert touch["to"] == "dave@whitakerroofing.com"
+    assert written["bumps"] == 1 and len(written["sequences"]) == 1
+
+
+def test_send_needs_csrf(client, monkeypatch):
+    written = _send_store(monkeypatch)
+    sign_in(client)
+    response = _send(client, "wrong")
+    assert response.status_code == 403 and written["sent"] == []
+
+
+def test_send_is_gated(client, monkeypatch):
+    written = _send_store(monkeypatch)
+    response = client.post("/console/outreach/p1/send", data={"to": "x@y.com"})
+    assert response.status_code == 401 and written["sent"] == []
+
+
+def test_send_checks_suppression_before_anything(client, monkeypatch):
+    written = _send_store(monkeypatch, suppressions={"place_id": set(), "domain": {"whitakerroofing.com"},
+                                                     "phone": set(), "email": set()})
+    csrf = sign_in(client)
+    response = _send(client, csrf)
+    assert "notice=not_sent" in response.headers["location"]
+    assert "suppressed" in response.headers["location"]
+    assert written["sent"] == [] and written["touches"] == []
+
+
+@pytest.mark.parametrize("to", ["", "dave", "a@b.com, c@d.com"])
+def test_send_refuses_anything_but_one_address(client, monkeypatch, to):
+    written = _send_store(monkeypatch)
+    csrf = sign_in(client)
+    response = _send(client, csrf, to=to)
+    assert "notice=not_sent" in response.headers["location"] and written["sent"] == []
+
+
+def test_send_stops_at_the_daily_cap(client, monkeypatch):
+    written = _send_store(monkeypatch, sent_today=40)
+    csrf = sign_in(client)
+    response = _send(client, csrf)
+    assert "notice=not_sent" in response.headers["location"]
+    assert "daily+limit" in response.headers["location"] or "daily%20limit" in response.headers["location"]
+    assert written["sent"] == []
+
+
+def test_send_refuses_internal_vocabulary_and_unknown_variables(client, monkeypatch):
+    written = _send_store(monkeypatch)
+    csrf = sign_in(client)
+    response = _send(client, csrf, body="Your Leaky Bucket segment scored 40.")
+    assert "notice=not_sent" in response.headers["location"] and "vocabulary" in response.headers["location"]
+    response = _send(client, csrf, body="Hi {{frist_name}}")
+    assert "notice=not_sent" in response.headers["location"] and "frist_name" in response.headers["location"]
+    assert written["sent"] == []
+
+
+def test_send_fixes_dashes_rather_than_refusing(client, monkeypatch):
+    written = _send_store(monkeypatch)
+    csrf = sign_in(client)
+    _send(client, csrf, body="Hi — one thing.")
+    assert written["sent"][0]["body"] == "Hi, one thing."
+
+
+def test_send_without_a_mailbox_sends_nothing_and_says_so(client, monkeypatch):
+    from app.tools.gmail import GmailUnavailable
+
+    written = _send_store(monkeypatch, gmail_error=GmailUnavailable("no Gmail token at x"))
+    csrf = sign_in(client)
+    response = _send(client, csrf)
+    assert "notice=not_sent" in response.headers["location"]
+    assert "not+connected" in response.headers["location"] or "not%20connected" in response.headers["location"]
+    assert written["touches"] == [], "nothing recorded when nothing left"
+
+
+def test_a_follow_up_threads_under_the_first_send(client, monkeypatch):
+    from datetime import datetime, timezone
+
+    from app import outreach
+    import app.console.routes as routes
+
+    seq = outreach.advance(outreach.open_sequence("p1", audit_id="a1", max_touches=4),
+                           sent_at=datetime(2026, 9, 10, tzinfo=timezone.utc))
+    written = _send_store(monkeypatch, sequence=seq.to_dict())
+    monkeypatch.setattr(routes.store, "touches_for",
+                        lambda pid: [{"ordinal": 1, "thread_id": "t-first"}])
+    csrf = sign_in(client)
+    response = _send(client, csrf, subject="Re: x", body="One more thing. {{followup}}")
+    assert "notice=sent" in response.headers["location"], response.headers["location"]
+    assert written["sent"][0]["thread_id"] == "t-first"
+    assert written["touches"][0][1]["ordinal"] == 2
+
+
+def test_the_timeline_says_where_a_send_came_from():
+    from datetime import datetime, timezone
+
+    page = _prospect_page(findings=_approved(), audit={"report_slug": "abcdefghijklmnop"},
+                          report_url="https://x/abc",
+                          touches=[{"ordinal": 1, "sent_at": datetime(2026, 9, 17, tzinfo=timezone.utc),
+                                    "to": "dave@apexroofingusa.com", "sent_via": "console"}])
+    assert "Email 1 sent Sep 17 to dave@apexroofingusa.com from the console" in page
+
+
+def test_the_send_notice_reads_as_a_sentence():
+    assert views.notice_from("sent", "Email 1 of 4 to dave@x.com.") == ("Email sent.", "Email 1 of 4 to dave@x.com.")
+    assert views.notice_from("not_sent", "x")[0] == "Email not sent."

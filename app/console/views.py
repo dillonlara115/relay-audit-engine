@@ -118,6 +118,8 @@ NOTICES = {
     "publish_blocked": "Report not published.",
     "not_recorded": "Nothing was recorded.",
     "reaudit_queued": "Re-audit queued.",
+    "sent": "Email sent.",
+    "not_sent": "Email not sent.",
     "templates_saved": "Templates saved.",
     "templates_rejected": "Templates not saved.",
 }
@@ -702,12 +704,15 @@ def outreach_context(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                      touches: Sequence[Mapping[str, Any]],
                      replies: Sequence[Mapping[str, Any]],
                      report_url: str | None, signature: str, sender_name: str = "",
-                     templates: Mapping[str, Any] | None = None) -> dict[str, Any]:
+                     templates: Mapping[str, Any] | None = None,
+                     mailbox: str = "") -> dict[str, Any]:
     """Everything the Outreach card shows, computed once and testable.
 
-    Compose builds a mailto: link and nothing else; Mark as sent posts to the
-    ledger route that records a send a person already made. Neither transmits
-    a byte, and the card says so in a fixed sentence.
+    Step 1 is the next email, rendered from the template, in editable fields
+    with a Send button: the send route behind it sends that one message from
+    the operator's mailbox when they press it (rule 4 as amended). Step 2 is
+    Mark as sent, for an email sent from somewhere else. The card says in a
+    fixed sentence that nothing goes out on its own.
     """
     from app import outreach
     from app.console import compose as composer
@@ -743,8 +748,13 @@ def outreach_context(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                         f"{seen[:80]}{'...' if len(seen) > 80 else ''}")
             step1 = {"mode": "compose" if owner_email else "no_address",
                      "href": composer.fit_mailto(draft), "note": note,
-                     "subject": draft.subject, "body": draft.body,
-                     "warnings": list(draft.warnings)}
+                     "to": owner_email or "", "subject": draft.subject, "body": draft.body,
+                     "warnings": list(draft.warnings), "ordinal": next_ordinal,
+                     "max": max_touches,
+                     "confirm": _confirm_attr(
+                         f"Send email {next_ordinal} of {max_touches} to "
+                         f"{owner_email or 'the address in the To field'}"
+                         f"{' from ' + mailbox if mailbox else ''}? It leaves your mailbox now.")}
 
     step2 = {"show": published and is_open and next_ordinal <= max_touches,
              "confirm": _confirm_attr(
@@ -756,7 +766,12 @@ def outreach_context(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
     for t in touches:
         when = t.get("sent_at")
         stamp = when.strftime("%b %d") if hasattr(when, "strftime") else ""
-        events.append((when, "sent", f"Email {t.get('ordinal', '?')} sent {stamp}".strip()))
+        text = f"Email {t.get('ordinal', '?')} sent {stamp}".strip()
+        if t.get("to"):
+            text += f" to {t['to']}"
+        if t.get("sent_via") == "console":
+            text += " from the console"
+        events.append((when, "sent", text))
     for r in replies:
         when = r.get("received_at")
         stamp = when.strftime("%b %d") if hasattr(when, "strftime") else ""
@@ -787,7 +802,14 @@ def outreach_context(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
             nxt = f"Next due {due}. No findings left for another email; the sequence closes after this one."
 
     return {"state": outreach_state(sequence, can_start=published),
-            "step1": step1, "step2": step2, "timeline": timeline, "next": nxt}
+            "step1": step1, "step2": step2, "timeline": timeline, "next": nxt,
+            "mailbox": mailbox or "your connected mailbox",
+            "variables": list(_variables().items())}
+
+
+def _variables() -> dict[str, str]:
+    from app import outreach_templates as tpl
+    return tpl.VARIABLES
 
 
 def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
@@ -800,7 +822,7 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                  history: Sequence[Mapping[str, Any]] | None = (),
                  report_url: str | None = None,
                  signature: str = "Relay for Roofers", sender_name: str = "",
-                 templates: Mapping[str, Any] | None = None,
+                 templates: Mapping[str, Any] | None = None, mailbox: str = "",
                  sweep_label: str | None = None) -> str:
     """One prospect: scores, findings, outreach, every check, the evidence."""
     from urllib.parse import urlparse
@@ -950,7 +972,7 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
 
     o_vm = outreach_context(audit=audit, prospect=prospect, findings=findings,
                             sequence=sequence, touches=touches, replies=replies,
-                            report_url=report_url, signature=signature, sender_name=sender_name, templates=templates)
+                            report_url=report_url, signature=signature, sender_name=sender_name, templates=templates, mailbox=mailbox)
 
     return _render("prospect.html", title=name, active="batches", csrf=csrf,
                    p=p_vm, f=f_vm, o=o_vm, sections=sections, evidence_html=evidence_html,
