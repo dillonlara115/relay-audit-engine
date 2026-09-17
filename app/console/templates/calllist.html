@@ -67,10 +67,10 @@
 </div>
 
 {% if tab == "excluded" %}
-<div class="table-wrap"><table id="call-list"><thead><tr>
+<div class="table-wrap"><table id="call-list" class="sortable"><thead><tr>
 <th class="pick"><input type="checkbox" id="pick-all" aria-label="Select all"></th>
-<th data-sort="business">Prospect</th><th>Phone</th><th>Website</th>
-<th>Gate</th><th>Reasons</th><th></th></tr></thead>
+<th data-sort="business">Prospect</th><th>Phone</th><th data-sort="website">Website</th>
+<th data-sort="gate">Gate</th><th data-sort="reasons">Reasons</th><th></th></tr></thead>
 <tbody>
 {% for e in excluded %}
 <tr {{ e.attrs }} data-sort_business="{{ e.business_name|lower }}">
@@ -89,14 +89,14 @@
 {% else %}
 {{ score_legend() }}
 
-<div class="table-wrap"><table id="call-list"><thead><tr>
+<div class="table-wrap"><table id="call-list" class="sortable"><thead><tr>
 <th class="pick"><input type="checkbox" id="pick-all" aria-label="Select all"></th>
 <th data-sort="rank">#</th><th data-sort="business">Prospect</th>
-<th>Segment</th>{{ score_headers() }}
+<th data-sort="segment">Segment</th>{{ score_headers() }}
 <th data-sort="total">Total<span class="sub">out of 100</span></th><th>Phone</th>
 <th>Contact<span class="sub">who to write to</span></th>
-<th>Outreach<span class="sub">four emails, then stop</span></th>
-<th>Findings</th><th></th><th></th></tr></thead>
+<th data-sort="outreach">Outreach<span class="sub">four emails, then stop</span></th>
+<th data-sort="findings">Findings</th><th></th><th></th></tr></thead>
 <tbody>
 {% for r in rows %}
 <tr {{ r.attrs }}>

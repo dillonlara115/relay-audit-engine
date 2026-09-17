@@ -240,6 +240,16 @@ def scan_label(batch: Mapping[str, Any]) -> str:
     return esc(batch_id)
 
 
+def scan_title(batch: Mapping[str, Any]) -> str:
+    """scan_label without the markup: for a breadcrumb, a <title>, a table
+    cell the template escapes. 'Fort Collins, Sep 16', or the market, or the id."""
+    market = batch.get("market")
+    started = batch.get("started_at")
+    if market and started:
+        return f"{market}, {started.strftime('%b %d')}"
+    return str(market or batch.get("batch_id", ""))
+
+
 def tiles(pairs: Sequence[tuple[str, Any]]) -> str:
     return '<div class="tiles">' + "".join(
         f'<div class="tile"><div class="n">{esc(n)}</div><div class="l">{esc(l)}</div></div>'
@@ -253,7 +263,7 @@ SCORE_TITLES = {
     "B": "Booked: if someone wants to hire them, can they actually get through? Scored out of 40.",
 }
 
-SCORE_SUBS = {"F": "can they be found", "C": "do they look safe", "B": "can leads get through"}
+SCORE_SUBS = {"F": "found", "C": "chosen", "B": "booked"}
 
 SCORE_SORT_KEYS = {"F": "found", "C": "chosen", "B": "booked"}
 
@@ -412,6 +422,8 @@ def render_run(*, csrf: str, markets: Sequence[str], active_jobs: Sequence[Mappi
         "total": b.get("total", 0), "done": b.get("done", 0),
         "bar": Markup(progress_bar(b.get("done", 0), b.get("total", 0))),
         "latest": b.get("latest") or "",
+        "latest_iso": (b.get("latest_at").isoformat() if hasattr(b.get("latest_at"), "isoformat") else ""),
+        "pct": round(100 * int(b.get("done") or 0) / int(b.get("total") or 1)),
     } for b in recent[:6]]
     return _render("overview.html", title="Overview", active="overview", csrf=csrf,
                    badges={"jobs": len(active_jobs)} if active_jobs else {},
@@ -459,6 +471,7 @@ def render_jobs(jobs_list: Sequence[Mapping[str, Any]], *,
         "kind": _KIND_LABEL.get(str(j.get("kind") or ""), str(j.get("kind") or "").title()),
         "status": j.get("status", ""),
         "started": j["created_at"].strftime("%b %d %H:%M") if j.get("created_at") else "",
+        "started_iso": (j.get("created_at").isoformat() if hasattr(j.get("created_at"), "isoformat") else ""),
     } for j in jobs_list]
     return _render("jobs.html", title="Jobs", active="jobs", rows=rows, notice=notice)
 
@@ -589,6 +602,9 @@ def render_batches(batches: Sequence[Mapping[str, Any]], *, days: int = 14,
         "failed": b.get("failed", 0),
         "bar": Markup(progress_bar(b.get("done", 0), b.get("total", 0))),
         "latest": b.get("latest") or "",
+        "latest_iso": (b.get("latest_at").isoformat() if hasattr(b.get("latest_at"), "isoformat") else ""),
+        "pct": round(100 * int(b.get("done") or 0) / int(b.get("total") or 1)),
+        "title": scan_title(b),
     } for b in batches]
     return _render("sweeps.html", title="Sweeps", active="batches", rows=rows,
                    windows=SWEEP_WINDOWS, days=days, notice=notice)
@@ -857,6 +873,7 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                 "code": c.get("code") or "", "title": d.get("title") or "",
                 "cls": _STATUS_CLASS.get(status, ""), "result": status.title(),
                 "points": f"{c.get('points_awarded', 0)}/{d.get('points', 0)}",
+                "points_awarded": c.get("points_awarded", 0),
                 "note": c.get("note") or "",
             })
     sections = [{"title": k.title(), "sub": subs[k], "rows": v} for k, v in grouped.items() if v]
@@ -889,6 +906,7 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
         history_note = "No earlier audits for this prospect."
     h_vm = [{
         "date": h["finished_at"].strftime("%b %d, %Y") if hasattr(h.get("finished_at"), "strftime") else "",
+        "date_iso": (h.get("finished_at").isoformat() if hasattr(h.get("finished_at"), "isoformat") else ""),
         "sweep": h.get("sweep_label") or h.get("batch_id") or "",
         "found": (h.get("scores") or {}).get("found", ""), "chosen": (h.get("scores") or {}).get("chosen", ""),
         "booked": (h.get("scores") or {}).get("booked", ""), "total": (h.get("scores") or {}).get("total", ""),

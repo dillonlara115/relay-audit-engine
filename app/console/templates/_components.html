@@ -19,8 +19,8 @@
 
 {#- The wrapper and the table open on the same line on purpose: a test pins
     the adjacency so no screen can quietly lose its scroll box. -#}
-{% macro table_wrap() -%}
-<div class="table-wrap"><table>{{ caller() }}</table></div>
+{% macro table_wrap(sortable=true) -%}
+<div class="table-wrap"><table{% if sortable %} class="sortable"{% endif %}>{{ caller() }}</table></div>
 {%- endmacro %}
 
 {% macro empty_row(colspan, html) -%}

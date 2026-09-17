@@ -133,7 +133,6 @@ td.num { text-align:right; font-variant-numeric:tabular-nums; }
 td.tel { white-space:nowrap; }
 tr:hover td { background:var(--field); }
 th[data-sort] { cursor:pointer; user-select:none; }
-th[data-sort]:hover { color:var(--ember); }
 
 .windows { margin:0 0 14px; font-size:.9rem; color:var(--ink2); }
 .windows a { display:inline-block; padding:3px 10px; margin-left:6px;
@@ -317,3 +316,22 @@ td.pick, th.pick { width:28px; padding-right:0; }
 td.pick input, th.pick input { width:16px; height:16px; margin:0; accent-color:var(--orange); }
 a.btn.ghost { background:transparent; color:var(--asphalt); border:1px solid var(--line);
               padding:8px 14px; font-size:.92rem; display:inline-flex; align-items:center; gap:6px; }
+
+/* ── Table headers. Quiet, sentence case, one line; the sortable ones show a
+   faint double arrow that becomes a single one in ember once sorted. ── */
+th { font-family:'Work Sans',sans-serif; font-weight:600; font-size:.78rem;
+     color:var(--ink2); letter-spacing:.01em; white-space:nowrap;
+     vertical-align:bottom; padding:10px 12px; }
+th .sub { display:block; font-weight:400; font-size:.7rem; color:var(--ink2);
+          white-space:nowrap; letter-spacing:0; margin-top:1px; }
+th abbr[title] { text-decoration:none; border-bottom:1px dotted var(--ink2); }
+th[data-sort]::after { content:"\2195"; display:inline-block; margin-left:5px;
+                       opacity:.35; font-size:.75rem; }
+th[data-sort]:hover { color:var(--asphalt); }
+th[data-sort]:hover::after { opacity:.7; }
+th[data-sort][aria-sort="ascending"] { color:var(--asphalt); }
+th[data-sort][aria-sort="descending"] { color:var(--asphalt); }
+th[data-sort][aria-sort="ascending"]::after { content:"\2191"; opacity:1; color:var(--ember); }
+th[data-sort][aria-sort="descending"]::after { content:"\2193"; opacity:1; color:var(--ember); }
+th .arrow { display:none; }
+th.pick::after { content:none; }

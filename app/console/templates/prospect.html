@@ -42,9 +42,9 @@
 {% if history_note %}<p class="muted">{{ history_note }}</p>{% endif %}
 {% if history %}
 {% call table_wrap() %}
-<tr><th>Date</th><th>Sweep</th><th>F</th><th>C</th><th>B</th><th>Total</th><th>Segment</th><th></th></tr>
+<tr><th data-sort="date">Date</th><th data-sort="sweep">Sweep</th><th data-sort="f">F</th><th data-sort="c">C</th><th data-sort="b">B</th><th data-sort="total">Total</th><th data-sort="segment">Segment</th><th></th></tr>
 {% for h in history %}
-<tr{% if h.current %} class="current"{% endif %}>
+<tr{% if h.current %} class="current"{% endif %} data-sort_date="{{ h.date_iso }}">
 <td>{{ h.date }}</td><td>{{ h.sweep }}</td>
 <td class="num">{{ h.found }}</td><td class="num">{{ h.chosen }}</td><td class="num">{{ h.booked }}</td>
 <td class="num">{{ h.total }}</td><td>{{ h.chip }}</td>
@@ -94,9 +94,9 @@
 <h2>{{ section.title }}</h2>
 <div class="sub">{{ section.sub }}</div>
 {% call table_wrap() %}
-<tr><th>Code</th><th>Check</th><th>Result</th><th>Points</th><th>Note</th></tr>
+<tr><th data-sort="code">Code</th><th data-sort="check">Check</th><th data-sort="result">Result</th><th data-sort="points">Points</th><th>Note</th></tr>
 {% for c in section.rows %}
-<tr class="checkrow"><td>{{ c.code }}</td><td>{{ c.title }}</td>
+<tr class="checkrow" data-sort_points="{{ c.points_awarded }}"><td>{{ c.code }}</td><td>{{ c.title }}</td>
 <td class="{{ c.cls }}">{{ c.result }}</td>
 <td class="num">{{ c.points }}</td><td>{{ c.note }}</td></tr>
 {% endfor %}

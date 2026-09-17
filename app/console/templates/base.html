@@ -1,7 +1,7 @@
 {#- The one layout every operator screen renders through. The login page
     uses bare.html instead, because a trimmed report URL lands there and the
     wordmark, tagline and nav between them say what this tool is. -#}
-{% from "_scripts.html" import submit_guard %}
+{% from "_scripts.html" import submit_guard, sortable %}
 {% from "_components.html" import notice_banner %}
 <!doctype html>
 <html lang="en">
@@ -47,6 +47,6 @@
     {% block body %}{{ body }}{% endblock %}
   </main>
 </div>
-{{ submit_guard() }}{{ script }}
+{{ submit_guard() }}{{ sortable() }}{{ script }}
 </body>
 </html>

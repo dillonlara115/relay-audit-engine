@@ -76,7 +76,7 @@
 {% if jobs %}
 <h2>Jobs running</h2>
 {% call table_wrap() %}
-<tr><th>Job</th><th>Status</th><th>Latest line</th></tr>
+<tr><th data-sort="job">Job</th><th data-sort="status">Status</th><th>Latest line</th></tr>
 {% for j in jobs %}
 <tr><td><a href="/console/jobs/{{ j.job_id }}">{{ j.label }}</a></td>
 <td>{{ status_pill(j.status) }}</td>
@@ -90,9 +90,9 @@
   <div class="primary"><a href="/console/batches">All sweeps</a></div>
 </div>
 {% call table_wrap() %}
-<tr><th>Sweep</th><th>Prospects</th><th>Audited</th><th>Progress</th><th>Last activity</th></tr>
+<tr><th data-sort="sweep">Sweep</th><th data-sort="total">Prospects</th><th data-sort="done">Audited</th><th data-sort="pct">Progress</th><th data-sort="latest">Last activity</th></tr>
 {% for b in sweeps %}
-<tr><td><a href="/console/batches/{{ b.batch_id }}">{{ b.label }}</a></td>
+<tr data-sort_pct="{{ b.pct }}" data-sort_latest="{{ b.latest_iso }}"><td><a href="/console/batches/{{ b.batch_id }}">{{ b.label }}</a></td>
 <td class="num">{{ b.total }}</td><td class="num">{{ b.done }}</td>
 <td>{{ b.bar }}</td><td class="muted">{{ b.latest }}</td></tr>
 {% else %}

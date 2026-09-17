@@ -5,9 +5,9 @@
                "Everything the engine has run, newest first. Jobs keep running if you close the tab.") }}
 
 {% call table_wrap() %}
-<tr><th>Job</th><th>Kind</th><th>Status</th><th>Started</th></tr>
+<tr><th data-sort="job">Job</th><th data-sort="kind">Kind</th><th data-sort="status">Status</th><th data-sort="started">Started</th></tr>
 {% for j in rows %}
-<tr>
+<tr data-sort_started="{{ j.started_iso }}">
   <td><a href="/console/jobs/{{ j.job_id }}">{{ j.label }}</a></td>
   <td>{{ pill("dim", j.kind) }}</td>
   <td>{{ status_pill(j.status) }}</td>

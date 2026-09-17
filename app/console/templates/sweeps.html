@@ -10,10 +10,10 @@
 </div>
 
 {% call table_wrap() %}
-<tr><th>Sweep</th><th>Status</th><th>Prospects</th><th>Audited</th><th>Running</th>
-<th>Waiting</th><th>Failed</th><th>Progress</th><th>Last activity</th><th></th></tr>
+<tr><th data-sort="sweep">Sweep</th><th data-sort="status">Status</th><th data-sort="total">Prospects</th><th data-sort="done">Audited</th><th data-sort="running">Running</th>
+<th data-sort="pending">Waiting</th><th data-sort="failed">Failed</th><th data-sort="pct">Progress</th><th data-sort="latest">Last activity</th><th></th></tr>
 {% for b in rows %}
-<tr>
+<tr data-sort_sweep="{{ b.title|lower }}" data-sort_pct="{{ b.pct }}" data-sort_latest="{{ b.latest_iso }}">
   <td><a href="/console/batches/{{ b.batch_id }}">{{ b.label }}</a></td>
   <td>{{ pill(b.state[0], b.state[1]) }}</td>
   <td class="num">{{ b.total }}</td><td class="num">{{ b.done }}</td>

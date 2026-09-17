@@ -54,6 +54,69 @@
 </script>
 {%- endmacro %}
 
+{#- Every table: click a header carrying data-sort to sort by it, again to
+    flip. The key reads the row's data-sort_<key> attribute when present, else
+    the cell text under that header; numbers compare as numbers. Keyboard
+    operable, and the direction is announced through aria-sort, which the
+    stylesheet also turns into the arrow. -#}
+{% macro sortable() -%}
+<script>
+(function () {
+  document.querySelectorAll('table.sortable').forEach(function (table) {
+    var tbody = table.tBodies[0];
+    if (!tbody) return;
+    var headers = table.querySelectorAll('th[data-sort]');
+    if (!headers.length) return;
+    var cols = table.tHead ? table.tHead.rows[0].cells.length : 0;
+    var state = {key: null, dir: 1};
+    function rows() {
+      return Array.prototype.slice.call(tbody.rows).filter(function (r) { return r.cells.length >= cols; });
+    }
+    function keyOf(row, th) {
+      var v = row.dataset['sort_' + th.dataset.sort];
+      if (v === undefined) {
+        var cell = row.cells[th.cellIndex];
+        v = cell ? cell.textContent.trim() : '';
+      }
+      return v;
+    }
+    function sortBy(th) {
+      var key = th.dataset.sort;
+      state.dir = state.key === key ? -state.dir : 1;
+      state.key = key;
+      headers.forEach(function (h) {
+        h.setAttribute('aria-sort', h === th ? (state.dir === 1 ? 'ascending' : 'descending') : 'none');
+      });
+      var list = rows();
+      list.sort(function (a, b) {
+        var av = keyOf(a, th), bv = keyOf(b, th);
+        var an = parseFloat(av), bn = parseFloat(bv);
+        // Numbers compare as numbers only when the whole cell is one ("12",
+        // "-4", "0/3"). An ISO date also starts with digits, so a looser test
+        // would compare every date by its year.
+        var num = /^[-+]?\d+(\.\d+)?(\/\d+)?$/;
+        var numeric = num.test(av) && num.test(bv);
+        var cmp = numeric ? an - bn : String(av).localeCompare(String(bv));
+        return cmp * state.dir;
+      });
+      list.forEach(function (row) { tbody.appendChild(row); });
+    }
+    headers.forEach(function (th) {
+      // Keyboard operable: a header a mouse can click but a keyboard cannot
+      // reach is not operable at all for someone who does not use a mouse.
+      th.setAttribute('tabindex', '0');
+      th.setAttribute('role', 'button');
+      th.setAttribute('aria-sort', 'none');
+      th.addEventListener('click', function () { sortBy(th); });
+      th.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sortBy(th); }
+      });
+    });
+  });
+})();
+</script>
+{%- endmacro %}
+
 {#- The call list. A search box, a check/result filter and click-to-sort
     headers, all over the rows already in the page, so switching a filter
     costs nothing server side. Segment filtering moved to the tabs, which are
@@ -135,42 +198,6 @@
     if (!el) return;
     el.addEventListener('input', apply);
     el.addEventListener('change', apply);
-  });
-
-  var sortState = {key: null, dir: 1};
-  function sortBy(th) {
-    var key = th.dataset.sort;
-    sortState.dir = sortState.key === key ? -sortState.dir : 1;
-    sortState.key = key;
-    // The arrow lives in its own element. The first version rewrote the
-    // header's textContent, which flattened the <abbr> tooltips and the
-    // sub-labels out of existence on the first click.
-    table.querySelectorAll('th[data-sort] .arrow').forEach(function (a) { a.remove(); });
-    var arrow = document.createElement('span');
-    arrow.className = 'arrow';
-    arrow.textContent = sortState.dir === 1 ? ' ▲' : ' ▼';
-    th.appendChild(arrow);
-    table.querySelectorAll('th[data-sort]').forEach(function (h) {
-      h.setAttribute('aria-sort', h === th ? (sortState.dir === 1 ? 'ascending' : 'descending') : 'none');
-    });
-    rows.sort(function (a, b) {
-      var av = a.dataset['sort_' + key], bv = b.dataset['sort_' + key];
-      var an = parseFloat(av), bn = parseFloat(bv);
-      var cmp = (!isNaN(an) && !isNaN(bn)) ? (an - bn) : String(av).localeCompare(String(bv));
-      return cmp * sortState.dir;
-    });
-    rows.forEach(function (row) { tbody.appendChild(row); });
-  }
-  table.querySelectorAll('th[data-sort]').forEach(function (th) {
-    // Keyboard operable: a header a mouse can click but a keyboard cannot
-    // reach is not operable at all for someone who does not use a mouse.
-    th.setAttribute('tabindex', '0');
-    th.setAttribute('role', 'button');
-    th.setAttribute('aria-sort', 'none');
-    th.addEventListener('click', function () { sortBy(th); });
-    th.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sortBy(th); }
-    });
   });
 
   apply();

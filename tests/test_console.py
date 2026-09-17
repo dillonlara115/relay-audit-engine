@@ -2449,3 +2449,84 @@ def test_history_for_names_each_sweep_once_and_survives_a_missing_index(monkeypa
 
     monkeypatch.setattr(routes.store, "audits_for_prospect", boom)
     assert routes._history_for("p1") is None
+
+
+# ── Sorting on every table, and a breadcrumb that is text ─────────────────────
+
+
+def test_scan_title_is_plain_text_where_scan_label_is_markup():
+    from datetime import datetime, timezone
+
+    batch = {"batch_id": "b1", "market": "Fort Collins",
+             "started_at": datetime(2026, 9, 16, tzinfo=timezone.utc)}
+    assert views.scan_title(batch) == "Fort Collins, Sep 16"
+    assert "<" not in views.scan_title(batch)
+    assert "<span" in views.scan_label(batch)
+    assert views.scan_title({"batch_id": "b1"}) == "b1"
+
+
+def test_the_breadcrumb_carries_no_markup_artifact():
+    """The sweep label was HTML, and the breadcrumb escaped it into view."""
+    page = _list([_row()], sweep_label="Fort Collins, Sep 16")
+    assert "Fort Collins, Sep 16" in page
+    assert "&lt;span" not in page and "&amp;middot;" not in page
+
+
+def test_every_screen_ships_the_shared_sorter_once():
+    pages = {
+        "overview": _overview(),
+        "sweeps": views.render_batches([_sweep()]),
+        "jobs": views.render_jobs([]),
+        "call list": _list([_row()]),
+        "prospect": _prospect_page(history=[_hist(2, 60), _hist(1, 50)]),
+    }
+    for name, page in pages.items():
+        assert page.count("table.sortable") == 1, name
+        assert "setAttribute('role', 'button')" in page, name
+
+
+def test_every_table_is_sortable_with_keys_where_text_will_not_do():
+    from datetime import datetime, timezone
+
+    when = datetime(2026, 9, 17, 9, 0, tzinfo=timezone.utc)
+    sweeps = views.render_batches([_sweep(latest_at=when)])
+    assert 'class="sortable"' in sweeps
+    assert 'data-sort="pct"' in sweeps and 'data-sort_pct="100"' in sweeps
+    assert 'data-sort_latest="2026-09-17T09:00:00+00:00"' in sweeps
+
+    jobs = views.render_jobs([{"job_id": "j1", "label": "x", "kind": "sweep",
+                               "status": "done", "created_at": when}])
+    assert 'data-sort="started"' in jobs and 'data-sort_started="2026-09-17T09:00:00+00:00"' in jobs
+
+    overview = _overview(recent_batches=[_sweep(latest_at=when, done=2)])
+    assert 'data-sort_pct="50"' in overview
+
+    prospect = _prospect_page(history=[_hist(2, 60), _hist(1, 50)])
+    assert 'data-sort="date"' in prospect and 'data-sort_date="2026-09-02T00:00:00+00:00"' in prospect
+
+    checks = [{"code": "C16", "status": "fail", "points_awarded": 0, "note": "x"}]
+    defs = {"C16": {"section": "chosen", "title": "Footer copyright", "points": 1, "sort_order": 1}}
+    page = views.render_audit(audit={"audit_id": "a1", "scores": {}, "batch_id": "b1"},
+                              prospect={"business_name": "X"}, checks=checks, definitions=defs,
+                              findings=None, evidence=[], csrf="t")
+    assert 'data-sort="points"' in page and 'data-sort_points="0"' in page
+
+
+def test_the_excluded_table_sorts_too():
+    page = views.render_batch("b1", [], {}, csrf="t", tab="excluded",
+                              excluded=[_gated("Alpha", "fail")], counts={"all": 0, "excluded": 1})
+    assert 'data-sort="gate"' in page and 'data-sort="reasons"' in page
+
+
+def test_score_sub_labels_are_short_enough_to_stay_on_one_line():
+    headers = views.score_headers()
+    for sub in ("found", "chosen", "booked"):
+        assert f'<span class="sub">{sub}</span>' in headers
+    assert "can they be found" not in headers
+
+
+def test_sort_arrows_come_from_aria_sort_not_a_span():
+    css = views.theme_css()
+    assert 'th[data-sort][aria-sort="ascending"]::after' in css
+    assert 'th[data-sort][aria-sort="descending"]::after' in css
+    assert "className = 'arrow'" not in views.render_batch("b1", [], {}, csrf="t")

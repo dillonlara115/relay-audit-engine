@@ -344,7 +344,7 @@ async def batch_screen(batch_id: str, request: Request, tab: str = "all") -> Res
                                     csrf=csrf_token(request), progress=progress,
                                     notice=_notice(request), tab=tab, counts=counts,
                                     excluded=excluded or (), excluded_known=excluded is not None,
-                                    sweep_label=views.scan_label(progress) if progress else None))
+                                    sweep_label=views.scan_title(progress) if progress else None))
 
 
 @router.get("/batches/{batch_id}/export.csv")
@@ -442,7 +442,7 @@ def _history_for(prospect_id: str) -> list[dict[str, Any]] | None:
         batch_id = str(row.get("batch_id") or "")
         if batch_id and batch_id not in labels:
             batch = _soft(store.get_batch, None, batch_id) or {}
-            labels[batch_id] = views.scan_label({"batch_id": batch_id, "market": batch.get("label"),
+            labels[batch_id] = views.scan_title({"batch_id": batch_id, "market": batch.get("label"),
                                                  "started_at": batch.get("created_at")}) \
                 if batch else batch_id
         row["sweep_label"] = labels.get(batch_id, batch_id)
