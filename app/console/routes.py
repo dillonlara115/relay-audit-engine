@@ -737,6 +737,7 @@ async def send_email(prospect_id: str, request: Request, audit_id: str = Form(No
                 to=to, subject=subj, body=text,
                 thread_id=(first or {}).get("thread_id") if ordinal > 1 else None,
                 in_reply_to=(first or {}).get("rfc_message_id") if ordinal > 1 else None,
+                logo_url=cfg.outreach_logo_url,
             )
         except gmail.GmailUnavailable as exc:
             return f"The mailbox is not connected: {exc}", ""

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import re
+from pathlib import Path
 from urllib.parse import quote
 import os
 
@@ -60,6 +61,7 @@ OPEN_PREFIXES = (
     "/robots.txt",
     "/pubsub/",     # token-gated
     "/tick",        # token-gated
+    "/static/",     # the logo an email's HTML part points at; a fixed whitelist of files
 )
 
 
@@ -69,6 +71,12 @@ OPEN_PREFIXES = (
 # alphabet, so the match is exact rather than a range. A route whose own path
 # happened to match this would be public by accident, which is why
 # test_no_route_can_be_mistaken_for_a_report walks the app and forbids it.
+# Files an email or a public page may point at. A whitelist, not a directory
+# listing: nothing else under app/static is reachable, whatever lands there.
+STATIC_FILES = {"relay-mark.png": "image/png"}
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
 REPORT_SLUG = re.compile(r"^/[A-Za-z0-9_-]{16}$")
 
 
@@ -269,6 +277,18 @@ def public_report_legacy(slug: str) -> Response:
     if not REPORT_SLUG.match(f"/{slug}"):
         return Response(status_code=404)
     return RedirectResponse(f"/{slug}", status_code=301)
+
+
+@app.get("/static/{name}")
+async def static_file(name: str) -> Response:
+    """The few files an email or public page embeds. Whitelisted by name."""
+    from fastapi.responses import FileResponse
+
+    kind = STATIC_FILES.get(name)
+    if not kind:
+        return Response(status_code=404)
+    return FileResponse(STATIC_DIR / name, media_type=kind,
+                        headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.get("/{slug}")

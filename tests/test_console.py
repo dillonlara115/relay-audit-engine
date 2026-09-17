@@ -1121,8 +1121,19 @@ def test_the_open_list_is_the_whole_public_surface(client):
 
     assert set(OPEN_PREFIXES) == {
         "/r/", "/console/login", "/health", "/healthz",
-        "/robots.txt", "/pubsub/", "/tick",
+        "/robots.txt", "/pubsub/", "/tick", "/static/",
     }
+
+
+def test_static_serves_the_logo_and_nothing_else(client):
+    """The HTML part of an email points at the logo, so a mail client that is
+    not logged in has to be able to fetch it. Only listed names answer."""
+    ok = client.get("/static/relay-mark.png")
+    assert ok.status_code == 200 and ok.headers["content-type"] == "image/png"
+    assert ok.content[:8] == b"\x89PNG\r\n\x1a\n"
+    assert ok.headers["cache-control"] == "public, max-age=86400"
+    for name in ("relay-mark.png/../../.env", "..%2F.env", "relay-mark.PNG", "x.png"):
+        assert client.get(f"/static/{name}").status_code in (401, 404), name
 
 
 def test_a_report_answers_without_a_password(client, monkeypatch):

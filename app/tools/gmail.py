@@ -153,10 +153,45 @@ class SentMessage:
     thread_id: str
 
 
-def build_raw(*, to: str, subject: str, body: str, in_reply_to: str | None = None) -> str:
-    """One plain-text RFC 5322 message, base64url as the API wants it. Plain
-    text on purpose: cold email with markup and images is what filters learn
-    to catch, and the report link is the only thing that needs to be clickable."""
+_URL = re.compile(r"https?://[^\s<>\"]+")
+
+
+def text_to_html(body: str, logo_url: str = "") -> str:
+    """The same words as the text part, as paragraphs, with links clickable
+    and the logo under the signature. No styles beyond a font and a width, no
+    tracking, nothing the text part does not say: the HTML exists so Gmail
+    does not re-wrap the lines and so the logo can appear at all."""
+    from html import escape
+
+    def para(block: str) -> str:
+        lines = []
+        for line in block.split("\n"):
+            parts, last = [], 0
+            for m in _URL.finditer(line):
+                parts.append(escape(line[last:m.start()]))
+                url = m.group(0).rstrip(".,;:)")
+                parts.append(f'<a href="{escape(url, quote=True)}">{escape(url)}</a>')
+                parts.append(escape(m.group(0)[len(url):]))
+                last = m.end()
+            parts.append(escape(line[last:]))
+            lines.append("".join(parts))
+        return "<p>" + "<br>".join(lines) + "</p>"
+
+    text = body.replace("\r\n", "\n").strip()
+    blocks = [b for b in re.split(r"\n{2,}", text) if b.strip()]
+    html = "\n".join(para(b) for b in blocks)
+    if logo_url:
+        html += (f'\n<p><img src="{escape(logo_url, quote=True)}" width="40" height="40" '
+                 f'alt="" style="display:block;border:0"></p>')
+    return ('<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;'
+            'line-height:1.5;color:#16120E;max-width:640px">' + html + "</div>")
+
+
+def build_raw(*, to: str, subject: str, body: str, in_reply_to: str | None = None,
+              logo_url: str = "") -> str:
+    """One RFC 5322 message, base64url as the API wants it: the text as the
+    first part, the same text as simple HTML as the alternative. A client
+    that prefers text shows the words unchanged."""
     from email.message import EmailMessage
 
     msg = EmailMessage()
@@ -165,12 +200,15 @@ def build_raw(*, to: str, subject: str, body: str, in_reply_to: str | None = Non
     if in_reply_to:
         msg["In-Reply-To"] = in_reply_to
         msg["References"] = in_reply_to
-    msg.set_content(body.replace("\r\n", "\n"))
+    text = body.replace("\r\n", "\n")
+    msg.set_content(text)
+    msg.add_alternative(text_to_html(text, logo_url), subtype="html")
     return base64.urlsafe_b64encode(msg.as_bytes()).decode()
 
 
 def send_message(*, to: str, subject: str, body: str, thread_id: str | None = None,
-                 in_reply_to: str | None = None, service: Any = None) -> SentMessage:
+                 in_reply_to: str | None = None, logo_url: str = "",
+                 service: Any = None) -> SentMessage:
     """Send one email from the connected mailbox to one address, now.
 
     Called from exactly one place, the console route behind the Send button,
@@ -183,7 +221,7 @@ def send_message(*, to: str, subject: str, body: str, thread_id: str | None = No
         raise ValueError(f"send_message needs one address, got {to!r}")
     api = service or _service(require_send=True)
     payload: dict[str, Any] = {"raw": build_raw(to=to, subject=subject, body=body,
-                                                in_reply_to=in_reply_to)}
+                                                in_reply_to=in_reply_to, logo_url=logo_url)}
     if thread_id:
         payload["threadId"] = thread_id
     sent = api.users().messages().send(userId="me", body=payload).execute()

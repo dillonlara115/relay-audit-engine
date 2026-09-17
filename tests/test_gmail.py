@@ -197,8 +197,30 @@ def test_send_message_builds_one_plain_text_email():
     msg = _decode_raw(api.sent[0]["raw"])
     assert msg["To"] == "dave@roofs.com"
     assert msg["Subject"] == "Whitaker Roofing: three things"
-    assert msg.get_content_type() == "text/plain"
-    assert "Here it is." in msg.get_content()
+    assert msg.get_content_type() == "multipart/alternative"
+    text, html = msg.get_body(("plain",)), msg.get_body(("html",))
+    assert "Here it is." in text.get_content()
+    assert "<p>Hi Dave,</p>" in html.get_content() and "<p>Here it is.</p>" in html.get_content()
+
+
+def test_the_html_part_says_only_what_the_text_says_and_escapes_it():
+    html = gmail.text_to_html("Hi <b>Dave</b>,\n\nSee https://r.example/abc.\nSecond line\n\nDillon\nRelay")
+    assert "&lt;b&gt;Dave&lt;/b&gt;" in html and "<b>" not in html
+    assert '<a href="https://r.example/abc">https://r.example/abc</a>.' in html
+    assert "<p>See <a" in html and "</a>.<br>Second line</p>" in html
+    assert "<p>Dillon<br>Relay</p>" in html
+    assert "<img" not in html, "no logo unless one is configured"
+    assert "<script" not in html and "<style" not in html and "track" not in html.lower()
+
+
+def test_the_logo_appears_under_the_signature_only_when_configured():
+    api = FakeSender()
+    gmail.send_message(to="d@x.com", subject="s", body="Hi.\n\nDillon", service=api,
+                       logo_url="https://reports.relayforroofers.com/static/relay-mark.png")
+    html = _decode_raw(api.sent[0]["raw"]).get_body(("html",)).get_content()
+    assert html.rstrip().endswith('alt="" style="display:block;border:0"></p></div>')
+    assert 'src="https://reports.relayforroofers.com/static/relay-mark.png" width="40" height="40"' in html
+    assert html.index("<p>Dillon</p>") < html.index("<img")
 
 
 def test_a_follow_up_threads_under_the_first_email():

@@ -134,6 +134,8 @@ class Config:
     # Emails the console will send in one UTC day before refusing. Criteria
     # section 7 puts target volume near a hundred a month.
     outreach_daily_cap: int = field(default_factory=lambda: _int("OUTREACH_DAILY_CAP", 40))
+    # A hosted PNG for the HTML part's signature block. Empty means no logo.
+    outreach_logo_url: str = field(default_factory=lambda: _str("OUTREACH_LOGO_URL"))
 
     # Pub/Sub
     pubsub_audit_topic: str = field(
@@ -194,6 +196,7 @@ _ENV_NAME = {
     "outreach_mailbox": "OUTREACH_MAILBOX",
     "outreach_sender_name": "OUTREACH_SENDER_NAME",
     "outreach_daily_cap": "OUTREACH_DAILY_CAP",
+    "outreach_logo_url": "OUTREACH_LOGO_URL",
 }
 
 
