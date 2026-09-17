@@ -20,3 +20,36 @@
 })();
 </script>
 {%- endmacro %}
+
+{#- Live job page. Polls the job's JSON every 2.5s, streams the log, and
+    reloads once so the follow-up card appears. The job id rides on
+    document.body's data-job attribute. -#}
+{% macro poll() -%}
+<script>
+(function () {
+  var id = document.body.dataset.job;
+  var status = document.getElementById('job-status');
+  var log = document.getElementById('job-log');
+  var done = document.getElementById('job-done');
+  if (!id) return;
+  function tick() {
+    fetch('/console/jobs/' + id + '.json', {credentials: 'same-origin'})
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        status.textContent = j.status;
+        status.className = 'status ' + j.status;
+        log.textContent = (j.log || []).map(function (l) { return l.line; }).join('\n');
+        log.scrollTop = log.scrollHeight;
+        if (j.status === 'done' || j.status === 'failed') {
+          if (done) { done.style.display = 'block'; }
+          window.location.reload();
+          return;
+        }
+        setTimeout(tick, 2500);
+      })
+      .catch(function () { setTimeout(tick, 5000); });
+  }
+  tick();
+})();
+</script>
+{%- endmacro %}

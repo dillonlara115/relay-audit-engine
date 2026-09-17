@@ -663,8 +663,8 @@ def test_render_jobs_content_matches_its_intent_not_just_its_title():
     function, and a weak "Activity" in page assertion missed it because the
     title alone satisfied it. Pin the real content this time."""
     page = views.render_jobs([])
-    assert "<h1>Activity</h1>" in page
-    assert "<h1>Jobs</h1>" not in page
+    assert "<h1>Jobs</h1>" in page
+    assert "<h1>Activity</h1>" not in page
     assert "Params" not in page, "raw JSON must not be a column a person reads"
 
 
@@ -1100,7 +1100,9 @@ def test_approving_records_the_three_a_person_picked(client, monkeypatch):
 
 
 def test_approving_the_wrong_number_is_refused_with_a_reason(client, monkeypatch):
+    """The refusal rides the redirect as a notice; the page it lands on shows it."""
     import app.console.routes as routes
+    from urllib.parse import unquote_plus
 
     def boom(aid, sel, **kw):
         raise ValueError("a report carries exactly 3 findings, got 2")
@@ -1109,9 +1111,14 @@ def test_approving_the_wrong_number_is_refused_with_a_reason(client, monkeypatch
     csrf = sign_in(client)
 
     response = client.post("/console/audits/a1/approve",
-                           data={"csrf": csrf, "selected": ["1", "2"]})
+                           data={"csrf": csrf, "selected": ["1", "2"]},
+                           follow_redirects=False)
 
-    assert "exactly 3 findings" in response.text
+    assert response.status_code == 303
+    location = unquote_plus(response.headers["location"])
+    assert location.startswith("/console/audits/a1?")
+    assert "notice=not_approved" in location
+    assert "exactly 3 findings" in location
 
 
 def test_a_thin_pool_closes_the_sequence_early(client, monkeypatch):
@@ -1696,3 +1703,158 @@ def test_legacy_shell_screens_keep_their_tables_and_tags():
     page = views.shell("t", body)
     assert "<h2>Before</h2>" in page
     assert '<div class="table-wrap"><table' in page
+
+
+# ── Notices on redirect, and where an action sends you back ───────────────────
+
+
+def test_a_notice_renders_its_headline_and_detail():
+    notice = views.notice_from("not_approved", "a report carries exactly 3 findings, got 2")
+    page = views.render_batches([], notice=notice)
+    assert "Findings not approved." in page
+    assert "exactly 3 findings" in page
+
+
+def test_an_unknown_notice_code_renders_nothing():
+    assert views.notice_from("made_up", "anything") is None
+    assert views.notice_from(None, None) is None
+
+
+def test_a_notice_detail_is_escaped_and_capped():
+    notice = views.notice_from("not_recorded", "<img src=x onerror=alert(1)>" + "y" * 500)
+    page = views.render_batches([], notice=notice)
+    assert "<img src=x" not in page
+    assert "&lt;img" in page
+    assert len(notice[1]) == views.NOTICE_DETAIL_CAP
+
+
+def test_the_notice_reaches_a_legacy_shell_screen():
+    page = views.shell("t", "<p>x</p>", notice=("Report not published.", "no evidence"))
+    assert "Report not published." in page and "no evidence" in page
+
+
+def test_a_blocked_touch_lands_where_you_were_with_a_notice(client, monkeypatch):
+    _ledger_store(monkeypatch, suppressions={
+        "place_id": set(), "phone": set(), "email": set(), "domain": {"whitakerroofing.com"},
+    })
+    csrf = sign_in(client)
+
+    response = client.post("/console/outreach/p1/log-touch", data={"csrf": csrf},
+                           headers={"Referer": "http://testserver/console/batches/b1?tab=all"},
+                           follow_redirects=False)
+
+    assert response.status_code == 303
+    location = response.headers["location"]
+    assert location.startswith("/console/batches/b1?")
+    assert "tab=all" in location and "notice=not_recorded" in location
+
+
+def test_a_referer_on_another_host_is_never_followed(client, monkeypatch):
+    """An open redirect on an action route is how a convincing phish gets built."""
+    _ledger_store(monkeypatch)
+    csrf = sign_in(client)
+
+    response = client.post("/console/outreach/p1/log-touch", data={"csrf": csrf},
+                           headers={"Referer": "https://evil.example/console/batches/b1"},
+                           follow_redirects=False)
+
+    assert response.headers["location"] == "/console/batches"
+
+
+def test_a_stale_notice_on_the_referer_is_not_carried_forward(client, monkeypatch):
+    _ledger_store(monkeypatch)
+    csrf = sign_in(client)
+
+    response = client.post("/console/outreach/p1/log-touch", data={"csrf": csrf},
+                           headers={"Referer": "http://testserver/console/batches/b1?notice=not_recorded&detail=old"},
+                           follow_redirects=False)
+
+    assert response.headers["location"] == "/console/batches/b1"
+
+
+# ── Sweeps, Jobs, Job detail on templates ─────────────────────────────────────
+
+
+def _sweep(**kw):
+    base = {"batch_id": "b1", "market": "Pueblo", "total": 4, "done": 4,
+            "running": 0, "pending": 0, "failed": 0, "latest": "Sep 17 09:00"}
+    base.update(kw)
+    return base
+
+
+def test_the_sweeps_page_speaks_the_new_vocabulary():
+    page = views.render_batches([_sweep()])
+    for present in ("<h1>Sweeps</h1>", "Open sweep", "Run sweep", "Pueblo"):
+        assert present in page, present
+    for gone in ("<h1>Results</h1>", "Recent scans", "Open a scan"):
+        assert gone not in page, gone
+
+
+@pytest.mark.parametrize("counts,label", [
+    (dict(total=4, done=4), "Finished"),
+    (dict(total=4, done=2, failed=2), "Failed"),
+    (dict(total=4, done=1, running=1, pending=2), "Running"),
+    (dict(total=0, done=0), "Queued"),
+])
+def test_a_sweep_gets_one_status_pill(counts, label):
+    assert label in views.render_batches([_sweep(**counts)])
+
+
+def test_the_sweeps_empty_state_still_points_at_running_one():
+    page = views.render_batches([])
+    assert "Start one" in page and 'href="/console"' in page
+
+
+def test_the_jobs_page_names_each_kind():
+    from datetime import datetime, timezone
+
+    rows = [{"job_id": "j1", "label": "Sweep Pueblo", "kind": "sweep", "status": "done",
+             "created_at": datetime(2026, 9, 17, 9, 0, tzinfo=timezone.utc)},
+            {"job_id": "j2", "label": "Coordinator run", "kind": "agent", "status": "running"}]
+    page = views.render_jobs(rows)
+    assert ">Sweep<" in page and ">Coordinator<" in page
+    assert "Sep 17 09:00" in page
+
+
+def _job(**kw):
+    base = {"job_id": "j1", "kind": "sweep", "label": "Sweep Pueblo", "status": "done",
+            "result": {"batch_id": "b1", "eligible": 12}, "params": {"market": "Pueblo"},
+            "log": [{"line": "ingested 40"}]}
+    base.update(kw)
+    return base
+
+
+def test_a_finished_sweep_offers_to_audit_the_passed_prospects():
+    page = views.render_job(_job(), csrf="t")
+    assert "Audit passed prospects" in page
+    assert 'name="batch_id" value="b1"' in page
+    assert 'name="market" value="Pueblo"' in page
+    assert "Dispatch audits" not in page and "survivors" not in page
+
+
+def test_a_finished_non_sweep_job_links_to_its_call_list():
+    page = views.render_job(_job(kind="dispatch"), csrf="t")
+    assert "Open call list" in page and 'href="/console/batches/b1"' in page
+
+
+def test_the_job_page_carries_its_id_for_the_poller():
+    page = views.render_job(_job(status="running"), csrf="t")
+    assert 'data-job="j1"' in page
+    assert 'id="job-status"' in page and 'id="job-log"' in page
+    assert "/console/jobs/' + id + '.json" in page
+
+
+def test_a_finished_job_does_not_poll():
+    assert "/console/jobs/' + id + '.json" not in views.render_job(_job(), csrf="t")
+
+
+def test_a_failed_job_says_so():
+    page = views.render_job(_job(status="failed", error="Places quota", result={}), csrf="t")
+    assert "<strong>Failed.</strong> Places quota" in page
+
+
+def test_the_ported_screens_carry_no_forbidden_dash():
+    for page in (views.render_batches([_sweep()]), views.render_jobs([]),
+                 views.render_job(_job(status="running"), csrf="t"),
+                 views.render_job(_job(status="failed", error="x", result={}), csrf="t")):
+        assert not contains_forbidden_dash(page)

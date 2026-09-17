@@ -81,6 +81,27 @@ def _markup(fn: Any) -> Any:
     return wrapped
 
 
+# A notice is a headline chosen by code plus a detail chosen by the caller.
+# Both ride the query string on a redirect, because Firebase Hosting forwards
+# only the session cookie and a cookie flash would never arrive. The headline
+# is fixed per code so a crafted link cannot invent one; the detail is capped
+# and escaped like any other string.
+NOTICES = {
+    "not_approved": "Findings not approved.",
+    "publish_blocked": "Report not published.",
+    "not_recorded": "Nothing was recorded.",
+    "reaudit_queued": "Re-audit queued.",
+}
+NOTICE_DETAIL_CAP = 200
+
+
+def notice_from(code: str | None, detail: str | None) -> tuple[str, str] | None:
+    headline = NOTICES.get(code or "")
+    if not headline:
+        return None
+    return headline, (detail or "")[:NOTICE_DETAIL_CAP]
+
+
 def icon(name: str) -> Markup:
     return Markup(f'<svg class="ic" aria-hidden="true"><use href="#i-{esc(name)}"></use></svg>')
 
@@ -142,14 +163,15 @@ def _wrap_tables(body: str) -> str:
     return _TABLE.sub(lambda m: f'<div class="table-wrap">{m.group(0)}</div>', body)
 
 
-def shell(title: str, body: str, *, active: str = "console", script: str = "") -> str:
+def shell(title: str, body: str, *, active: str = "console", script: str = "",
+          notice: tuple[str, str] | None = None) -> str:
     """Wrapper for screens not yet on their own template.
 
     The body is trusted HTML the caller built, wrapped the way the old shell
     did it. Each screen leaves this behind as it gets a template.
     """
     return _render("base.html", title=title, body=Markup(_wrap_tables(body)),
-                   active=active, script=Markup(script))
+                   active=active, script=Markup(script), notice=notice)
 
 
 def csrf_field(token: str) -> str:
@@ -336,7 +358,8 @@ def outreach_cell(sequence: Mapping[str, Any] | None, *, prospect_id: str,
 
 
 def render_run(*, csrf: str, markets: Sequence[str], active_jobs: Sequence[Mapping[str, Any]],
-               recent_batches: Sequence[Mapping[str, Any]]) -> str:
+               recent_batches: Sequence[Mapping[str, Any]],
+               notice: tuple[str, str] | None = None) -> str:
     """The Overview: what is running, what has run, and the two ways to start."""
     recent = [dict(b) for b in recent_batches]
 
@@ -365,105 +388,52 @@ def render_run(*, csrf: str, markets: Sequence[str], active_jobs: Sequence[Mappi
     } for b in recent[:6]]
     return _render("overview.html", title="Overview", active="overview", csrf=csrf,
                    badges={"jobs": len(active_jobs)} if active_jobs else {},
-                   markets=list(markets), kpis=kpis, jobs=jobs_vm, sweeps=sweeps_vm)
+                   markets=list(markets), kpis=kpis, jobs=jobs_vm, sweeps=sweeps_vm,
+                   notice=notice)
 
 
-_POLL = """<script>
-(function () {
-  var id = document.body.dataset.job;
-  var status = document.getElementById('job-status');
-  var log = document.getElementById('job-log');
-  var done = document.getElementById('job-done');
-  if (!id) return;
-  function tick() {
-    fetch('/console/jobs/' + id + '.json', {credentials: 'same-origin'})
-      .then(function (r) { return r.json(); })
-      .then(function (j) {
-        status.textContent = j.status;
-        status.className = 'status ' + j.status;
-        log.textContent = (j.log || []).map(function (l) { return l.line; }).join('\\n');
-        log.scrollTop = log.scrollHeight;
-        if (j.status === 'done' || j.status === 'failed') {
-          if (done) { done.style.display = 'block'; }
-          window.location.reload();
-          return;
-        }
-        setTimeout(tick, 2500);
-      })
-      .catch(function () { setTimeout(tick, 5000); });
-  }
-  tick();
-})();
-</script>"""
-
-
-def render_job(job: Mapping[str, Any], *, csrf: str) -> str:
+def render_job(job: Mapping[str, Any], *, csrf: str,
+               notice: tuple[str, str] | None = None) -> str:
+    """One job: live status, the streamed log, and the one next step."""
     status = job.get("status", "queued")
-    lines = "\n".join(entry.get("line", "") for entry in (job.get("log") or []))
     result = job.get("result") or {}
-
-    followups = ""
-    if status == "done":
-        if job.get("kind") == "sweep" and result.get("batch_id"):
-            followups = f"""
-<div class="card">
-  <h3>Next: audit the survivors</h3>
-  <p class="muted">{esc(result.get("eligible", 0))} prospects passed the gate.
-  Dispatching fans them out over Pub/Sub, four at a time, politely.</p>
-  <form method="post" action="/console/dispatch">
-    {csrf_field(csrf)}
-    <input type="hidden" name="batch_id" value="{esc(result.get("batch_id"))}">
-    <input type="hidden" name="market" value="{esc((job.get("params") or {}).get("market"))}">
-    <label for="dlimit">How many</label>
-    <input id="dlimit" type="number" name="limit" value="40" min="1" max="200">
-    <button type="submit">Dispatch audits</button>
-  </form>
-</div>"""
-        elif result.get("batch_id"):
-            followups = (f'<div class="card"><h3>Batch</h3>'
-                         f'<p><a href="/console/batches/{esc(result["batch_id"])}">'
-                         f'Open {esc(result["batch_id"])}</a></p></div>')
-
-    answer = ""
-    if result.get("answer"):
-        answer = (f'<div class="card"><h3>What it reported</h3>'
-                  f'<div style="white-space:pre-wrap">{esc(result["answer"])}</div></div>')
-
-    error = ""
-    if job.get("error"):
-        error = f'<div class="banner"><strong>Failed.</strong> {esc(job["error"])}</div>'
-
-    body = f"""
-<div class="sub"><a href="/console">&larr; console</a></div>
-<h1>{esc(job.get("label") or job.get("kind"))}</h1>
-<div class="sub">Job {esc(job.get("job_id"))} &middot; {status_pill(status)}
-<span id="job-status" style="display:none"></span></div>
-{error}
-<pre class="log" id="job-log">{esc(lines) or "Waiting for a worker to pick this up..."}</pre>
-{answer}
-{followups}
-"""
-    script = _POLL if status in ("queued", "running") else ""
-    page = shell(f"Job {job.get('job_id')}", body, active="jobs", script=script)
-    return page.replace("<body>", f'<body data-job="{esc(job.get("job_id"))}">')
+    job_id = str(job.get("job_id") or "")
+    followup = None
+    if status == "done" and result.get("batch_id"):
+        followup = "sweep" if job.get("kind") == "sweep" else "batch"
+    vm = {
+        "job_id": job_id,
+        "label": job.get("label") or job.get("kind") or "",
+        "status": status,
+        "lines": "\n".join(entry.get("line", "") for entry in (job.get("log") or [])),
+        "error": job.get("error") or "",
+        "answer": result.get("answer") or "",
+        "followup": followup,
+        "eligible": result.get("eligible", 0),
+        "batch_id": result.get("batch_id") or "",
+        "market": (job.get("params") or {}).get("market") or "",
+    }
+    live = status in ("queued", "running")
+    script = _env.get_template("_scripts.html").module.poll() if live else Markup("")
+    return _render("job.html", title=f"Job {job_id}", active="jobs", csrf=csrf, job=vm,
+                   body_attrs=Markup(f'data-job="{esc(job_id)}"'), script=script,
+                   notice=notice)
 
 
-def render_jobs(jobs_list: Sequence[Mapping[str, Any]]) -> str:
-    rows = "".join(
-        f'<tr><td><a href="/console/jobs/{esc(j.get("job_id"))}">{esc(j.get("label"))}</a></td>'
-        f'<td>{status_pill(j.get("status", ""))}</td>'
-        f'<td class="muted">{esc((j.get("created_at").strftime("%b %d %H:%M")) if j.get("created_at") else "")}</td>'
-        "</tr>"
-        for j in jobs_list
-    )
-    empty = ('<tr><td colspan=3 class=muted>Nothing has run yet. Every scan and '
-            'every "write talking points" job shows up here, and keeps going '
-            'even if you close this tab.</td></tr>')
-    body = ('<div class="topbar"><h1>Activity</h1></div>'
-            '<p class="lede">Everything the engine has run, newest first.</p>'
-            "<table><tr><th>What ran</th><th>Status</th><th>Started</th></tr>"
-            f"{rows or empty}</table>")
-    return shell("Activity", body, active="jobs")
+_KIND_LABEL = {"sweep": "Sweep", "audit": "Audit", "draft": "Draft",
+               "agent": "Coordinator", "dispatch": "Dispatch"}
+
+
+def render_jobs(jobs_list: Sequence[Mapping[str, Any]], *,
+                notice: tuple[str, str] | None = None) -> str:
+    rows = [{
+        "job_id": j.get("job_id"),
+        "label": j.get("label") or j.get("kind") or "",
+        "kind": _KIND_LABEL.get(str(j.get("kind") or ""), str(j.get("kind") or "").title()),
+        "status": j.get("status", ""),
+        "started": j["created_at"].strftime("%b %d %H:%M") if j.get("created_at") else "",
+    } for j in jobs_list]
+    return _render("jobs.html", title="Jobs", active="jobs", rows=rows, notice=notice)
 
 
 # ── Batch screen, with actions ────────────────────────────────────────────────
@@ -571,7 +541,8 @@ def _check_filter_options(check_defs: Sequence[Mapping[str, Any]]) -> str:
 
 def render_batch(batch_id: str, rows: Sequence[Mapping[str, Any]],
                  segments: Mapping[str, int], check_defs: Sequence[Mapping[str, Any]] = (),
-                 *, csrf: str, progress: Mapping[str, Any] | None = None) -> str:
+                 *, csrf: str, progress: Mapping[str, Any] | None = None,
+                 notice: tuple[str, str] | None = None) -> str:
     tile_pairs = [(name, segments.get(name, 0)) for name in
                   ("Leaky Bucket", "Invisible Pro", "Both Broken", "Dialed", "incomplete")
                   if segments.get(name)]
@@ -720,34 +691,41 @@ faster and easier conversation than one that needs everything rebuilt.
 </tbody></table>
 {_BATCH_FILTER_SCRIPT}
 """
-    return shell(f"Call list {batch_id}", body, active="batches")
+    return shell(f"Call list {batch_id}", body, active="batches", notice=notice)
 
 
-def render_batches(batches: Sequence[Mapping[str, Any]], *, days: int = 14) -> str:
-    windows = "".join(
-        f'<a class="{"on" if d == days else ""}" href="/console/batches?days={d}">{label}</a>'
-        for d, label in ((14, "2 weeks"), (90, "3 months"), (365, "a year"), (3650, "everything"))
-    )
-    rows = "".join(
-        f'<tr><td><a href="/console/batches/{esc(b["batch_id"])}">{scan_label(b)}</a></td>'
-        f'<td class="num">{b.get("total", 0)}</td><td class="num">{b.get("done", 0)}</td>'
-        f'<td class="num">{b.get("running", 0)}</td><td class="num">{b.get("pending", 0)}</td>'
-        f'<td>{progress_bar(b.get("done", 0), b.get("total", 0))}</td>'
-        f'<td class="muted">{esc(b.get("latest") or "")}</td></tr>'
-        for b in batches
-    )
-    empty = ('<tr><td colspan=7 class=muted>No scans in this stretch. '
-             '<a href="/console">Start one</a>, it takes a couple of minutes for a '
-             'small city. If you are looking for an older scan, widen the range '
-             'above.</td></tr>')
-    body = ('<div class="topbar"><h1>Results</h1></div>'
-            '<p class="lede">Open a scan to see who to call.</p>'
-            f'<div class="windows">Showing {windows}</div>'
-            "<table><tr><th>Scan</th><th>Companies</th><th>Checked</th>"
-            "<th>Running</th><th>Waiting</th><th>Progress</th><th>Last activity</th></tr>"
-            + (rows or empty)
-            + "</table>")
-    return shell("Results", body, active="batches")
+def _sweep_state(b: Mapping[str, Any]) -> tuple[str, str]:
+    """A sweep's pill, from the ledger counts. Finished when every audit is
+    done; Failed when the rest failed; Running while anything is still owed."""
+    total = int(b.get("total") or 0)
+    done = int(b.get("done") or 0)
+    failed = int(b.get("failed") or 0)
+    if not total:
+        return "dim", "Queued"
+    if done >= total:
+        return "ok", "Finished"
+    if failed and done + failed >= total:
+        return "bad", "Failed"
+    return "tint", "Running"
+
+
+SWEEP_WINDOWS = ((14, "2 weeks"), (90, "3 months"), (365, "a year"), (3650, "everything"))
+
+
+def render_batches(batches: Sequence[Mapping[str, Any]], *, days: int = 14,
+                   notice: tuple[str, str] | None = None) -> str:
+    rows = [{
+        "batch_id": b.get("batch_id"),
+        "label": Markup(scan_label(b)),
+        "state": _sweep_state(b),
+        "total": b.get("total", 0), "done": b.get("done", 0),
+        "running": b.get("running", 0), "pending": b.get("pending", 0),
+        "failed": b.get("failed", 0),
+        "bar": Markup(progress_bar(b.get("done", 0), b.get("total", 0))),
+        "latest": b.get("latest") or "",
+    } for b in batches]
+    return _render("sweeps.html", title="Sweeps", active="batches", rows=rows,
+                   windows=SWEEP_WINDOWS, days=days, notice=notice)
 
 
 # ── Audit detail, where approval happens ──────────────────────────────────────
@@ -779,7 +757,8 @@ def findings_predate_audit(findings: Mapping[str, Any] | None,
 def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                  checks: Sequence[Mapping[str, Any]], definitions: Mapping[str, Any],
                  findings: Mapping[str, Any] | None, evidence: Sequence[Mapping[str, Any]],
-                 csrf: str) -> str:
+                 csrf: str,
+                 notice: tuple[str, str] | None = None) -> str:
     scores = audit.get("scores") or {}
     audit_id = audit.get("audit_id") or audit.get("id") or ""
 
@@ -988,4 +967,4 @@ the most work and explain each in plain language. You pick the three he reads.</
 <h2>What we saw</h2>
 <div class="card">{shots or '<p class="muted">No screenshot was saved for this check.</p>'}</div>
 """
-    return shell(prospect.get("business_name") or "Audit", body, active="batches")
+    return shell(prospect.get("business_name") or "Audit", body, active="batches", notice=notice)

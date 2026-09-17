@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% from "_components.html" import page_header, pill, table_wrap, empty_row %}
+{% block body %}
+{{ page_header("Sweeps",
+               "Every sweep and how far its audits have got. Open one for its call list.",
+               primary_html='<a class="btn" href="/console#run">Run sweep</a>'|safe) }}
+
+<div class="windows">Showing
+  {% for d, label in windows %}<a class="{{ 'on' if d == days else '' }}" href="/console/batches?days={{ d }}">{{ label }}</a>{% endfor %}
+</div>
+
+{% call table_wrap() %}
+<tr><th>Sweep</th><th>Status</th><th>Prospects</th><th>Audited</th><th>Running</th>
+<th>Waiting</th><th>Failed</th><th>Progress</th><th>Last activity</th><th></th></tr>
+{% for b in rows %}
+<tr>
+  <td><a href="/console/batches/{{ b.batch_id }}">{{ b.label }}</a></td>
+  <td>{{ pill(b.state[0], b.state[1]) }}</td>
+  <td class="num">{{ b.total }}</td><td class="num">{{ b.done }}</td>
+  <td class="num">{{ b.running }}</td><td class="num">{{ b.pending }}</td>
+  <td class="num">{{ b.failed }}</td>
+  <td>{{ b.bar }}</td>
+  <td class="muted">{{ b.latest }}</td>
+  <td class="rowact"><a href="/console/batches/{{ b.batch_id }}" title="Open sweep" aria-label="Open sweep">{{ icon("external") }}</a></td>
+</tr>
+{% else %}
+{{ empty_row(10, 'No sweeps in this window. <a href="/console">Start one</a>; a small market finishes in a few minutes. Looking for an older sweep? Widen the window above.'|safe) }}
+{% endfor %}
+{% endcall %}
+{% endblock %}

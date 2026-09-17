@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% from "_components.html" import page_header %}
+{% block body %}
+{{ page_header(job.label, crumbs=[("/console/jobs", "Jobs"), (None, job.label)]) }}
+<div class="sub">Job {{ job.job_id }} &middot; {{ status_pill(job.status) }}
+<span id="job-status" style="display:none"></span></div>
+
+{% if job.error %}
+<div class="banner"><strong>Failed.</strong> {{ job.error }}</div>
+{% endif %}
+
+<pre class="log" id="job-log">{{ job.lines or "Waiting for a worker to pick this up..." }}</pre>
+
+{% if job.answer %}
+<div class="card"><h3>What the coordinator reported</h3>
+<div style="white-space:pre-wrap">{{ job.answer }}</div></div>
+{% endif %}
+
+{% if job.followup == "sweep" %}
+<div class="card">
+  <h3>Audit passed prospects</h3>
+  <p class="muted">{{ job.eligible }} prospects passed the gate. Audits fan out
+  four at a time, politely.</p>
+  <form method="post" action="/console/dispatch">
+    {{ csrf_field(csrf) }}
+    <input type="hidden" name="batch_id" value="{{ job.batch_id }}">
+    <input type="hidden" name="market" value="{{ job.market }}">
+    <label for="dlimit">Audits at most</label>
+    <input id="dlimit" type="number" name="limit" value="40" min="1" max="200">
+    <button type="submit">Audit passed prospects</button>
+  </form>
+</div>
+{% elif job.followup == "batch" %}
+<div class="card"><h3>Call list</h3>
+<p><a href="/console/batches/{{ job.batch_id }}">Open call list</a></p></div>
+{% endif %}
+{% endblock %}

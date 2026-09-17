@@ -25,6 +25,7 @@ import asyncio
 import hashlib
 import logging
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlparse
 
 from fastapi import APIRouter, Form, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -62,6 +63,38 @@ def _page(html: str) -> Response:
 
 def _redirect(path: str) -> RedirectResponse:
     return RedirectResponse(url=path, status_code=303)
+
+
+def _host(request: Request) -> str:
+    """The hostname the caller asked for. X-Forwarded-Host first, because
+    Firebase Hosting proxies with Host rewritten to the run.app name."""
+    forwarded = (request.headers.get("x-forwarded-host") or "").split(",")[0]
+    host = forwarded.strip() or request.headers.get("host") or ""
+    return host.split(":")[0].strip().lower()
+
+
+def _back(request: Request, default: str) -> str:
+    """Where to send the operator after an action: the page they came from,
+    if it is ours. A Referer on another host is discarded, never followed."""
+    referer = request.headers.get("referer") or ""
+    if referer:
+        parsed = urlparse(referer)
+        if parsed.netloc.split(":")[0].lower() == _host(request) and parsed.path.startswith("/"):
+            query = [(k, v) for k, v in parse_qsl(parsed.query) if k not in ("notice", "detail")]
+            return parsed.path + (f"?{urlencode(query)}" if query else "")
+    return default
+
+
+def _with_notice(path: str, code: str, detail: str = "") -> str:
+    """A redirect target carrying a notice. Only the session cookie survives
+    Firebase Hosting, so a flash rides the query string instead."""
+    joiner = "&" if "?" in path else "?"
+    return f"{path}{joiner}{urlencode({'notice': code, 'detail': str(detail)[:views.NOTICE_DETAIL_CAP]})}"
+
+
+def _notice(request: Request) -> tuple[str, str] | None:
+    return views.notice_from(request.query_params.get("notice"),
+                             request.query_params.get("detail"))
 
 
 async def _start(request: Request, csrf: str | None, kind: str, params: dict[str, Any],
@@ -117,7 +150,7 @@ async def run_screen(request: Request) -> Response:
     )
     return _page(views.render_run(
         csrf=csrf_token(request), markets=known_markets(),
-        active_jobs=active, recent_batches=batches,
+        active_jobs=active, recent_batches=batches, notice=_notice(request)
     ))
 
 
@@ -159,7 +192,7 @@ async def start_draft(request: Request, batch_id: str = Form(...),
 
 @router.get("/jobs")
 async def jobs_screen(request: Request) -> Response:
-    return _page(views.render_jobs(await asyncio.to_thread(jobs.recent, 40)))
+    return _page(views.render_jobs(await asyncio.to_thread(jobs.recent, 40), notice=_notice(request)))
 
 
 @router.get("/jobs/{job_id}.json")
@@ -181,7 +214,7 @@ async def job_screen(job_id: str, request: Request) -> Response:
     record = await asyncio.to_thread(jobs.get, job_id)
     if record is None:
         return Response(status_code=404)
-    return _page(views.render_job(record, csrf=csrf_token(request)))
+    return _page(views.render_job(record, csrf=csrf_token(request), notice=_notice(request)))
 
 
 # ── Batches ───────────────────────────────────────────────────────────────────
@@ -246,7 +279,7 @@ async def batches_screen(request: Request, days: int = 14) -> Response:
     no way to reach them from the screen."""
     days = max(1, min(days, 3650))
     return _page(views.render_batches(
-        await asyncio.to_thread(store.batch_overview, days), days=days))
+        await asyncio.to_thread(store.batch_overview, days), days=days, notice=_notice(request)))
 
 
 @router.get("/batches/{batch_id}")
@@ -255,7 +288,7 @@ async def batch_screen(batch_id: str, request: Request) -> Response:
     overview = await asyncio.to_thread(store.batch_overview)
     progress = next((b for b in overview if b["batch_id"] == batch_id), None)
     return _page(views.render_batch(batch_id, rows, segments, check_defs,
-                                    csrf=csrf_token(request), progress=progress))
+                                    csrf=csrf_token(request), progress=progress, notice=_notice(request)))
 
 
 # ── One audit, and the human decisions ────────────────────────────────────────
@@ -307,7 +340,7 @@ async def audit_screen(audit_id: str, request: Request) -> Response:
     audit, prospect, checks, definitions, findings, evidence = loaded
     return _page(views.render_audit(
         audit=audit, prospect=prospect, checks=checks, definitions=definitions,
-        findings=findings, evidence=evidence, csrf=csrf_token(request),
+        findings=findings, evidence=evidence, csrf=csrf_token(request), notice=_notice(request)
     ))
 
 
@@ -327,12 +360,7 @@ async def approve_findings(audit_id: str, request: Request,
     try:
         await asyncio.to_thread(store.approve_report_findings, audit_id, selected)
     except ValueError as exc:
-        return _page(views.shell(
-            "Not approved",
-            f'<h1>Not approved</h1><div class="banner">{views.esc(exc)}</div>'
-            f'<p><a href="/console/audits/{views.esc(audit_id)}">Back to the audit</a></p>',
-            active="batches",
-        ))
+        return _redirect(_with_notice(f"/console/audits/{audit_id}", "not_approved", str(exc)))
     return _redirect(f"/console/audits/{audit_id}")
 
 
@@ -347,12 +375,7 @@ async def publish_report(audit_id: str, request: Request,
     try:
         await asyncio.to_thread(publish, audit_id)
     except PublishBlocked as exc:
-        return _page(views.shell(
-            "Publish blocked",
-            f'<h1>Publish blocked</h1><div class="banner">{views.esc(exc)}</div>'
-            f'<p><a href="/console/audits/{views.esc(audit_id)}">Back to the audit</a></p>',
-            active="batches",
-        ))
+        return _redirect(_with_notice(f"/console/audits/{audit_id}", "publish_blocked", str(exc)))
     return _redirect(f"/console/audits/{audit_id}")
 
 
@@ -408,7 +431,7 @@ async def log_touch(prospect_id: str, request: Request, audit_id: str = Form(Non
             email=prospect.get("owner_email"),
         )
         if hit:
-            return f"That prospect is suppressed ({hit}). Nothing was recorded."
+            return f"This prospect is suppressed ({hit})."
 
         row = store.get_sequence(prospect_id)
         if row:
@@ -421,7 +444,7 @@ async def log_touch(prospect_id: str, request: Request, audit_id: str = Form(Non
                 max_touches=outreach.touches_supported(pool) or 1,
             )
         if not seq.is_open:
-            return "That sequence is finished. Nothing was recorded."
+            return "This outreach sequence is finished."
 
         sent_at = store.utcnow()
         advanced = outreach.advance(seq, sent_at=sent_at)
@@ -436,14 +459,10 @@ async def log_touch(prospect_id: str, request: Request, audit_id: str = Form(Non
         return None
 
     blocked = await asyncio.to_thread(record)
+    back = _back(request, "/console/batches")
     if blocked:
-        return _page(views.shell(
-            "Not recorded",
-            f'<h1>Not recorded</h1><div class="banner">{views.esc(blocked)}</div>'
-            '<p><a href="/console/batches">Back to the scans</a></p>',
-            active="batches",
-        ))
-    return _redirect(request.headers.get("referer") or "/console/batches")
+        return _redirect(_with_notice(back, "not_recorded", blocked))
+    return _redirect(back)
 
 
 # ── Suppression ───────────────────────────────────────────────────────────────
