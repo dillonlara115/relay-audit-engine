@@ -183,8 +183,9 @@ findings by.
 
 ### Still open
 
-- Throttle and daily cap values. Cannot be chosen sensibly until the hand-sent
-  thirty show what a normal day looks like.
+- ~~Throttle and daily cap values.~~ Decided Sep 17, 2026: 40 per UTC day
+  (`OUTREACH_DAILY_CAP`), and emails are plain text, no markup or images.
+  Revisit the number once the first thirty show what a normal day looks like.
 - Whether each send still needs individual human approval, or whether approving
   the findings (rule 7) is approval enough for the message built from them. This
   is the rule 7 question restated for a channel that did not exist when it was
