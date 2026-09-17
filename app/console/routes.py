@@ -246,43 +246,52 @@ async def job_screen(job_id: str, request: Request) -> Response:
 # ── Batches ───────────────────────────────────────────────────────────────────
 
 
+# Concurrent Firestore reads per call-list load. Sixteen keeps a hundred-audit
+# sweep to seven rounds of round trips instead of three hundred.
+READ_WORKERS = 16
+
+
 def _assemble_batch(
     batch_id: str,
 ) -> tuple[list[dict[str, Any]], dict[str, int], list[dict[str, Any]]]:
     from app.ranker import rank
 
+    from concurrent.futures import ThreadPoolExecutor
+
     audits = list(store.audits_for_batch(batch_id))
-    prospects: dict[str, Any] = {}
-    for audit in audits:
-        pid = audit.get("prospect_id")
-        if pid and pid not in prospects:
-            prospects[pid] = store.get_prospect(pid) or {}
+    audit_ids = [a.get("audit_id") for a in audits]
+    prospect_ids = list({a.get("prospect_id") for a in audits if a.get("prospect_id")})
     slugs = {a.get("audit_id"): a.get("report_slug") for a in audits}
 
-    # Every check's status per audit, so the batch page can filter by them
-    # client side ("show only businesses failing C16, footer copyright") without
-    # a round trip per filter change. One extra Firestore read per audit, same
-    # cost class as the findings lookup already done here.
-    checks_by_audit = {
-        a.get("audit_id"): {
-            c.get("code"): c.get("status")
-            for c in store.audit_checks(a.get("audit_id"))
-            if c.get("code")
+    # Three reads per audit: the prospect, every check's status (so the page
+    # can filter by check without a round trip), and the findings doc. Done
+    # one after another they cost a Firestore round trip each, ninety in a
+    # row for a thirty-audit sweep and five seconds on screen. Done at once
+    # they cost about one. The reads go through store.* by name so a test
+    # can stub them, and the pool is bounded so a hundred-audit sweep does
+    # not open a hundred connections.
+    with ThreadPoolExecutor(max_workers=READ_WORKERS) as pool:
+        prospect_futures = {pid: pool.submit(store.get_prospect, pid) for pid in prospect_ids}
+        checks_futures = {aid: pool.submit(store.audit_checks, aid) for aid in audit_ids}
+        findings_futures = {aid: pool.submit(store.get_draft_findings, aid) for aid in audit_ids}
+        sequences_future = pool.submit(store.sequences_for_batch, batch_id)
+        defs_future = pool.submit(store.all_check_defs)
+        prospects: dict[str, Any] = {pid: f.result() or {} for pid, f in prospect_futures.items()}
+        checks_by_audit = {
+            aid: {c.get("code"): c.get("status") for c in f.result() if c.get("code")}
+            for aid, f in checks_futures.items()
         }
-        for a in audits
-    }
-
-    check_defs = sorted(
-        (d for d in store.all_check_defs() if d.get("enabled")),
-        key=lambda d: d.get("sort_order", 0),
-    )
-
-    sequences = store.sequences_for_batch(batch_id)
+        findings_by_audit = {aid: f.result() for aid, f in findings_futures.items()}
+        sequences = sequences_future.result()
+        check_defs = sorted(
+            (d for d in defs_future.result() if d.get("enabled")),
+            key=lambda d: d.get("sort_order", 0),
+        )
 
     rows, segments = [], {}
     for r in rank(audits, prospects):
         segments[r.segment or "incomplete"] = segments.get(r.segment or "incomplete", 0) + 1
-        findings = store.get_draft_findings(r.audit_id)
+        findings = findings_by_audit.get(r.audit_id)
         rows.append({
             "rank": r.rank, "audit_id": r.audit_id, "business_name": r.business_name,
             "city": r.city, "segment": r.segment, "scores": dict(r.scores),
@@ -334,12 +343,14 @@ async def batches_screen(request: Request, days: int = 14) -> Response:
 async def batch_screen(batch_id: str, request: Request, tab: str = "all") -> Response:
     from app.console import calllist
 
-    rows, segments, check_defs = await asyncio.to_thread(_assemble_batch, batch_id)
-    overview = await asyncio.to_thread(store.batch_overview)
+    # The three loads are independent, so they run at once. The excluded
+    # read is soft: a failure there costs the tab, not the page.
+    (rows, segments, check_defs), overview, excluded = await asyncio.gather(
+        asyncio.to_thread(_assemble_batch, batch_id),
+        asyncio.to_thread(store.batch_overview),
+        asyncio.to_thread(_soft, _excluded_for_batch, None, batch_id),
+    )
     progress = next((b for b in overview if b["batch_id"] == batch_id), None)
-    # Two small indexed reads so the tab can carry a count. Soft: a failure
-    # here costs the tab, not the page.
-    excluded = await asyncio.to_thread(_soft, _excluded_for_batch, None, batch_id)
     counts = calllist.tab_counts(segments, excluded=len(excluded) if excluded is not None else None)
     return _page(views.render_batch(batch_id, rows, segments, check_defs,
                                     csrf=csrf_token(request), progress=progress,

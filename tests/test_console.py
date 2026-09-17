@@ -2870,3 +2870,45 @@ def test_text_like_inputs_are_tap_sized_including_email_and_password():
         assert f"input[type={kind}]" in rule, kind
     assert "min-height:44px" in rule
     assert "font-size:16px" in rule
+
+
+# ── The call list reads Firestore concurrently ────────────────────────────────
+
+
+def test_assemble_batch_reads_per_audit_documents_at_once(monkeypatch):
+    """Thirty audits, three reads each, 40 ms a read: sequential is 3.6 s,
+    concurrent is well under half a second. The stubs sleep to prove which."""
+    import time
+
+    import app.console.routes as routes
+
+    audits = [{"audit_id": f"a{i}", "prospect_id": f"p{i}", "batch_id": "b1",
+               "scores": {"found": 1, "chosen": 1, "booked": 1, "total": 3}} for i in range(30)]
+
+    def slow(value):
+        def fn(*a):
+            time.sleep(0.04)
+            return value
+        return fn
+
+    monkeypatch.setattr(routes.store, "audits_for_batch", lambda b: audits)
+    monkeypatch.setattr(routes.store, "get_prospect", slow({"business_name": "X"}))
+    monkeypatch.setattr(routes.store, "audit_checks", slow([{"code": "C16", "status": "fail"}]))
+    monkeypatch.setattr(routes.store, "get_draft_findings", slow(None))
+    monkeypatch.setattr(routes.store, "sequences_for_batch", slow({}))
+    monkeypatch.setattr(routes.store, "all_check_defs", slow([]))
+
+    started = time.perf_counter()
+    rows, segments, _ = routes._assemble_batch("b1")
+    took = time.perf_counter() - started
+
+    assert len(rows) == 30 and all(r["checks"] == {"C16": "fail"} for r in rows)
+    assert took < 0.6, f"{took:.2f}s: the reads ran one after another"
+
+
+def test_pages_are_gzipped_when_the_browser_accepts_it(client):
+    sign_in(client)
+    response = client.get("/console", headers={"accept-encoding": "gzip"})
+    assert response.headers.get("content-encoding") == "gzip"
+    assert "Overview" in response.text, "transparently decoded"
+    assert "content-encoding" not in client.get("/health", headers={"accept-encoding": "gzip"}).headers

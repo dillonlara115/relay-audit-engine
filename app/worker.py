@@ -39,6 +39,12 @@ BUILD_SHA = os.getenv("BUILD_SHA", "dev")
 
 app = FastAPI(title="relay-audit-worker")
 
+# Pages compress about six to one; the call list is 130 KB of HTML before
+# this. Applied to anything over a kilobyte, which leaves health checks alone.
+from starlette.middleware.gzip import GZipMiddleware  # noqa: E402
+
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+
 from app.console.auth import authorize as _console_authorize  # noqa: E402
 from app.console.routes import router as console_router  # noqa: E402
 
