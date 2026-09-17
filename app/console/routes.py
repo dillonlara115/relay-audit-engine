@@ -471,19 +471,22 @@ async def audit_screen(audit_id: str, request: Request) -> Response:
             _soft(store.touches_for, [], pid),
             _soft(store.replies_for, [], pid),
             _history_for(pid),
+            _soft(store.get_email_templates, None),
         )
 
     loaded = await asyncio.to_thread(load)
     if loaded is None:
         return Response(status_code=404)
     (audit, prospect, checks, definitions, findings, evidence,
-     sequence, touches, replies, history) = loaded
+     sequence, touches, replies, history, templates) = loaded
     return _page(views.render_audit(
         audit=audit, prospect=prospect, checks=checks, definitions=definitions,
         findings=findings, evidence=evidence, csrf=csrf_token(request), notice=_notice(request),
         sequence=sequence, touches=touches, replies=replies, history=history,
         report_url=_report_url(request, audit.get("report_slug")),
         signature=get_config().outreach_signature,
+        sender_name=get_config().outreach_sender_name,
+        templates=templates,
     ))
 
 
@@ -607,6 +610,33 @@ async def log_touch(prospect_id: str, request: Request, audit_id: str = Form(Non
     if back.startswith("/console/audits/"):
         target += "#outreach"
     return _redirect(target)
+
+
+# ── Email templates ───────────────────────────────────────────────────────────
+
+
+@router.get("/templates")
+async def templates_screen(request: Request) -> Response:
+    saved = await asyncio.to_thread(_soft, store.get_email_templates, None)
+    return _page(views.render_templates(saved, csrf=csrf_token(request), notice=_notice(request)))
+
+
+@router.post("/templates")
+async def save_templates(request: Request, csrf: str = Form(None)) -> Response:
+    """Validate and store the four templates. Sends nothing; the next draft
+    on every prospect page picks these up."""
+    if not check_csrf(request, csrf):
+        return Response(status_code=403, content="stale form, reload the page")
+    from app import outreach_templates as tpl
+
+    form = await request.form()
+    templates = tpl.normalise({k: str(v) for k, v in form.items()})
+    problems = tpl.all_problems(templates)
+    if problems:
+        return _redirect(_with_notice("/console/templates", "templates_rejected",
+                                      " ".join(problems)))
+    await asyncio.to_thread(store.save_email_templates, templates)
+    return _redirect(_with_notice("/console/templates", "templates_saved", ""))
 
 
 # ── Suppression ───────────────────────────────────────────────────────────────

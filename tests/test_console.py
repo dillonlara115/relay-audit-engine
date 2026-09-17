@@ -2569,3 +2569,53 @@ def test_the_partial_tag_explains_itself():
     assert "<h4>Tags</h4>" in page and "Re-audit before trusting them." in page
     prospect = _prospect_page(history=[dict(_hist(2, 60), partial=True), _hist(1, 50)])
     assert 'title="Partial audit:' in prospect
+
+
+# ── Email templates screen ────────────────────────────────────────────────────
+
+
+def test_the_templates_screen_lists_four_editors_and_the_variables():
+    page = views.render_templates(None, csrf="t")
+    assert page.count('name="subject_') == 4 and page.count('name="body_') == 4
+    assert "{{first_name}}" in page and "{{report_url}}" in page
+    assert 'class="insert-var" data-target="body-1"' in page
+    assert "These are the defaults; nothing has been saved yet." in page
+    assert 'href="/console/templates"' in page, "it is in the nav"
+
+
+def test_saved_templates_show_in_the_editors():
+    page = views.render_templates({"1": {"subject": "Custom subject", "body": "Custom body"}}, csrf="t")
+    assert 'value="Custom subject"' in page and ">Custom body</textarea>" in page
+    assert "nothing has been saved yet" not in page
+
+
+def test_saving_templates_validates_then_stores(client, monkeypatch):
+    import app.console.routes as routes
+
+    saved = {}
+    monkeypatch.setattr(routes.store, "save_email_templates", lambda t: saved.update(t))
+    csrf = sign_in(client)
+    good = {"csrf": csrf}
+    for n in range(1, 5):
+        good[f"subject_{n}"] = f"Subject {n} for {{{{business}}}}"
+        good[f"body_{n}"] = "Hi {{first_name}},\n{{report_url}}\n{{sender_name}}"
+    response = client.post("/console/templates", data=good, follow_redirects=False)
+    assert response.status_code == 303 and "notice=templates_saved" in response.headers["location"]
+    assert saved["1"]["subject"] == "Subject 1 for {{business}}"
+
+    bad = dict(good, body_2="your Leaky Bucket segment {{oops}}")
+    response = client.post("/console/templates", data=bad, follow_redirects=False)
+    assert "notice=templates_rejected" in response.headers["location"]
+    assert "Email+2" in response.headers["location"] or "Email%202" in response.headers["location"]
+    assert saved["2"]["body"] != bad["body_2"]
+
+
+def test_the_templates_screen_is_gated_and_survives_a_missing_store(client, monkeypatch):
+    import app.console.routes as routes
+
+    assert client.get("/console/templates").status_code == 401
+    monkeypatch.setattr(routes.store, "get_email_templates",
+                        lambda: (_ for _ in ()).throw(RuntimeError("no firestore")))
+    sign_in(client)
+    response = client.get("/console/templates")
+    assert response.status_code == 200 and "Email templates" in response.text

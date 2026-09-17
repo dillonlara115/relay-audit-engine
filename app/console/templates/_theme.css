@@ -335,3 +335,13 @@ th[data-sort][aria-sort="ascending"]::after { content:"\2191"; opacity:1; color:
 th[data-sort][aria-sort="descending"]::after { content:"\2193"; opacity:1; color:var(--ember); }
 th .arrow { display:none; }
 th.pick::after { content:none; }
+
+/* ── Email templates ──────────────────────────────────────────────────────── */
+.vars { display:grid; grid-template-columns:max-content 1fr; gap:4px 14px; margin:0; font-size:.9rem; }
+.vars dt { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.85rem; }
+.vars dd { margin:0; color:var(--ink2); }
+.tpl .row { display:flex; justify-content:space-between; align-items:end; gap:12px; }
+.tpl .row label { margin-bottom:4px; }
+.tpl select.insert-var { width:auto; font-size:.85rem; padding:4px 8px; margin:0 0 4px; }
+.tpl textarea { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.9rem; line-height:1.45; }
+.tpl h3 .muted { font-weight:400; font-size:.85rem; margin-left:8px; }

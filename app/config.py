@@ -129,6 +129,8 @@ class Config:
     # operator knows whose mailbox it leaves. Display only; Gmail sets the real
     # From header from the connected account.
     outreach_mailbox: str = field(default_factory=lambda: _str("OUTREACH_MAILBOX"))
+    # The name above the signature line. {{sender_name}} in the templates.
+    outreach_sender_name: str = field(default_factory=lambda: _str("OUTREACH_SENDER_NAME"))
     # Emails the console will send in one UTC day before refusing. Criteria
     # section 7 puts target volume near a hundred a month.
     outreach_daily_cap: int = field(default_factory=lambda: _int("OUTREACH_DAILY_CAP", 40))
@@ -190,6 +192,7 @@ _ENV_NAME = {
     "smoke_base_url": "SMOKE_BASE_URL",
     "outreach_signature": "OUTREACH_SIGNATURE",
     "outreach_mailbox": "OUTREACH_MAILBOX",
+    "outreach_sender_name": "OUTREACH_SENDER_NAME",
     "outreach_daily_cap": "OUTREACH_DAILY_CAP",
 }
 

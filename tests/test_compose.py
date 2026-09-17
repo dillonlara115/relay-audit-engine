@@ -11,7 +11,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from app.console.compose import MAX_MAILTO, compose, mailto_url, touch_draft
+from app.console.compose import MAX_MAILTO, compose, fit_mailto, mailto_url, touch_draft
 from app.copy_rules import contains_forbidden_dash
 from app.report.data import forbidden_terms_in
 
@@ -38,9 +38,41 @@ def test_touch_one_carries_the_link_and_the_three_chosen_findings():
     assert d.to == "dave@apex.com"
     assert d.subject == "Apex Roofing: three things costing you booked jobs"
     for line in ("Hi there,", "homeowner in Denver", URL, "1. Saw thing 1", "2. Saw thing 2",
-                 "3. Saw thing 3", "yours to keep either way", "{Your name}", "Relay for Roofers"):
+                 "3. Saw thing 3", "yours to keep either way", "Relay for Roofers"):
         assert line in d.body, line
     assert "Saw thing 4" not in d.body
+    assert any("Sender name is not set" in w for w in d.warnings)
+
+
+def test_the_default_template_renders_to_the_text_the_composer_always_wrote():
+    """The defaults are the drafts the plan specified. With the old placeholder
+    as the sender name, the template renders byte for byte to touch_draft."""
+    old = touch_draft(ordinal=1, business_name="Apex Roofing", city="Denver", report_url=URL,
+                      report_findings=doc()["findings"][:3], signature="Relay for Roofers")
+    new = compose(ordinal=1, prospect={"business_name": "Apex Roofing", "city": "Denver"},
+                  report_url=URL, findings_doc=doc(), signature="Relay for Roofers",
+                  sender_name="{Your name}")
+    assert new.subject == old.subject
+    assert new.body == old.body
+
+
+def test_a_saved_template_replaces_the_default_and_variables_fill_in():
+    saved = {"1": {"subject": "{{first_name}}, about {{domain}}",
+                   "body": "Hi {{first_name}}, {{finding_1}} See {{report_url}}\n{{sender_name}}"}}
+    d = compose(ordinal=1, prospect={"business_name": "A", "domain": "apex.com",
+                                     "owner_name": "Dave Whitaker"},
+                report_url=URL, findings_doc=doc(), sender_name="Dillon", templates=saved)
+    assert d.subject == "Dave, about apex.com"
+    assert d.body == f"Hi Dave, Saw thing 1 on the site. See {URL}\r\nDillon"
+    assert d.warnings == ()
+
+
+def test_an_unknown_variable_stays_visible_and_is_flagged():
+    saved = {"1": {"subject": "x", "body": "Hi {{frist_name}}"}}
+    d = compose(ordinal=1, prospect={"business_name": "A"}, report_url=URL, findings_doc=doc(),
+                sender_name="D", templates=saved)
+    assert "{{frist_name}}" in d.body
+    assert any("{{frist_name}} is not a variable" in w for w in d.warnings)
 
 
 def test_a_follow_up_carries_one_held_back_finding_and_the_link_again():
@@ -99,9 +131,10 @@ def test_three_long_findings_still_fit_the_link_budget():
     d = compose(ordinal=1, prospect={"business_name": "Apex Roofing", "city": "Denver",
                                      "owner_email": "dave@apex.com"},
                 report_url=URL, findings_doc=long)
-    url = mailto_url(d)
+    assert len(mailto_url(d)) > MAX_MAILTO, "the editor keeps the whole text"
+    url = fit_mailto(d)
     assert len(url) <= MAX_MAILTO
-    assert URL in body_of(url), "the link is the last thing trimmed"
+    assert URL in body_of(url), "the link comes before the findings and survives the cut"
     assert "1. " in body_of(url), "at least one finding survives"
 
 
@@ -120,6 +153,10 @@ def test_the_signature_is_configurable_and_sanitised():
 
 
 @pytest.mark.parametrize("ordinal", [1, 2, 3, 4])
-def test_every_touch_carries_the_placeholder_the_operator_replaces(ordinal):
-    d = compose(ordinal=ordinal, prospect={"business_name": "A"}, report_url=URL, findings_doc=doc())
-    assert "{Your name}" in d.body
+def test_every_email_carries_the_sender_name_or_warns_that_it_is_missing(ordinal):
+    named = compose(ordinal=ordinal, prospect={"business_name": "A"}, report_url=URL,
+                    findings_doc=doc(), sender_name="Dillon")
+    assert "\r\nDillon\r\nRelay for Roofers" in named.body
+    unnamed = compose(ordinal=ordinal, prospect={"business_name": "A"}, report_url=URL,
+                      findings_doc=doc())
+    assert any("Sender name is not set" in w for w in unnamed.warnings)

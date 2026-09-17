@@ -92,7 +92,8 @@ def _theme_css_stripped() -> str:
 # symbol ids without the i- prefix.
 NAV_GROUPS = [
     ("Prospecting", [("/console", "overview", "Overview", "home"),
-                     ("/console/batches", "batches", "Sweeps", "list")]),
+                     ("/console/batches", "batches", "Sweeps", "list"),
+                     ("/console/templates", "templates", "Email templates", "mail")]),
     ("System", [("/console/jobs", "jobs", "Jobs", "activity")]),
 ]
 
@@ -117,6 +118,8 @@ NOTICES = {
     "publish_blocked": "Report not published.",
     "not_recorded": "Nothing was recorded.",
     "reaudit_queued": "Re-audit queued.",
+    "templates_saved": "Templates saved.",
+    "templates_rejected": "Templates not saved.",
 }
 NOTICE_DETAIL_CAP = 200
 
@@ -335,6 +338,25 @@ _CONTACT_TAG = {"valid": "ok", "risky": "warn", "invalid": "bad", "unknown": "di
 _CONTACT_LABEL = {
     "valid": "good", "risky": "check first", "invalid": "bad", "unknown": "unchecked",
 }
+
+
+def render_templates(templates: Mapping[str, Any] | None, *, csrf: str,
+                     notice: tuple[str, str] | None = None) -> str:
+    """The four emails as the operator has written them, with the variables
+    that can go in. Saving validates; nothing here sends or renders a real
+    prospect, that happens on the prospect page."""
+    from app import outreach_templates as tpl
+
+    rows = []
+    for n, row in enumerate(tpl.sequence_of(templates), start=1):
+        rows.append({"n": n, "subject": row["subject"], "body": row["body"],
+                     "when": {1: "Day 0, with the report link and its three findings",
+                              2: "Day 3, one held-back finding",
+                              3: "Day 7, one held-back finding",
+                              4: "Day 14, one held-back finding, then the sequence closes"}[n]})
+    return _render("templates.html", title="Email templates", active="templates", csrf=csrf,
+                   notice=notice, rows=rows, variables=list(tpl.VARIABLES.items()),
+                   saved=bool(templates))
 
 
 def render_login(*, next_path: str = "/console", error: str | None = None) -> str:
@@ -679,7 +701,8 @@ def outreach_context(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                      sequence: Mapping[str, Any] | None,
                      touches: Sequence[Mapping[str, Any]],
                      replies: Sequence[Mapping[str, Any]],
-                     report_url: str | None, signature: str) -> dict[str, Any]:
+                     report_url: str | None, signature: str, sender_name: str = "",
+                     templates: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Everything the Outreach card shows, computed once and testable.
 
     Compose builds a mailto: link and nothing else; Mark as sent posts to the
@@ -708,7 +731,8 @@ def outreach_context(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
         else:
             draft = composer.compose(ordinal=next_ordinal, prospect=prospect,
                                      report_url=report_url or "", findings_doc=findings,
-                                     signature=signature)
+                                     signature=signature, sender_name=sender_name,
+                                     templates=templates)
             if next_ordinal == 1:
                 note = (f"Opens your mail client with the report link and the three "
                         f"findings for {owner_email}." if owner_email else "")
@@ -718,7 +742,7 @@ def outreach_context(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                 note = (f"Opens your mail client with follow-up finding {next_ordinal - 1}: "
                         f"{seen[:80]}{'...' if len(seen) > 80 else ''}")
             step1 = {"mode": "compose" if owner_email else "no_address",
-                     "href": composer.mailto_url(draft), "note": note,
+                     "href": composer.fit_mailto(draft), "note": note,
                      "subject": draft.subject, "body": draft.body,
                      "warnings": list(draft.warnings)}
 
@@ -775,7 +799,8 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                  replies: Sequence[Mapping[str, Any]] = (),
                  history: Sequence[Mapping[str, Any]] | None = (),
                  report_url: str | None = None,
-                 signature: str = "Relay for Roofers",
+                 signature: str = "Relay for Roofers", sender_name: str = "",
+                 templates: Mapping[str, Any] | None = None,
                  sweep_label: str | None = None) -> str:
     """One prospect: scores, findings, outreach, every check, the evidence."""
     from urllib.parse import urlparse
@@ -925,7 +950,7 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
 
     o_vm = outreach_context(audit=audit, prospect=prospect, findings=findings,
                             sequence=sequence, touches=touches, replies=replies,
-                            report_url=report_url, signature=signature)
+                            report_url=report_url, signature=signature, sender_name=sender_name, templates=templates)
 
     return _render("prospect.html", title=name, active="batches", csrf=csrf,
                    p=p_vm, f=f_vm, o=o_vm, sections=sections, evidence_html=evidence_html,

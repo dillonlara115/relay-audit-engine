@@ -1,21 +1,20 @@
-"""The email an operator sends by hand, drafted so they do not start blank.
+"""The email an operator reads and sends, drafted so they do not start blank.
 
-This module writes text and builds a mailto: link. It sends nothing and
-cannot: there is no mail client in this process, and hard rule 4 keeps it
-that way. The link opens the operator's own mail client with the fields
-filled; what leaves their mailbox is whatever they send after reading it.
+Since the Sep 17 amendment to rule 4 the console can send the email itself,
+from the operator's own mailbox, when they press Send on it. This module
+still only writes text: it renders the stored template for the next email
+with the prospect's values, checks it, and hands the draft to the page. The
+send lives in app/tools/gmail.py and the route that calls it.
 
 Three guarantees the draft carries, because it goes to a contractor:
 
-- No forbidden dash survives. Every line passes through copy_rules.sanitize
+- No forbidden dash survives. Every value passes through copy_rules.sanitize
   and the whole body is checked again.
 - No internal vocabulary leaks. The report's three findings were gated at
   publish time; a follow-up finding is checked here, and one that names a
   score or a segment is left out with a warning rather than sent.
-- The link stays under a length every mail client hands off intact. Finding
-  lines are dropped last to first, then context, then the body is cut at a
-  word boundary. The page also offers the text to copy, for a client that
-  truncates anyway.
+- A mailto: link is still offered, for an operator who prefers their own mail
+  client; it is trimmed to a length every client hands off intact.
 """
 
 from __future__ import annotations
@@ -147,21 +146,49 @@ def mailto_url(draft: Draft) -> str:
 
 def compose(*, ordinal: int, prospect: Mapping[str, Any], report_url: str,
             findings_doc: Mapping[str, Any] | None,
-            signature: str = DEFAULT_SIGNATURE) -> Draft:
-    """The draft for the next email to this prospect, addressed if we can."""
-    doc = findings_doc or {}
-    chosen = report_findings(doc) if doc else []
-    later = followup_findings(doc) if doc else []
-    followup = later[ordinal - 2] if ordinal >= 2 and len(later) >= ordinal - 1 else None
-    draft = touch_draft(
-        ordinal=ordinal,
-        business_name=str(prospect.get("business_name") or ""),
-        city=str(prospect.get("city") or ""),
-        report_url=report_url,
-        report_findings=chosen,
-        followup=followup,
-        signature=signature,
-    )
+            signature: str = DEFAULT_SIGNATURE, sender_name: str = "",
+            templates: Mapping[str, Any] | None = None) -> Draft:
+    """The draft for the next email to this prospect, addressed if we can.
+
+    Rendered from the stored template for this email (the default when none
+    is saved) with the prospect's values. A held-back finding that names
+    internal vocabulary is blanked with a warning; the operator reads the
+    result before it goes anywhere."""
+    from app import outreach_templates as tpl
+
+    values = tpl.values_for(ordinal=ordinal, prospect=prospect, report_url=report_url,
+                            findings_doc=findings_doc, sender_name=sender_name,
+                            signature=signature)
+    warnings: list[str] = []
+    for key, label in (("followup", "what we saw"), ("followup_means", "what it means")):
+        leaked = forbidden_terms_in(values[key])
+        if leaked:
+            warnings.append(f"Follow-up finding {ordinal - 1} names internal vocabulary "
+                            f"({', '.join(leaked)}) and was left out of the {label} line. "
+                            "Edit it before it goes out.")
+            values[key] = ""
+    if not values["sender_name"]:
+        warnings.append("Sender name is not set (OUTREACH_SENDER_NAME). Add your name above "
+                        "the signature before it goes out.")
+    template = tpl.template_for(ordinal, templates)
+    subject, unknown_s = tpl.render(template["subject"], values)
+    body, unknown_b = tpl.render(template["body"], values)
+    for name in unknown_s + unknown_b:
+        warnings.append(f"{{{{{name}}}}} is not a variable and was left as written.")
+    subject = _cut(" ".join(subject.split()), SUBJECT_CAP)
+    body, _ = sanitize(body.replace("\r\n", "\n"))
+    body = "\r\n".join(line.rstrip() for line in body.split("\n"))
     to = prospect.get("owner_email") or None
-    return Draft(to=str(to) if to else None, subject=draft.subject,
-                 body=draft.body, warnings=draft.warnings)
+    return Draft(to=str(to) if to else None, subject=subject, body=body,
+                 warnings=tuple(warnings))
+
+
+def fit_mailto(draft: Draft) -> str:
+    """The mailto: link for a draft, its body cut at a word boundary when the
+    link would exceed what mail clients hand off intact."""
+    if len(mailto_url(draft)) <= MAX_MAILTO:
+        return mailto_url(draft)
+    body = draft.body
+    while body and len(mailto_url(Draft(draft.to, draft.subject, body))) > MAX_MAILTO:
+        body = _cut(body[: max(0, len(body) - 200)], len(body))
+    return mailto_url(Draft(draft.to, draft.subject, body))

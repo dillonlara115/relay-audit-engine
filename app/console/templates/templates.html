@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% from "_components.html" import page_header %}
+{% from "_scripts.html" import insert_variables %}
+{% block body %}
+{{ page_header("Email templates",
+               "The four emails, in the order they go. Each prospect's page fills these in and shows you the result to read and edit before you press Send.") }}
+
+<div class="card">
+  <h3>Variables</h3>
+  <p class="muted">Type one as written, or pick it from the Insert menu beside each box. Anything not on this list is left as braces and flagged, so a typo cannot go out.</p>
+  <dl class="vars">
+    {% for name, what in variables %}<dt><code>{{ "{{" }}{{ name }}{{ "}}" }}</code></dt><dd>{{ what }}</dd>{% endfor %}
+  </dl>
+</div>
+
+<form method="post" action="/console/templates" id="templates-form">
+  {{ csrf_field(csrf) }}
+  {% for r in rows %}
+  <div class="card tpl">
+    <h3>Email {{ r.n }} <span class="muted">{{ r.when }}</span></h3>
+    <div class="row">
+      <label for="subject-{{ r.n }}">Subject</label>
+      <select class="insert-var" data-target="subject-{{ r.n }}" aria-label="Insert a variable into the subject">
+        <option value="">Insert variable</option>
+        {% for name, what in variables %}<option value="{{ name }}">{{ name }}</option>{% endfor %}
+      </select>
+    </div>
+    <input id="subject-{{ r.n }}" name="subject_{{ r.n }}" type="text" value="{{ r.subject }}" maxlength="120" required>
+    <div class="row">
+      <label for="body-{{ r.n }}">Body</label>
+      <select class="insert-var" data-target="body-{{ r.n }}" aria-label="Insert a variable into the body">
+        <option value="">Insert variable</option>
+        {% for name, what in variables %}<option value="{{ name }}">{{ name }}</option>{% endfor %}
+      </select>
+    </div>
+    <textarea id="body-{{ r.n }}" name="body_{{ r.n }}" rows="14" required>{{ r.body }}</textarea>
+  </div>
+  {% endfor %}
+  <button type="submit">Save templates</button>
+  <p class="hint">Saving changes the next email drafted for every prospect. Emails already sent are not affected. {% if not saved %}These are the defaults; nothing has been saved yet.{% endif %}</p>
+</form>
+{{ insert_variables() }}
+{% endblock %}

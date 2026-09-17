@@ -210,3 +210,27 @@
 })();
 </script>
 {%- endmacro %}
+
+{#- An Insert menu beside a subject or body box: choosing a name drops
+    {{name}} at the cursor and resets the menu. Typing the braces by hand
+    works just as well; this only saves remembering the spelling. -#}
+{% macro insert_variables() -%}
+<script>
+(function () {
+  document.querySelectorAll('select.insert-var').forEach(function (sel) {
+    sel.addEventListener('change', function () {
+      var name = sel.value;
+      var box = document.getElementById(sel.dataset.target);
+      sel.value = '';
+      if (!name || !box) return;
+      var token = '{{' + name + '}}';
+      var start = box.selectionStart, end = box.selectionEnd;
+      if (typeof start !== 'number') { box.value += token; return; }
+      box.value = box.value.slice(0, start) + token + box.value.slice(end);
+      box.selectionStart = box.selectionEnd = start + token.length;
+      box.focus();
+    });
+  });
+})();
+</script>
+{%- endmacro %}

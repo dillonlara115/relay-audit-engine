@@ -606,6 +606,21 @@ def add_manual_contact(place_id: str, email: str, *, note: str = "") -> str:
 # of every touch ever recorded. Backed by: status ASC, next_due_at ASC.
 
 
+SETTINGS = "settings"
+EMAIL_TEMPLATES_DOC = "email_templates"
+
+
+def get_email_templates() -> dict[str, Any] | None:
+    """The operator's edited templates, keyed "1".."4", or None when never saved."""
+    snap = get_client().collection(SETTINGS).document(EMAIL_TEMPLATES_DOC).get()
+    return snap.to_dict() if snap.exists else None
+
+
+def save_email_templates(templates: Mapping[str, Any]) -> None:
+    get_client().collection(SETTINGS).document(EMAIL_TEMPLATES_DOC).set(
+        {**_plain(dict(templates)), "updated_at": utcnow()})
+
+
 def get_sequence(prospect_id: str) -> dict[str, Any] | None:
     snap = get_client().collection(OUTREACH).document(prospect_id).get()
     return snap.to_dict() if snap.exists else None
