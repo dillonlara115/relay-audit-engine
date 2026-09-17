@@ -39,6 +39,7 @@
 
 <div class="toolbar">
   <div class="search">{{ icon("search") }}<input id="f-q" type="search" placeholder="Search prospect or city" aria-label="Search prospect or city"></div>
+  {% if tab != "excluded" %}
   <details class="popover">
     <summary>{{ icon("filter") }} Filter</summary>
     <div class="inner">
@@ -55,12 +56,41 @@
       site still showing an old copyright year. Click any column heading to sort.</p>
     </div>
   </details>
+  {% endif %}
+  <a class="btn ghost" id="export-link" href="{{ export_href }}">{{ icon("download") }} Export CSV</a>
   <span class="muted" id="f-count"></span>
 </div>
 
+<div class="bulkbar" id="bulkbar">
+  <span class="muted" id="bulk-count">0 selected</span>
+  <a class="btn ghost" id="bulk-export" href="{{ export_href }}">{{ icon("download") }} Export selected</a>
+</div>
+
+{% if tab == "excluded" %}
+<div class="table-wrap"><table id="call-list"><thead><tr>
+<th class="pick"><input type="checkbox" id="pick-all" aria-label="Select all"></th>
+<th data-sort="business">Prospect</th><th>Phone</th><th>Website</th>
+<th>Gate</th><th>Reasons</th><th></th></tr></thead>
+<tbody>
+{% for e in excluded %}
+<tr {{ e.attrs }} data-sort_business="{{ e.business_name|lower }}">
+<td class="pick"><input type="checkbox" class="pick-row" name="pick" value="{{ e.prospect_id }}"></td>
+<td>{{ e.business_name }}<br><span class="muted">{{ e.city }}</span></td>
+<td class="tel">{% if e.phone %}<a href="tel:{{ e.phone }}">{{ e.phone }}</a>{% endif %}</td>
+<td>{% if e.website %}<a href="{{ e.website }}" target="_blank" rel="noopener noreferrer">{{ e.domain or e.website }}</a>{% endif %}</td>
+<td>{{ pill(e.gate[0], e.gate[1]) }}</td>
+<td{% if e.detail %} title="{{ e.detail }}"{% endif %}>{{ e.reasons }}</td>
+<td class="rowact">{% if e.maps_uri %}<a href="{{ e.maps_uri }}" target="_blank" rel="noopener noreferrer" title="Open Google profile" aria-label="Open Google profile">{{ icon("external") }}</a>{% endif %}</td>
+</tr>
+{% else %}
+{{ empty_row(7, "Nothing was excluded from this sweep." if excluded_known else "This sweep has no gate record.") }}
+{% endfor %}
+</tbody></table></div>
+{% else %}
 {{ score_legend() }}
 
 <div class="table-wrap"><table id="call-list"><thead><tr>
+<th class="pick"><input type="checkbox" id="pick-all" aria-label="Select all"></th>
 <th data-sort="rank">#</th><th data-sort="business">Prospect</th>
 <th>Segment</th>{{ score_headers() }}
 <th data-sort="total">Total<span class="sub">out of 100</span></th><th>Phone</th>
@@ -70,6 +100,7 @@
 <tbody>
 {% for r in rows %}
 <tr {{ r.attrs }}>
+<td class="pick"><input type="checkbox" class="pick-row" name="pick" value="{{ r.audit_id }}"></td>
 <td class="num">{{ r.rank }}</td>
 <td><a href="/console/audits/{{ r.audit_id }}">{{ r.business_name }}</a><br><span class="muted">{{ r.city }}</span></td>
 <td>{{ r.chip }}</td>
@@ -88,8 +119,9 @@
 </td>
 </tr>
 {% else %}
-{{ empty_row(14, 'No audits finished yet. This finishes on its own; check back in a few minutes or watch <a href="/console/jobs">Jobs</a>.'|safe) }}
+{{ empty_row(15, 'No audits finished yet. This finishes on its own; check back in a few minutes or watch <a href="/console/jobs">Jobs</a>.'|safe) }}
 {% endfor %}
 </tbody></table></div>
+{% endif %}
 {{ calllist_script() }}
 {% endblock %}

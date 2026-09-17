@@ -2208,3 +2208,153 @@ def test_focus_visible_styles_exist():
 def test_the_login_stylesheet_carries_no_comments():
     assert "/*" not in views.render_login()
     assert "/*" in views.theme_css(), "the sheet itself is commented; only the login strips them"
+
+
+# ── The Excluded tab and the CSV export ───────────────────────────────────────
+
+
+def _gated(name, result, reasons=(), **kw):
+    base = {"place_id": f"p-{name}", "business_name": name, "city": "COS",
+            "gbp_phone": "(719) 555-0100", "website_url": f"https://{name.lower()}.com/",
+            "domain": f"{name.lower()}.com", "gate_result": result,
+            "gate_reasons": [{"code": c, "label": l, "verdict": v, "severity": "blocking",
+                              "detail": d} for c, l, v, d in reasons],
+            "maps_uri": "https://maps.google.com/?cid=1"}
+    base.update(kw)
+    return base
+
+
+def test_the_excluded_tab_lists_gated_out_prospects_with_their_reasons():
+    rows = [_gated("Alpha", "fail", [("reviews", "25+ Google reviews", "fail", "18 reviews"),
+                                     ("owner", "Reachable owner", "advisory", "")]),
+            _gated("Beta", "review", [("owner", "Reachable owner", "unknown", "No site copy")])]
+    page = views.render_batch("b1", [], {}, csrf="t", tab="excluded", excluded=rows,
+                              counts={"all": 0, "excluded": 2})
+    assert ">Excluded<" in page and ">Needs review<" in page
+    assert "25+ Google reviews" in page
+    assert 'title="25+ Google reviews: 18 reviews"' in page
+    assert "Open Google profile" in page
+    assert 'data-sort="found"' not in page, "no score columns on the excluded table"
+    assert 'href="?tab=excluded">Excluded <b>2</b>' in page
+
+
+def test_the_excluded_tab_distinguishes_empty_from_unknown():
+    empty = views.render_batch("b1", [], {}, csrf="t", tab="excluded", excluded=[],
+                               counts={"all": 0, "excluded": 0}, excluded_known=True)
+    assert "Nothing was excluded from this sweep." in empty
+    unknown = views.render_batch("b1", [], {}, csrf="t", tab="excluded", excluded=[],
+                                 counts={"all": 0}, excluded_known=False)
+    assert "This sweep has no gate record." in unknown
+
+
+def test_the_excluded_tab_hides_the_check_filter():
+    page = views.render_batch("b1", [], {}, csrf="t", tab="excluded", excluded=[],
+                              counts={"all": 0, "excluded": 0})
+    assert 'id="f-check"' not in page
+    assert 'id="f-q"' in page and 'id="export-link"' in page
+
+
+def test_the_export_link_and_bulk_bar_are_on_the_call_list():
+    page = _list([_row()])
+    assert 'id="export-link" href="/console/batches/b1/export.csv?tab=all"' in page
+    assert 'id="bulk-export"' in page and 'class="pick-row"' in page
+    assert 'id="pick-all"' in page
+
+
+def test_excluded_scoping_and_order(monkeypatch):
+    import app.console.routes as routes
+
+    monkeypatch.setattr(routes.store, "get_batch", lambda b: {"market_id": "m1"})
+    calls = []
+
+    def prospects(market_id, *, gate_result=None, suppressed=False):
+        calls.append(gate_result)
+        if gate_result == "fail":
+            return iter([_gated("Zed", "fail", latest_batch_id="b1"),
+                         _gated("Old", "fail", latest_batch_id="b0")])
+        return iter([_gated("Beta", "review")])
+
+    monkeypatch.setattr(routes.store, "prospects_for_market", prospects)
+    rows = routes._excluded_for_batch("b1")
+    assert [r["business_name"] for r in rows] == ["Beta", "Zed"], "review first, other sweep dropped"
+    assert sorted(calls) == ["fail", "review"]
+
+
+def test_a_sweep_without_a_market_has_no_gate_record(monkeypatch):
+    import app.console.routes as routes
+
+    monkeypatch.setattr(routes.store, "get_batch", lambda b: None)
+    assert routes._excluded_for_batch("b1") is None
+
+
+def _csv_setup(monkeypatch, rows, excluded=None):
+    import app.console.routes as routes
+
+    monkeypatch.setattr(routes, "_assemble_batch", lambda b: (rows, {}, []))
+    monkeypatch.setattr(routes, "_excluded_for_batch", lambda b: excluded)
+    monkeypatch.setattr(routes.store, "batch_overview",
+                        lambda days=14: [{"batch_id": "b1", "market": "Colorado Springs"}])
+
+
+def test_the_export_is_a_csv_of_what_the_page_shows(client, monkeypatch):
+    _csv_setup(monkeypatch, [_row(1), _row(2, segment="Dialed", report_slug="abcdefghijklmnop")])
+    sign_in(client)
+
+    response = client.get("/console/batches/b1/export.csv?tab=dialed")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert 'filename="call-list-colorado-springs-' in response.headers["content-disposition"]
+    text = response.text.lstrip("﻿")
+    lines = [l for l in text.splitlines() if l]
+    assert lines[0].startswith("rank,prospect,city,segment,found,")
+    assert len(lines) == 2
+    assert "Roofer 2" in lines[1] and "Roofer 1" not in text
+    assert "/abcdefghijklmnop" in lines[1] and "Published" in lines[1]
+    assert "Not started" not in lines[1] and "Due: first email" in lines[1]
+
+
+def test_the_export_honours_check_filters_and_selected_ids(client, monkeypatch):
+    _csv_setup(monkeypatch, [_row(1), _row(2, checks={"C16": "pass"}), _row(3)])
+    sign_in(client)
+
+    by_check = client.get("/console/batches/b1/export.csv?check=C16&status=fail").text
+    assert "Roofer 1" in by_check and "Roofer 3" in by_check and "Roofer 2" not in by_check
+
+    by_ids = client.get("/console/batches/b1/export.csv?ids=a3").text
+    assert "Roofer 3" in by_ids and "Roofer 1" not in by_ids
+
+
+def test_the_excluded_export_has_its_own_columns(client, monkeypatch):
+    _csv_setup(monkeypatch, [], excluded=[_gated("Alpha", "fail",
+                                                 [("reviews", "25+ Google reviews", "fail", "")])])
+    sign_in(client)
+
+    text = client.get("/console/batches/b1/export.csv?tab=excluded").text.lstrip("﻿")
+    assert text.splitlines()[0] == "prospect,city,phone,website,gate,reasons,google_profile"
+    assert "Alpha,COS" in text and "Excluded,25+ Google reviews" in text
+
+
+def test_the_export_is_gated(client):
+    assert client.get("/console/batches/b1/export.csv").status_code == 401
+
+
+def test_csv_rows_use_the_screen_vocabulary_and_name_no_mechanism():
+    from app.console import calllist
+
+    row = _row(contacts=[{"email": "info@x.com", "status": "risky"}], partial=True)
+    record = calllist.csv_rows([row], report_base="https://r.example", console_base="https://c")[0]
+    assert record["contact_status"] == "Check first"
+    assert record["tags"] == "Partial"
+    assert record["audit_url"] == "https://c/console/audits/a1"
+    blob = " ".join(str(v) for v in record.values()).lower()
+    for word in ("mx", "dns", "smtp", "role address"):
+        assert word not in blob, word
+
+
+def test_csv_filename_slugs_the_market_and_names_the_tab():
+    from app.console import calllist
+
+    assert calllist.csv_filename("Colorado Springs, CO", "b1", "leaky-bucket", "20260917") \
+        == "call-list-colorado-springs-co-20260917-leaky-bucket.csv"
+    assert calllist.csv_filename(None, "b1", "bogus", "20260917") == "call-list-b1-20260917-all.csv"

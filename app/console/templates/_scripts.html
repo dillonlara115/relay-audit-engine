@@ -71,9 +71,9 @@
   var countEl = document.getElementById('f-count');
 
   function apply() {
-    var needle = (q.value || '').trim().toLowerCase();
-    var code = checkSel.value;
-    var status = statusSel.value;
+    var needle = (q ? q.value || '' : '').trim().toLowerCase();
+    var code = checkSel ? checkSel.value : '';
+    var status = statusSel ? statusSel.value : '';
     var shown = 0;
     rows.forEach(function (row) {
       var visible = true;
@@ -91,9 +91,48 @@
       if (visible) shown++;
     });
     if (countEl) countEl.textContent = shown + ' of ' + rows.length + ' shown';
+    syncExport();
   }
 
+  // The export link carries the same search and filter the page shows, so
+  // what downloads is what is on screen. Selected rows narrow it further.
+  var exportLink = document.getElementById('export-link');
+  var bulk = document.getElementById('bulkbar');
+  var bulkCount = document.getElementById('bulk-count');
+  var bulkExport = document.getElementById('bulk-export');
+  function picked() {
+    return Array.prototype.slice.call(table.querySelectorAll('input.pick-row:checked'))
+      .map(function (c) { return c.value; });
+  }
+  function withFilters(href) {
+    var base = href.split('&q=')[0].split('&check=')[0].split('&status=')[0].split('&ids=')[0];
+    var params = [];
+    if (q && q.value.trim()) params.push('q=' + encodeURIComponent(q.value.trim()));
+    if (checkSel && checkSel.value) params.push('check=' + encodeURIComponent(checkSel.value));
+    if (statusSel && statusSel.value) params.push('status=' + encodeURIComponent(statusSel.value));
+    return params.length ? base + '&' + params.join('&') : base;
+  }
+  function syncExport() {
+    if (exportLink) exportLink.href = withFilters(exportLink.href);
+    var ids = picked();
+    if (bulk) bulk.classList.toggle('show', ids.length > 0);
+    if (bulkCount) bulkCount.textContent = ids.length + ' selected';
+    if (bulkExport && exportLink) bulkExport.href = withFilters(exportLink.href) + '&ids=' + ids.join(',');
+  }
+  table.addEventListener('change', function (e) {
+    if (e.target && e.target.classList.contains('pick-row')) syncExport();
+  });
+  var pickAll = document.getElementById('pick-all');
+  if (pickAll) pickAll.addEventListener('change', function () {
+    rows.forEach(function (row) {
+      var box = row.querySelector('input.pick-row');
+      if (box && row.style.display !== 'none') box.checked = pickAll.checked;
+    });
+    syncExport();
+  });
+
   [q, checkSel, statusSel].forEach(function (el) {
+    if (!el) return;
     el.addEventListener('input', apply);
     el.addEventListener('change', apply);
   });

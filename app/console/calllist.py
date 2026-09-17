@@ -103,3 +103,107 @@ def visible_tabs(counts: Mapping[str, int]) -> Sequence[tuple[str, str, int]]:
     """Tabs in order with their counts; Excluded only when it has been counted."""
     return [(slug, label, counts.get(slug, 0)) for slug, label in TAB_ORDER
             if slug != "excluded" or "excluded" in counts]
+
+
+# ── The Excluded tab ──────────────────────────────────────────────────────────
+
+GATE_LABEL = {"fail": ("bad", "Excluded"), "review": ("warn", "Needs review")}
+
+
+def excluded_rows_vm(prospects: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Gated-out prospects for the Excluded table: who, how to reach them, why."""
+    out = []
+    for p in prospects:
+        reasons = [r for r in (p.get("gate_reasons") or []) if isinstance(r, Mapping)]
+        failed = [str(r.get("label") or r.get("code") or "") for r in reasons
+                  if r.get("verdict") == "fail"]
+        advisory = [str(r.get("label") or r.get("code") or "") for r in reasons
+                    if r.get("verdict") not in ("fail", "pass")]
+        detail = "; ".join(f"{r.get('label') or r.get('code')}: {r.get('detail')}"
+                           for r in reasons if r.get("detail"))
+        kind, label = GATE_LABEL.get(str(p.get("gate_result") or ""), ("dim", "Unknown"))
+        out.append({
+            "prospect_id": p.get("place_id") or "",
+            "business_name": p.get("business_name") or "",
+            "city": p.get("city") or "",
+            "phone": p.get("gbp_phone") or p.get("site_phone") or "",
+            "website": p.get("website_url") or "",
+            "domain": p.get("domain") or "",
+            "gate": (kind, label),
+            "reasons": "; ".join(failed or advisory) or "No reason recorded",
+            "detail": detail,
+            "maps_uri": p.get("maps_uri") or "",
+            "needle": f"{p.get('business_name') or ''} {p.get('city') or ''}".lower(),
+        })
+    return out
+
+
+def sort_excluded(prospects: Iterable[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    """Needs review first, since those are the ones a person can act on."""
+    return sorted(prospects, key=lambda p: (p.get("gate_result") != "review",
+                                            (p.get("business_name") or "").lower()))
+
+
+# ── CSV export ────────────────────────────────────────────────────────────────
+
+CSV_COLUMNS = ("rank", "prospect", "city", "segment", "found", "chosen", "booked", "total",
+               "phone", "contact_email", "contact_status", "outreach", "emails_sent",
+               "next_due", "findings", "report_url", "tags", "audit_url")
+CSV_EXCLUDED_COLUMNS = ("prospect", "city", "phone", "website", "gate", "reasons",
+                        "google_profile")
+
+_CONTACT_WORDS = {"valid": "Good", "risky": "Check first", "unknown": "Unchecked"}
+
+
+def _first_contact(row: Mapping[str, Any]) -> tuple[str, str]:
+    for c in row.get("contacts") or []:
+        if c.get("status") in _CONTACT_WORDS:
+            return str(c.get("email") or ""), _CONTACT_WORDS[str(c.get("status"))]
+    return "", ""
+
+
+def csv_rows(rows: Iterable[Mapping[str, Any]], *, report_base: str,
+             console_base: str) -> list[dict[str, Any]]:
+    """The call list as it reads on screen, one dict per row in CSV_COLUMNS."""
+    from app.console.views import outreach_state
+
+    out = []
+    for r in rows:
+        scores = r.get("scores") or {}
+        email, contact_status = _first_contact(r)
+        seq = r.get("sequence") or {}
+        due = seq.get("next_due_at")
+        segment = r.get("segment") or "incomplete"
+        out.append({
+            "rank": r.get("rank", ""),
+            "prospect": r.get("business_name") or "",
+            "city": r.get("city") or "",
+            "segment": "Incomplete" if segment == "incomplete" else segment,
+            "found": scores.get("found", ""), "chosen": scores.get("chosen", ""),
+            "booked": scores.get("booked", ""), "total": scores.get("total", ""),
+            "phone": r.get("phone") or "",
+            "contact_email": email, "contact_status": contact_status,
+            "outreach": outreach_state(r.get("sequence"), can_start=bool(r.get("report_slug")))[1],
+            "emails_sent": seq.get("touch_count", 0) if seq else 0,
+            "next_due": due.strftime("%Y-%m-%d") if hasattr(due, "strftime") else "",
+            "findings": findings_state(r)[1],
+            "report_url": f"{report_base}/{r['report_slug']}" if r.get("report_slug") else "",
+            "tags": "; ".join(row_tags(r)),
+            "audit_url": f"{console_base}/console/audits/{r.get('audit_id') or ''}",
+        })
+    return out
+
+
+def csv_excluded_rows(prospects: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    return [{
+        "prospect": v["business_name"], "city": v["city"], "phone": v["phone"],
+        "website": v["website"], "gate": v["gate"][1], "reasons": v["reasons"],
+        "google_profile": v["maps_uri"],
+    } for v in excluded_rows_vm(prospects)]
+
+
+def csv_filename(market: str | None, batch_id: str, tab: str, today: str) -> str:
+    import re as _re
+
+    base = _re.sub(r"[^a-z0-9]+", "-", (market or "").lower()).strip("-") or batch_id
+    return f"call-list-{base}-{today}-{normalize_tab(tab)}.csv"

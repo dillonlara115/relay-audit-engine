@@ -297,6 +297,28 @@ def _assemble_batch(
     return rows, segments, check_defs
 
 
+def _excluded_for_batch(batch_id: str) -> list[dict[str, Any]] | None:
+    """Prospects the gate turned away for this sweep, review first.
+
+    None when the sweep has no batch document or market, which is what a
+    CLI-built batch looks like: the tab then says there is no gate record
+    rather than claiming nothing was excluded. Scoped by latest_batch_id, so
+    a market swept twice shows each sweep its own.
+    """
+    from app.console import calllist
+
+    batch = store.get_batch(batch_id) or {}
+    market_id = batch.get("market_id")
+    if not market_id:
+        return None
+    rows: list[dict[str, Any]] = []
+    for result in ("review", "fail"):
+        for prospect in store.prospects_for_market(market_id, gate_result=result):
+            if prospect.get("latest_batch_id") in (None, batch_id):
+                rows.append(prospect)
+    return calllist.sort_excluded(rows)
+
+
 @router.get("/batches")
 async def batches_screen(request: Request, days: int = 14) -> Response:
     """Recent scans. The window is adjustable because a call list does not stop
@@ -309,13 +331,79 @@ async def batches_screen(request: Request, days: int = 14) -> Response:
 
 @router.get("/batches/{batch_id}")
 async def batch_screen(batch_id: str, request: Request, tab: str = "all") -> Response:
+    from app.console import calllist
+
     rows, segments, check_defs = await asyncio.to_thread(_assemble_batch, batch_id)
     overview = await asyncio.to_thread(store.batch_overview)
     progress = next((b for b in overview if b["batch_id"] == batch_id), None)
+    # Two small indexed reads so the tab can carry a count. Soft: a failure
+    # here costs the tab, not the page.
+    excluded = await asyncio.to_thread(_soft, _excluded_for_batch, None, batch_id)
+    counts = calllist.tab_counts(segments, excluded=len(excluded) if excluded is not None else None)
     return _page(views.render_batch(batch_id, rows, segments, check_defs,
                                     csrf=csrf_token(request), progress=progress,
-                                    notice=_notice(request), tab=tab,
+                                    notice=_notice(request), tab=tab, counts=counts,
+                                    excluded=excluded or (), excluded_known=excluded is not None,
                                     sweep_label=views.scan_label(progress) if progress else None))
+
+
+@router.get("/batches/{batch_id}/export.csv")
+async def export_batch(batch_id: str, request: Request, tab: str = "all", q: str = "",
+                       check: str = "", status: str = "", ids: str = "") -> Response:
+    """The call list as a spreadsheet, narrowed the way the page is.
+
+    Same filter function as the page, so what is on screen is what downloads.
+    A UTF-8 byte order mark up front so Excel reads accents; streamed row by
+    row; the vocabulary is the screen's, and contact_status names no mechanism.
+    """
+    import csv
+    import io
+    from datetime import datetime, timezone
+
+    from fastapi.responses import StreamingResponse
+
+    from app.console import calllist
+
+    tab = calllist.normalize_tab(tab)
+    wanted = {i for i in ids.split(",") if i.strip()}
+    overview = await asyncio.to_thread(store.batch_overview)
+    progress = next((b for b in overview if b["batch_id"] == batch_id), None)
+
+    if tab == "excluded":
+        prospects = await asyncio.to_thread(_soft, _excluded_for_batch, None, batch_id) or []
+        if q:
+            needle = q.strip().lower()
+            prospects = [p for p in prospects
+                         if needle in f"{p.get('business_name') or ''} {p.get('city') or ''}".lower()]
+        columns = calllist.CSV_EXCLUDED_COLUMNS
+        records = calllist.csv_excluded_rows(prospects)
+    else:
+        rows, _segments, _defs = await asyncio.to_thread(_assemble_batch, batch_id)
+        rows = calllist.filter_rows(rows, tab=tab, q=q, check=check, status=status)
+        if wanted:
+            rows = [r for r in rows if r.get("audit_id") in wanted]
+        base = _report_url(request, "x")
+        report_base = base[: -len("/x")] if base else ""
+        scheme = request.headers.get("x-forwarded-proto") or request.url.scheme
+        console_base = f"{scheme}://{_host(request) or request.url.netloc}"
+        columns = calllist.CSV_COLUMNS
+        records = calllist.csv_rows(rows, report_base=report_base, console_base=console_base)
+
+    def stream():
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        yield "\ufeff"
+        writer.writerow(columns)
+        yield buf.getvalue(); buf.seek(0); buf.truncate(0)
+        for record in records:
+            writer.writerow([record.get(c, "") for c in columns])
+            yield buf.getvalue(); buf.seek(0); buf.truncate(0)
+
+    name = calllist.csv_filename((progress or {}).get("market"), batch_id, tab,
+                                 datetime.now(timezone.utc).strftime("%Y%m%d"))
+    return StreamingResponse(stream(), media_type="text/csv; charset=utf-8",
+                             headers={**_HTML_HEADERS,
+                                      "Content-Disposition": f'attachment; filename="{name}"'})
 
 
 # ── One audit, and the human decisions ────────────────────────────────────────

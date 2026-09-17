@@ -493,13 +493,17 @@ def render_batch(batch_id: str, rows: Sequence[Mapping[str, Any]],
                  *, csrf: str, progress: Mapping[str, Any] | None = None,
                  notice: tuple[str, str] | None = None, tab: str = "all",
                  counts: Mapping[str, int] | None = None,
-                 sweep_label: str | None = None) -> str:
+                 sweep_label: str | None = None,
+                 excluded: Sequence[Mapping[str, Any]] = (),
+                 excluded_known: bool = True) -> str:
     """The call list: one sweep's prospects in call order, under tabs."""
     from app.console import calllist
 
     tab = calllist.normalize_tab(tab)
     counts = dict(counts) if counts is not None else calllist.tab_counts(segments)
-    shown = calllist.filter_rows(rows, tab=tab)
+    if tab == "excluded" and "excluded" not in counts:
+        counts["excluded"] = len(excluded)
+    shown = calllist.filter_rows(rows, tab=tab) if tab != "excluded" else []
 
     vm = []
     for r in shown:
@@ -543,11 +547,17 @@ def render_batch(batch_id: str, rows: Sequence[Mapping[str, Any]],
         live = {"text": "All audits finished." if done >= total else f"{done} of {total} audits finished.",
                 "bar": Markup(progress_bar(done, total))}
 
+    excluded_vm = calllist.excluded_rows_vm(excluded) if tab == "excluded" else []
+    for e in excluded_vm:
+        e["attrs"] = Markup(f'data-business="{esc(e["needle"])}"')
+
     return _render("calllist.html", title=f"Call list {batch_id}", active="batches", csrf=csrf,
                    batch_id=batch_id, rows=vm, tab=tab,
                    tabs=calllist.visible_tabs(counts), progress=live,
                    check_options=Markup(_check_filter_options(check_defs)),
-                   sweep_label=sweep_label or batch_id, notice=notice)
+                   sweep_label=sweep_label or batch_id, notice=notice,
+                   excluded=excluded_vm, excluded_known=excluded_known,
+                   export_href=f"/console/batches/{esc(batch_id)}/export.csv?tab={tab}")
 
 
 def _sweep_state(b: Mapping[str, Any]) -> tuple[str, str]:

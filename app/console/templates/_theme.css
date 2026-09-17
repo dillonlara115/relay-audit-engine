@@ -306,3 +306,14 @@ details.popover > .inner label { margin-top:8px; }
         line-height:1.5; }
 .chip i { width:8px; height:8px; border-radius:2px; }
 .finding h3 .tag { vertical-align:middle; }
+
+/* ── Selection and export ─────────────────────────────────────────────── */
+.bulkbar { display:none; align-items:center; gap:12px; background:var(--panel);
+           border:1px solid var(--line); border-radius:12px; padding:8px 14px;
+           margin:0 0 12px; box-shadow:var(--shadow-soft); }
+.bulkbar.show { display:flex; }
+.bulkbar .muted { margin-right:auto; }
+td.pick, th.pick { width:28px; padding-right:0; }
+td.pick input, th.pick input { width:16px; height:16px; margin:0; accent-color:var(--orange); }
+a.btn.ghost { background:transparent; color:var(--asphalt); border:1px solid var(--line);
+              padding:8px 14px; font-size:.92rem; display:inline-flex; align-items:center; gap:6px; }
