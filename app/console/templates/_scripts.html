@@ -234,3 +234,27 @@
 })();
 </script>
 {%- endmacro %}
+
+{#- A Copy button that puts the plain-text form of a card on the clipboard,
+    for pasting into a notes app before a call. -#}
+{% macro copy_button() -%}
+<script>
+(function () {
+  document.querySelectorAll('button[data-source]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var src = document.getElementById(btn.dataset.source);
+      if (!src) return;
+      var label = btn.textContent;
+      function done(ok) { btn.textContent = ok ? 'Copied' : 'Could not copy'; setTimeout(function () { btn.textContent = label; }, 1500); }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(src.value).then(function () { done(true); }, function () { done(false); });
+      } else {
+        src.classList.remove('visually-hidden'); src.select();
+        try { done(document.execCommand('copy')); } catch (e) { done(false); }
+        src.classList.add('visually-hidden');
+      }
+    });
+  });
+})();
+</script>
+{%- endmacro %}

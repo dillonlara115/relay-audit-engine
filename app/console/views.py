@@ -972,9 +972,15 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
 
     o_vm = outreach_context(audit=audit, prospect=prospect, findings=findings,
                             sequence=sequence, touches=touches, replies=replies,
-                            report_url=report_url, signature=signature, sender_name=sender_name, templates=templates, mailbox=mailbox)
+                            report_url=report_url, signature=signature,
+                            sender_name=sender_name, templates=templates, mailbox=mailbox)
+    from app import outreach as _outreach
+    from app.console import callnotes
+    notes = callnotes.build(prospect=prospect, audit=audit, checks=checks, definitions=definitions,
+                            findings_doc=findings, touches=touches, replies=replies,
+                            report_url=report_url, intent_labels=_outreach.INTENT_LABELS)
 
     return _render("prospect.html", title=name, active="batches", csrf=csrf,
-                   p=p_vm, f=f_vm, o=o_vm, sections=sections, evidence_html=evidence_html,
+                   p=p_vm, f=f_vm, o=o_vm, notes=notes, sections=sections, evidence_html=evidence_html,
                    history=h_vm if len(h_vm) > 1 else [], history_note=history_note,
                    notice=notice)

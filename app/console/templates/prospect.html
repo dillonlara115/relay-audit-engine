@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "_components.html" import page_header, kpi, pill, table_wrap, empty_row %}
 {% from "_outreach.html" import outreach_card %}
-{% from "_scripts.html" import insert_variables %}
+{% from "_scripts.html" import insert_variables, copy_button %}
 {% block body %}
 {{ page_header(p.name, p.lede, primary_html=p.primary,
                crumbs=[("/console/batches", "Sweeps"), ("/console/batches/" ~ p.batch_id, p.sweep_label), (None, p.name)]) }}
@@ -90,8 +90,40 @@
 </div>
 {% endif %}
 
+<div class="card" id="callnotes">
+  <div class="pagehead">
+    <h2>Call notes</h2>
+    <div class="primary"><button type="button" class="ghost" id="copy-notes" data-source="callnotes-text">Copy notes</button></div>
+  </div>
+  <p class="muted">What to say if you pick up the phone. Built from the findings and the checks on this page, nothing else.</p>
+  <div class="notes">
+    <h4>Where they stand</h4>
+    <p>{{ notes.standing }}</p>
+    <h4>The angle <span class="muted">({{ notes.who.segment }})</span></h4>
+    <ul>{% for a in notes.angle %}<li>{{ a }}</li>{% endfor %}</ul>
+    {% if notes.strengths %}
+    <h4>Open with, what is working</h4>
+    <ul>{% for s in notes.strengths %}<li><strong>{{ s.title }}.</strong> {{ s.note }}</li>{% endfor %}</ul>
+    {% endif %}
+    <h4>Raise <span class="muted">{% if notes.raise_source == "report" %}(the report's three){% else %}(from the checks; no findings drafted yet){% endif %}</span></h4>
+    {% if notes.raise %}
+    <ol>{% for r in notes.raise %}<li><strong>{{ r.saw }}</strong>{% if r.means %} {{ r.means }}{% endif %}</li>{% endfor %}</ol>
+    {% else %}<p class="muted">Nothing on record to raise. Draft the findings first.</p>{% endif %}
+    {% if notes.more %}
+    <h4>If they want more</h4>
+    <ul>{% for m in notes.more %}<li>{{ m }}</li>{% endfor %}</ul>
+    {% endif %}
+    <h4>The ask</h4>
+    <ul>{% for a in notes.ask %}<li>{{ a }}</li>{% endfor %}</ul>
+    <h4>Rules</h4>
+    <ul>{% for r in notes.rules %}<li>{{ r }}</li>{% endfor %}</ul>
+  </div>
+  <textarea id="callnotes-text" class="visually-hidden" readonly aria-hidden="true" tabindex="-1">{{ notes.text }}</textarea>
+</div>
+
 {{ outreach_card(o, csrf, p.prospect_id, p.audit_id) }}
 {{ insert_variables() }}
+{{ copy_button() }}
 
 {% for section in sections %}
 <h2>{{ section.title }}</h2>

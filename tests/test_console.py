@@ -2795,3 +2795,14 @@ def test_the_timeline_says_where_a_send_came_from():
 def test_the_send_notice_reads_as_a_sentence():
     assert views.notice_from("sent", "Email 1 of 4 to dave@x.com.") == ("Email sent.", "Email 1 of 4 to dave@x.com.")
     assert views.notice_from("not_sent", "x")[0] == "Email not sent."
+
+
+def test_the_prospect_page_carries_call_notes_and_a_copy_button():
+    page = _prospect_page(findings=_approved(), audit={"report_slug": "abcdefghijklmnop"},
+                          report_url="https://x/abc")
+    assert "<h2>Call notes</h2>" in page
+    assert 'id="copy-notes" data-source="callnotes-text"' in page
+    assert 'id="callnotes-text" class="visually-hidden"' in page
+    assert "CALL NOTES:" in page and "Offer to send the write-up: https://x/abc" in page
+    assert "Never quote a score, a band or a segment name." in page
+    assert "navigator.clipboard.writeText" in page
