@@ -38,8 +38,9 @@
   {% if p.audited %}<span class="muted" style="margin-left:10px">Audited {{ p.audited }}</span>{% endif %}
 </div>
 
-{% if history %}
 <h2>Score history</h2>
+{% if history_note %}<p class="muted">{{ history_note }}</p>{% endif %}
+{% if history %}
 {% call table_wrap() %}
 <tr><th>Date</th><th>Sweep</th><th>F</th><th>C</th><th>B</th><th>Total</th><th>Segment</th><th></th></tr>
 {% for h in history %}

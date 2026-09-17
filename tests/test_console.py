@@ -2358,3 +2358,94 @@ def test_csv_filename_slugs_the_market_and_names_the_tab():
     assert calllist.csv_filename("Colorado Springs, CO", "b1", "leaky-bucket", "20260917") \
         == "call-list-colorado-springs-co-20260917-leaky-bucket.csv"
     assert calllist.csv_filename(None, "b1", "bogus", "20260917") == "call-list-b1-20260917-all.csv"
+
+
+# ── Score history ─────────────────────────────────────────────────────────────
+
+
+def _hist(i, total, **kw):
+    from datetime import datetime, timezone
+
+    base = {"audit_id": f"a{i}", "batch_id": f"b{i}", "sweep_label": f"Sweep {i}",
+            "finished_at": datetime(2026, 9, i, tzinfo=timezone.utc),
+            "scores": {"found": 10, "chosen": 10, "booked": 10, "total": total},
+            "segment": "Leaky Bucket", "partial": False}
+    base.update(kw)
+    return base
+
+
+def test_score_history_lists_each_audit_and_marks_this_one():
+    page = _prospect_page(audit={"audit_id": "a2"}, history=[_hist(2, 60), _hist(1, 50, partial=True)])
+    assert "<h2>Score history</h2>" in page
+    assert "Sep 02, 2026" in page and "Sep 01, 2026" in page
+    assert "Sweep 2" in page and "Sweep 1" in page
+    assert "this audit" in page
+    assert ">Partial<" in page
+    assert page.count('class="current"') == 1
+
+
+def test_a_single_audit_is_not_a_history():
+    page = _prospect_page(audit={"audit_id": "a1"}, history=[_hist(1, 50)])
+    assert "No earlier audits for this prospect." in page
+    assert "Sweep 1" not in page
+
+
+def test_history_before_the_index_exists_says_so_plainly():
+    page = _prospect_page(history=None)
+    assert "Score history is not available yet." in page
+
+
+def test_audits_for_prospect_queries_newest_first_by_finished_at(monkeypatch):
+    from app.store import firestore as store
+
+    seen = {}
+
+    class Q:
+        def where(self, *, filter):
+            seen["where"] = (filter.field_path, filter.op_string, filter.value); return self
+
+        def order_by(self, field, direction=None):
+            seen["order"] = (field, direction); return self
+
+        def limit(self, n):
+            seen["limit"] = n; return self
+
+        def stream(self):
+            class S:
+                id = "a1"
+
+                def to_dict(self):
+                    return {"prospect_id": "p1", "scores": {"total": 50}}
+            return [S()]
+
+    class C:
+        def collection(self, name):
+            seen["collection"] = name; return Q()
+
+    monkeypatch.setattr(store, "get_client", lambda: C())
+    rows = store.audits_for_prospect("p1", limit=5)
+
+    assert seen["collection"] == "audits"
+    assert seen["where"] == ("prospect_id", "==", "p1")
+    assert seen["order"][0] == "finished_at"
+    assert seen["limit"] == 5
+    assert rows == [{"audit_id": "a1", "prospect_id": "p1", "scores": {"total": 50}}]
+
+
+def test_history_for_names_each_sweep_once_and_survives_a_missing_index(monkeypatch):
+    import app.console.routes as routes
+
+    monkeypatch.setattr(routes.store, "audits_for_prospect",
+                        lambda pid, **kw: [_hist(2, 60), _hist(1, 50)])
+    calls = []
+    monkeypatch.setattr(routes.store, "get_batch",
+                        lambda b: calls.append(b) or {"label": "Pueblo"})
+    rows = routes._history_for("p1")
+    assert [r["sweep_label"] for r in rows] and all("Pueblo" in r["sweep_label"] for r in rows)
+    assert sorted(calls) == ["b1", "b2"]
+
+    def boom(pid, **kw):
+        raise RuntimeError("index not ready")
+
+    monkeypatch.setattr(routes.store, "audits_for_prospect", boom)
+    assert routes._history_for("p1") is None

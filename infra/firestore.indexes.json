@@ -4,26 +4,64 @@
       "collectionGroup": "audits",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "batch_id", "order": "ASCENDING" },
-        { "fieldPath": "segment", "order": "ASCENDING" },
-        { "fieldPath": "scores.booked", "order": "ASCENDING" }
+        {
+          "fieldPath": "batch_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "segment",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "scores.booked",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "audits",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "prospect_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "finished_at",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "outreach",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "next_due_at", "order": "ASCENDING" }
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "next_due_at",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "prospects",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "market_id", "order": "ASCENDING" },
-        { "fieldPath": "gate_result", "order": "ASCENDING" },
-        { "fieldPath": "suppressed", "order": "ASCENDING" }
+        {
+          "fieldPath": "market_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "gate_result",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "suppressed",
+          "order": "ASCENDING"
+        }
       ]
     }
   ],

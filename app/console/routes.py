@@ -430,6 +430,25 @@ def _evidence_with_urls(evidence_store: Any, audit_id: str) -> list[dict[str, An
     return rows
 
 
+def _history_for(prospect_id: str) -> list[dict[str, Any]] | None:
+    """Every finished audit of this prospect with its sweep named, or None
+    when the query cannot run yet (the index is still building) so the page
+    can say so instead of drawing an empty card."""
+    rows = _soft(store.audits_for_prospect, None, prospect_id)
+    if rows is None:
+        return None
+    labels: dict[str, str] = {}
+    for row in rows:
+        batch_id = str(row.get("batch_id") or "")
+        if batch_id and batch_id not in labels:
+            batch = _soft(store.get_batch, None, batch_id) or {}
+            labels[batch_id] = views.scan_label({"batch_id": batch_id, "market": batch.get("label"),
+                                                 "started_at": batch.get("created_at")}) \
+                if batch else batch_id
+        row["sweep_label"] = labels.get(batch_id, batch_id)
+    return rows
+
+
 @router.get("/audits/{audit_id}")
 async def audit_screen(audit_id: str, request: Request) -> Response:
 
@@ -451,16 +470,18 @@ async def audit_screen(audit_id: str, request: Request) -> Response:
             _soft(store.get_sequence, None, pid),
             _soft(store.touches_for, [], pid),
             _soft(store.replies_for, [], pid),
+            _history_for(pid),
         )
 
     loaded = await asyncio.to_thread(load)
     if loaded is None:
         return Response(status_code=404)
-    audit, prospect, checks, definitions, findings, evidence, sequence, touches, replies = loaded
+    (audit, prospect, checks, definitions, findings, evidence,
+     sequence, touches, replies, history) = loaded
     return _page(views.render_audit(
         audit=audit, prospect=prospect, checks=checks, definitions=definitions,
         findings=findings, evidence=evidence, csrf=csrf_token(request), notice=_notice(request),
-        sequence=sequence, touches=touches, replies=replies,
+        sequence=sequence, touches=touches, replies=replies, history=history,
         report_url=_report_url(request, audit.get("report_slug")),
         signature=get_config().outreach_signature,
     ))

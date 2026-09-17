@@ -250,6 +250,24 @@ def create_audit(prospect_id: str, batch_id: str) -> str:
     return doc.id
 
 
+def audits_for_prospect(prospect_id: str, *, limit: int = 12) -> list[dict[str, Any]]:
+    """Finished audits for one prospect, newest first: the score history.
+
+    Backed by composite index: prospect_id ASC, finished_at DESC. order_by
+    drops documents without the field, which here means the queued and
+    running audits, and that is wanted. Raises FailedPrecondition until the
+    index exists; the caller shows a plain line rather than a broken card.
+    """
+    query = (
+        get_client()
+        .collection(AUDITS)
+        .where(filter=firestore.FieldFilter("prospect_id", "==", prospect_id))
+        .order_by("finished_at", direction=firestore.Query.DESCENDING)
+        .limit(limit)
+    )
+    return [{"audit_id": snap.id, **(snap.to_dict() or {})} for snap in query.stream()]
+
+
 def audits_for_batch(batch_id: str, segment: str | None = None) -> Iterator[dict[str, Any]]:
     """Every audit in a batch, or one segment of it.
 

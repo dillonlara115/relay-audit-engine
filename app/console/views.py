@@ -748,7 +748,7 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                  sequence: Mapping[str, Any] | None = None,
                  touches: Sequence[Mapping[str, Any]] = (),
                  replies: Sequence[Mapping[str, Any]] = (),
-                 history: Sequence[Mapping[str, Any]] = (),
+                 history: Sequence[Mapping[str, Any]] | None = (),
                  report_url: str | None = None,
                  signature: str = "Relay for Roofers",
                  sweep_label: str | None = None) -> str:
@@ -881,6 +881,12 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
 
     evidence_html = Markup("".join(evidence_item(e) for e in evidence))
 
+    history_note = None
+    if history is None:
+        history_note = "Score history is not available yet."
+        history = ()
+    elif len(history) <= 1:
+        history_note = "No earlier audits for this prospect."
     h_vm = [{
         "date": h["finished_at"].strftime("%b %d, %Y") if hasattr(h.get("finished_at"), "strftime") else "",
         "sweep": h.get("sweep_label") or h.get("batch_id") or "",
@@ -896,4 +902,5 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
 
     return _render("prospect.html", title=name, active="batches", csrf=csrf,
                    p=p_vm, f=f_vm, o=o_vm, sections=sections, evidence_html=evidence_html,
-                   history=h_vm, notice=notice)
+                   history=h_vm if len(h_vm) > 1 else [], history_note=history_note,
+                   notice=notice)
