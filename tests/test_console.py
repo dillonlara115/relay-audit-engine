@@ -2047,7 +2047,9 @@ def test_compose_opens_the_mail_client_with_the_report_and_the_three_findings():
     assert "for dave@apexroofingusa.com" in page
     assert 'action="/console/outreach/p1/send"' in page
     assert 'name="to" type="email" value="dave@apexroofingusa.com"' in page
-    assert "Send email 1 of 4 to dave@apexroofingusa.com? It leaves your mailbox now." in page
+    assert 'data-confirm="Send email 1 of 4 to {to}? It leaves your mailbox now."' in page
+    assert 'onsubmit="return sendConfirm(this)"' in page
+    assert "function sendConfirm(form)" in page and "form.elements.to" in page
     assert ">Send email</button>" in page and "Open in my mail client instead" in page
 
 
@@ -2598,7 +2600,10 @@ def test_the_templates_screen_lists_four_editors_and_the_variables():
     page = views.render_templates(None, csrf="t")
     assert page.count('name="subject_') == 4 and page.count('name="body_') == 4
     assert "{{first_name}}" in page and "{{report_url}}" in page
-    assert 'class="insert-var" data-target="body-1"' in page
+    assert 'class="popover vars-menu" data-fields="subject-1,body-1"' in page
+    assert page.count('data-insert="first_name"') == 4
+    assert "<h5>Their info</h5>" in page and "<h5>The report</h5>" in page and "<h5>Your info</h5>" in page
+    assert 'class="var empty"' not in page, "no prospect, so nothing is empty"
     assert "These are the defaults; nothing has been saved yet." in page
     assert 'href="/console/templates"' in page, "it is in the nav"
 
@@ -2806,3 +2811,33 @@ def test_the_prospect_page_carries_call_notes_and_a_copy_button():
     assert "CALL NOTES:" in page and "Offer to send the write-up: https://x/abc" in page
     assert "Never quote a score, a band or a segment name." in page
     assert "navigator.clipboard.writeText" in page
+
+
+def test_the_confirm_is_filled_from_the_to_field_not_the_record():
+    """The owner changed the address to their own and the confirm still named
+    Michael. The sentence now carries a {to} slot the page fills on submit."""
+    page = _prospect_page(findings=_approved(), audit={"report_slug": "abcdefghijklmnop"},
+                          prospect={"owner_email": "dave@apexroofingusa.com"},
+                          report_url="https://x/abc")
+    assert "{to}" in page and "dave@apexroofingusa.com? It leaves" not in page
+    assert "replace('{to}', to)" in page
+
+
+def test_the_variables_menu_dims_what_this_prospect_lacks():
+    page = _prospect_page(findings=_approved(), audit={"report_slug": "abcdefghijklmnop"},
+                          prospect={"owner_email": "dave@apexroofingusa.com", "business_name": "Apex"},
+                          report_url="https://x/abc")
+    assert 'class="var" data-insert="business"' in page
+    assert 'class="var empty" data-insert="phone"' in page and "no value" in page
+    assert 'class="var empty" data-insert="sender_name"' in page, "OUTREACH_SENDER_NAME unset here"
+
+
+def test_text_like_inputs_are_tap_sized_including_email_and_password():
+    import re as _re
+
+    css = views.theme_css()
+    rule = _re.search(r"input\[type=text\],[^{]*\{[^}]*\}", css).group(0)
+    for kind in ("email", "password", "search"):
+        assert f"input[type={kind}]" in rule, kind
+    assert "min-height:44px" in rule
+    assert "font-size:16px" in rule

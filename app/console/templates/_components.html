@@ -30,3 +30,24 @@
 {% macro notice_banner(notice) -%}
 <div class="banner"><strong>{{ notice[0] }}</strong>{% if notice[1] %} {{ notice[1] }}{% endif %}</div>
 {%- endmacro %}
+
+{#- The Variables menu beside a subject or body box. `fields` names the
+    inputs it can insert into; the script inserts into whichever of them was
+    focused last, the last one listed by default. -#}
+{% macro variables_menu(groups, fields) -%}
+<details class="popover vars-menu" data-fields="{{ fields|join(',') }}">
+  <summary>{{ icon("braces") }} Variables {{ icon("down") }}</summary>
+  <div class="inner">
+    {% for g in groups %}
+    <div class="group">
+      <h5>{{ g.title }}</h5>
+      {% for r in g.rows %}
+      <button type="button" class="var{{ ' empty' if r.empty else '' }}" data-insert="{{ r.name }}" title="{{ r.what }}"{% if r.empty %} disabled aria-disabled="true"{% endif %}>
+        {{ icon(r.icon) }}<span class="v">{{ r.name }}</span><span class="add">{{ "no value" if r.empty else "Add" }}</span>
+      </button>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+</details>
+{%- endmacro %}

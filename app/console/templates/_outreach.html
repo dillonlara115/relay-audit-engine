@@ -2,7 +2,7 @@
     the next email and press Send on it, or mark one sent from elsewhere,
     and see where the sequence stands. The one sentence about what sends
     and when is fixed and appears beside the button on purpose. -#}
-{% from "_components.html" import pill %}
+{% from "_components.html" import pill, variables_menu %}
 
 {% macro outreach_card(o, csrf, prospect_id, audit_id) -%}
 <div class="card" id="outreach">
@@ -19,7 +19,7 @@
       <p class="muted">Publish the report first. The email carries its link.</p>
     {% else %}
       <form method="post" action="/console/outreach/{{ prospect_id }}/send" id="send-form"
-            onsubmit="{{ o.step1.confirm }}">
+            data-confirm="{{ o.step1.confirm }}" onsubmit="return sendConfirm(this)">
         {{ csrf_field(csrf) }}
         <input type="hidden" name="audit_id" value="{{ audit_id }}">
         <input type="hidden" name="ordinal" value="{{ o.step1.ordinal }}">
@@ -30,21 +30,12 @@
           {{ pill("warn", "No address on record") }}
           <p class="muted">Find an address and type it in. It is kept with the record of the send.</p>
         {% endif %}
-        <div class="row">
+        <div class="fieldrow">
           <label for="send-subject">Subject</label>
-          <select class="insert-var" data-target="send-subject" aria-label="Insert a variable into the subject">
-            <option value="">Insert variable</option>
-            {% for name, what in o.variables %}<option value="{{ name }}">{{ name }}</option>{% endfor %}
-          </select>
+          {{ variables_menu(o.step1.menu, ["send-subject", "send-body"]) }}
         </div>
         <input id="send-subject" name="subject" type="text" value="{{ o.step1.subject }}" maxlength="120" required>
-        <div class="row">
-          <label for="send-body">Body</label>
-          <select class="insert-var" data-target="send-body" aria-label="Insert a variable into the body">
-            <option value="">Insert variable</option>
-            {% for name, what in o.variables %}<option value="{{ name }}">{{ name }}</option>{% endfor %}
-          </select>
-        </div>
+        <label for="send-body">Body</label>
         <textarea id="send-body" name="body" rows="16" required>{{ o.step1.body }}</textarea>
         {% for w in o.step1.warnings %}<p>{{ pill("warn", w) }}</p>{% endfor %}
         <p class="muted">Email {{ o.step1.ordinal }} of {{ o.step1.max }}. {{ o.step1.note }} Variables you type are filled in when it sends.</p>

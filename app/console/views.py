@@ -358,7 +358,7 @@ def render_templates(templates: Mapping[str, Any] | None, *, csrf: str,
                               4: "Day 14, one held-back finding, then the sequence closes"}[n]})
     return _render("templates.html", title="Email templates", active="templates", csrf=csrf,
                    notice=notice, rows=rows, variables=list(tpl.VARIABLES.items()),
-                   saved=bool(templates))
+                   menu=variable_menu(), saved=bool(templates))
 
 
 def render_login(*, next_path: str = "/console", error: str | None = None) -> str:
@@ -751,10 +751,13 @@ def outreach_context(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                      "to": owner_email or "", "subject": draft.subject, "body": draft.body,
                      "warnings": list(draft.warnings), "ordinal": next_ordinal,
                      "max": max_touches,
-                     "confirm": _confirm_attr(
-                         f"Send email {next_ordinal} of {max_touches} to "
-                         f"{owner_email or 'the address in the To field'}"
-                         f"{' from ' + mailbox if mailbox else ''}? It leaves your mailbox now.")}
+                     # {to} is filled in by the page from the To field when
+                     # Send is pressed, so editing the address changes the
+                     # sentence in the confirm.
+                     "confirm": (f"Send email {next_ordinal} of {max_touches} to {{to}}"
+                                 f"{' from ' + mailbox if mailbox else ''}? It leaves your mailbox now."),
+                     "menu": variable_menu(tpl_values(next_ordinal, prospect, report_url or "",
+                                                      findings, sender_name, signature))}
 
     step2 = {"show": published and is_open and next_ordinal <= max_touches,
              "confirm": _confirm_attr(
@@ -803,13 +806,43 @@ def outreach_context(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
 
     return {"state": outreach_state(sequence, can_start=published),
             "step1": step1, "step2": step2, "timeline": timeline, "next": nxt,
-            "mailbox": mailbox or "your connected mailbox",
-            "variables": list(_variables().items())}
+            "mailbox": mailbox or "your connected mailbox"}
+
+
+def tpl_values(ordinal: int, prospect: Mapping[str, Any], report_url: str,
+               findings: Mapping[str, Any] | None, sender_name: str, signature: str) -> dict[str, str]:
+    from app import outreach_templates as tpl
+    return tpl.values_for(ordinal=ordinal, prospect=prospect, report_url=report_url,
+                          findings_doc=findings, sender_name=sender_name, signature=signature)
 
 
 def _variables() -> dict[str, str]:
     from app import outreach_templates as tpl
     return tpl.VARIABLES
+
+
+VARIABLE_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
+    ("Their info", [("first_name", "user"), ("business", "building"), ("city", "pin"),
+                    ("domain", "globe"), ("phone", "phone")]),
+    ("The report", [("report_url", "link"), ("findings", "list"), ("finding_1", "hash"),
+                    ("finding_2", "hash"), ("finding_3", "hash"), ("followup", "file"),
+                    ("followup_means", "file")]),
+    ("Your info", [("sender_name", "pen"), ("signature", "mail")]),
+]
+
+
+def variable_menu(values: Mapping[str, str] | None = None) -> list[dict[str, Any]]:
+    """The Variables menu: three groups, each row a name, an icon and what it
+    becomes. With a prospect's values, a row that would render empty is
+    marked so the operator sees it before inserting it."""
+    described = _variables()
+    out = []
+    for title, rows in VARIABLE_GROUPS:
+        out.append({"title": title, "rows": [
+            {"name": name, "icon": ic, "what": described.get(name, ""),
+             "empty": values is not None and not str(values.get(name) or "").strip()}
+            for name, ic in rows if name in described]})
+    return out
 
 
 def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],

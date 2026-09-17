@@ -211,27 +211,43 @@
 </script>
 {%- endmacro %}
 
-{#- An Insert menu beside a subject or body box: choosing a name drops
-    {{name}} at the cursor and resets the menu. Typing the braces by hand
-    works just as well; this only saves remembering the spelling. -#}
+{#- The Variables menu: choosing a row drops {{name}} at the cursor of
+    whichever named field was focused last (the last listed by default) and
+    closes the menu. Typing the braces by hand works just as well. -#}
 {% macro insert_variables() -%}
 <script>
 (function () {
-  document.querySelectorAll('select.insert-var').forEach(function (sel) {
-    sel.addEventListener('change', function () {
-      var name = sel.value;
-      var box = document.getElementById(sel.dataset.target);
-      sel.value = '';
-      if (!name || !box) return;
-      var token = '{{' + name + '}}';
-      var start = box.selectionStart, end = box.selectionEnd;
-      if (typeof start !== 'number') { box.value += token; return; }
-      box.value = box.value.slice(0, start) + token + box.value.slice(end);
-      box.selectionStart = box.selectionEnd = start + token.length;
-      box.focus();
+  document.querySelectorAll('details.vars-menu').forEach(function (menu) {
+    var ids = (menu.dataset.fields || '').split(',').filter(Boolean);
+    var fields = ids.map(function (id) { return document.getElementById(id); }).filter(Boolean);
+    var last = fields[fields.length - 1];
+    fields.forEach(function (f) { f.addEventListener('focus', function () { last = f; }); });
+    menu.querySelectorAll('button.var').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var box = last;
+        menu.removeAttribute('open');
+        if (btn.disabled || !box) return;
+        var token = '{{' + btn.dataset.insert + '}}';
+        var start = box.selectionStart, end = box.selectionEnd;
+        if (typeof start !== 'number') { box.value += token; box.focus(); return; }
+        box.value = box.value.slice(0, start) + token + box.value.slice(end);
+        box.selectionStart = box.selectionEnd = start + token.length;
+        box.focus();
+      });
     });
   });
 })();
+</script>
+{%- endmacro %}
+
+{#- The Send button's confirm, built when it is pressed from what is in the
+    To field, so an edited address is the one the sentence names. -#}
+{% macro send_confirm() -%}
+<script>
+function sendConfirm(form) {
+  var to = (form.elements.to && form.elements.to.value || '').trim() || 'the address in the To field';
+  return window.confirm((form.dataset.confirm || 'Send this email now?').replace('{to}', to));
+}
 </script>
 {%- endmacro %}
 
