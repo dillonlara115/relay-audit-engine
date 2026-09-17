@@ -285,7 +285,7 @@ async def static_file(name: str) -> Response:
     from fastapi.responses import FileResponse
 
     kind = STATIC_FILES.get(name)
-    if not kind:
+    if not kind or not (STATIC_DIR / name).is_file():
         return Response(status_code=404)
     return FileResponse(STATIC_DIR / name, media_type=kind,
                         headers={"Cache-Control": "public, max-age=86400"})

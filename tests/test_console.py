@@ -1136,6 +1136,24 @@ def test_static_serves_the_logo_and_nothing_else(client):
         assert client.get(f"/static/{name}").status_code in (401, 404), name
 
 
+def test_a_listed_static_file_that_is_missing_answers_404_not_500(client, monkeypatch):
+    """The PNG was gitignored once and the deploy shipped without it."""
+    import app.worker as worker
+
+    monkeypatch.setattr(worker, "STATIC_DIR", worker.STATIC_DIR / "nowhere")
+    assert client.get("/static/relay-mark.png").status_code == 404
+
+
+def test_the_logo_is_tracked_so_a_source_deploy_ships_it():
+    import pathlib as _pl
+    import subprocess
+
+    root = _pl.Path(__file__).resolve().parent.parent
+    tracked = subprocess.run(["git", "ls-files", "app/static/relay-mark.png"], cwd=root,
+                             capture_output=True, text=True).stdout.strip()
+    assert tracked == "app/static/relay-mark.png"
+
+
 def test_a_report_answers_without_a_password(client, monkeypatch):
     """A contractor cannot log in, so this one path stays open on purpose."""
     monkeypatch.setattr("app.report.publish.render_by_slug", lambda slug: "<html>report</html>")
