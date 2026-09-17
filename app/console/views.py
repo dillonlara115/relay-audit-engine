@@ -119,11 +119,14 @@ def _render(template: str, **ctx: Any) -> str:
     # Markup so autoescape leaves the result alone; the Python callers still
     # on shell() get plain str, because str + Markup escapes the str and a
     # screen that concatenates its body would lose its own tags.
-    ctx.setdefault("icon", icon)
+    # Registered as environment globals, not just context: a macro imported
+    # from another file does not see the caller's context, and the Outreach
+    # card is one. Idempotent, so every render can afford to call it.
+    _env.globals.setdefault("icon", icon)
     for name in ("csrf_field", "status_pill", "chip", "tiles", "progress_bar",
                  "scan_label", "score_headers", "score_legend", "contact_cell",
                  "outreach_cell"):
-        ctx.setdefault(name, _markup(globals()[name]))
+        _env.globals.setdefault(name, _markup(globals()[name]))
     active = ctx.get("active", "overview")
     ctx["active"] = _ACTIVE_ALIASES.get(active, active)
     return _env.get_template(template).render(**ctx)
@@ -579,151 +582,257 @@ def findings_predate_audit(findings: Mapping[str, Any] | None,
         return False
 
 
+def _confirm_attr(text: str) -> Markup:
+    """An onsubmit attribute whose string survives any name. json.dumps makes
+    the JS literal; esc makes the attribute. The browser undoes the second
+    before the first runs."""
+    return Markup(esc("return confirm(" + json.dumps(text) + ")"))
+
+
+def outreach_state(sequence: Mapping[str, Any] | None, *, can_start: bool) -> tuple[str, str]:
+    """One pill for where a prospect sits in the four-email sequence."""
+    from app import outreach
+
+    if not sequence:
+        return ("tint", "Due: first email") if can_start else ("dim", "Not started")
+    seq = outreach.Sequence.from_dict(sequence)
+    if seq.status == outreach.CLOSED:
+        reason = outreach.INTENT_LABELS.get(seq.last_intent or "") or seq.closed_reason or "finished"
+        return "dim", f"Closed: {reason}"
+    if seq.status == outreach.WAITING:
+        return "warn", f"Waiting: {outreach.park_reason(seq)}"
+    if seq.touch_count == 0:
+        return ("tint", "Due: first email") if can_start else ("dim", "Not started")
+    label = f"{seq.touch_count} of {seq.max_touches} sent"
+    if seq.due():
+        return "warn", f"Due today, {label}"
+    if seq.next_due_at:
+        label += f", next {seq.next_due_at.strftime('%b %d')}"
+    return "tint", label
+
+
+def outreach_context(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
+                     findings: Mapping[str, Any] | None,
+                     sequence: Mapping[str, Any] | None,
+                     touches: Sequence[Mapping[str, Any]],
+                     replies: Sequence[Mapping[str, Any]],
+                     report_url: str | None, signature: str) -> dict[str, Any]:
+    """Everything the Outreach card shows, computed once and testable.
+
+    Compose builds a mailto: link and nothing else; Mark as sent posts to the
+    ledger route that records a send a person already made. Neither transmits
+    a byte, and the card says so in a fixed sentence.
+    """
+    from app import outreach
+    from app.console import compose as composer
+    from app.report.publish import followup_findings
+
+    published = bool(audit.get("report_slug"))
+    seq = outreach.Sequence.from_dict(sequence) if sequence else None
+    pool = list((findings or {}).get("findings") or [])
+    later = followup_findings(findings) if findings else []
+    max_touches = seq.max_touches if seq else (outreach.touches_supported(len(pool)) or 1)
+    sent = seq.touch_count if seq else 0
+    is_open = seq.is_open if seq else True
+    next_ordinal = sent + 1
+    owner_email = prospect.get("owner_email") or None
+    recipient = owner_email or "the owner (no address on record)"
+
+    step1: dict[str, Any] = {"mode": "hidden"}
+    if is_open and next_ordinal <= max_touches:
+        if not published:
+            step1 = {"mode": "unpublished"}
+        else:
+            draft = composer.compose(ordinal=next_ordinal, prospect=prospect,
+                                     report_url=report_url or "", findings_doc=findings,
+                                     signature=signature)
+            if next_ordinal == 1:
+                note = (f"Opens your mail client with the report link and the three "
+                        f"findings for {owner_email}." if owner_email else "")
+            else:
+                fu = later[next_ordinal - 2] if len(later) >= next_ordinal - 1 else {}
+                seen = " ".join(str(fu.get("what_we_saw") or "").split())
+                note = (f"Opens your mail client with follow-up finding {next_ordinal - 1}: "
+                        f"{seen[:80]}{'...' if len(seen) > 80 else ''}")
+            step1 = {"mode": "compose" if owner_email else "no_address",
+                     "href": composer.mailto_url(draft), "note": note,
+                     "subject": draft.subject, "body": draft.body,
+                     "warnings": list(draft.warnings)}
+
+    step2 = {"show": published and is_open and next_ordinal <= max_touches,
+             "confirm": _confirm_attr(
+                 f"Mark email {next_ordinal} of {max_touches} to {recipient} as sent? "
+                 "This only records that you already sent it from your own mailbox. "
+                 "Nothing is sent from here.")}
+
+    events: list[tuple[Any, str, str]] = []
+    for t in touches:
+        when = t.get("sent_at")
+        stamp = when.strftime("%b %d") if hasattr(when, "strftime") else ""
+        events.append((when, "sent", f"Email {t.get('ordinal', '?')} sent {stamp}".strip()))
+    for r in replies:
+        when = r.get("received_at")
+        stamp = when.strftime("%b %d") if hasattr(when, "strftime") else ""
+        label = outreach.INTENT_LABELS.get(str(r.get("intent") or ""), str(r.get("intent") or "reply"))
+        excerpt = " ".join(str(r.get("excerpt") or "").split())[:120]
+        who = f" ({r.get('from_email')})" if r.get("from_email") else ""
+        text = f"Reply {stamp}: {label}{who}".strip()
+        if excerpt:
+            text += f'. "{excerpt}"'
+        events.append((when, "reply", text))
+    events.sort(key=lambda e: (e[0] is None, e[0] or 0))
+    timeline = [{"kind": k, "text": t} for _, k, t in events]
+
+    nxt = None
+    if seq and seq.status == outreach.CLOSED:
+        _, text = outreach_state(sequence, can_start=published)
+        nxt = text + "."
+    elif seq and seq.status == outreach.WAITING:
+        nxt = (f"Waiting: {outreach.park_reason(seq)}. Log the reply outcome from the CLI "
+               "(python -m app.cli replies) to continue.")
+    elif sent and seq and seq.next_due_at:
+        due = seq.next_due_at.strftime("%b %d")
+        fu = later[next_ordinal - 2] if next_ordinal >= 2 and len(later) >= next_ordinal - 1 else None
+        if fu:
+            seen = " ".join(str(fu.get("what_we_saw") or "").split())
+            nxt = f"Next due {due}, carrying follow-up finding {next_ordinal - 1}: {seen[:120]}"
+        else:
+            nxt = f"Next due {due}. No findings left for another email; the sequence closes after this one."
+
+    return {"state": outreach_state(sequence, can_start=published),
+            "step1": step1, "step2": step2, "timeline": timeline, "next": nxt}
+
+
 def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                  checks: Sequence[Mapping[str, Any]], definitions: Mapping[str, Any],
                  findings: Mapping[str, Any] | None, evidence: Sequence[Mapping[str, Any]],
-                 csrf: str,
-                 notice: tuple[str, str] | None = None) -> str:
+                 csrf: str, notice: tuple[str, str] | None = None,
+                 sequence: Mapping[str, Any] | None = None,
+                 touches: Sequence[Mapping[str, Any]] = (),
+                 replies: Sequence[Mapping[str, Any]] = (),
+                 history: Sequence[Mapping[str, Any]] = (),
+                 report_url: str | None = None,
+                 signature: str = "Relay for Roofers",
+                 sweep_label: str | None = None) -> str:
+    """One prospect: scores, findings, outreach, every check, the evidence."""
+    from urllib.parse import urlparse
+
+    from app.console import calllist
+
     scores = audit.get("scores") or {}
-    audit_id = audit.get("audit_id") or audit.get("id") or ""
+    audit_id = str(audit.get("audit_id") or audit.get("id") or "")
+    prospect_id = str(audit.get("prospect_id") or prospect.get("place_id") or "")
+    name = str(prospect.get("business_name") or "Prospect")
 
-    sections: dict[str, list] = {"found": [], "chosen": [], "booked": [], "measurement": []}
-    for check in sorted(checks, key=lambda c: definitions.get(c.get("code"), {}).get("sort_order", 0)):
-        definition = definitions.get(check.get("code")) or {}
-        section = definition.get("section")
-        if section in sections:
-            sections[section].append((check, definition))
+    # ── header ────────────────────────────────────────────────────────────
+    website = prospect.get("website_url") or "#"
+    lede = (f'{esc(prospect.get("city") or "")} &middot; {esc(prospect.get("gbp_phone") or "")} &middot; '
+            f'<a href="{esc(website)}" target="_blank" rel="noopener noreferrer">'
+            f'{esc(prospect.get("domain") or "no website")}</a>')
+    if prospect.get("maps_uri"):
+        lede += (f' &middot; <a href="{esc(prospect["maps_uri"])}" target="_blank" '
+                 'rel="noopener noreferrer">Google Business Profile</a>')
+    state = (findings or {}).get("status")
+    if audit.get("report_slug"):
+        primary = Markup(f'<a class="btn" href="/{esc(audit["report_slug"])}" target="_blank" '
+                         'rel="noopener noreferrer">Open report</a>')
+    elif state == "approved":
+        primary = Markup(f'<form method="post" action="/console/audits/{esc(audit_id)}/publish">'
+                         f'{csrf_field(csrf)}<button type="submit">Publish report</button></form>')
+    elif not findings:
+        primary = Markup(f'<form method="post" action="/console/audits/{esc(audit_id)}/draft">'
+                         f'{csrf_field(csrf)}<button type="submit">Draft findings</button></form>')
+    else:
+        primary = None
 
-    section_subs = {
+    landing = None
+    if audit.get("landing_url"):
+        path = urlparse(audit["landing_url"]).path or "/"
+        if path not in ("", "/"):
+            landing = {"url": audit["landing_url"], "path": path}
+    partial = list(audit.get("partial_sections") or [])
+    finished = audit.get("finished_at")
+
+    p_vm = {
+        "audit_id": audit_id, "prospect_id": prospect_id, "name": name,
+        "batch_id": audit.get("batch_id") or "", "sweep_label": sweep_label or "Call list",
+        "lede": Markup(lede), "primary": primary,
+        "scores": {k: scores.get(k, 0) for k in ("found", "chosen", "booked", "total")},
+        "chip": Markup(chip(audit.get("segment"))), "band": audit.get("band") or "",
+        "landing": landing, "crawl_error": audit.get("crawl_error") or "",
+        "partial_sections": ", ".join(partial), "partial_count": len(partial),
+        "audited": finished.strftime("%b %d, %Y") if hasattr(finished, "strftime") else "",
+        "report_slug": audit.get("report_slug") or "",
+        "findings_state": calllist.findings_state({"report_slug": audit.get("report_slug"),
+                                                   "findings_status": state}),
+        "reaudit_confirm": _confirm_attr(f"Re-audit {name}? This queues a fresh audit."),
+        "suppress_confirm": _confirm_attr(f"Never contact {name} again? This cannot be undone here."),
+    }
+
+    # ── findings ──────────────────────────────────────────────────────────
+    f_vm = None
+    if findings:
+        pool = list(findings.get("findings") or [])
+        selected = [int(o) for o in (findings.get("selected") or [])]
+        draft = state == "draft"
+        later = [int(x.get("ordinal") or 0) for x in pool
+                 if int(x.get("ordinal") or 0) not in selected]
+        cards = []
+        for position, item in enumerate(pool, start=1):
+            ordinal = int(item.get("ordinal") or 0)
+            tag = None
+            if not draft:
+                if ordinal in selected:
+                    tag = ("ok", f"report, number {selected.index(ordinal) + 1}")
+                elif ordinal in later:
+                    tag = ("dim", f"follow up {later.index(ordinal) + 1}")
+            cards.append({"ordinal": ordinal, "preticked": position <= 3, "tag": tag,
+                          "saw": item.get("what_we_saw") or "",
+                          "means": item.get("what_it_means") or "",
+                          "fix": item.get("what_fixing_takes") or "",
+                          "flags": ", ".join(item.get("mechanism_flags") or [])})
+        held = max(0, len(pool) - 3)
+        thin = ""
+        if not draft and held < 3:
+            thin = (f"{held} held back, so this prospect gets {held + 1} "
+                    f"email{'s' if held else ''} rather than four. There was not enough "
+                    "wrong with the site to say something new a fourth time.")
+        f_vm = {"draft": draft, "cards": cards, "stale": findings_predate_audit(findings, audit),
+                "needs_review": bool(findings.get("needs_review")),
+                "can_publish": state == "approved" and not audit.get("report_slug"),
+                "thin_note": thin}
+
+    # ── checks by section ─────────────────────────────────────────────────
+    subs = {
         "found": "Can a homeowner searching for a roofer find them at all?",
         "chosen": "Once found, do they look like a safe choice?",
         "booked": "If someone wants to hire them, can they actually get through? "
                   "Worth the most, because this is where jobs quietly go missing.",
         "measurement": "Background information only. Not scored.",
     }
+    grouped: dict[str, list] = {k: [] for k in subs}
+    for c in sorted(checks, key=lambda c: definitions.get(c.get("code"), {}).get("sort_order", 0)):
+        d = definitions.get(c.get("code")) or {}
+        if d.get("section") in grouped:
+            status = str(c.get("status") or "")
+            grouped[d["section"]].append({
+                "code": c.get("code") or "", "title": d.get("title") or "",
+                "cls": _STATUS_CLASS.get(status, ""), "result": status.title(),
+                "points": f"{c.get('points_awarded', 0)}/{d.get('points', 0)}",
+                "note": c.get("note") or "",
+            })
+    sections = [{"title": k.title(), "sub": subs[k], "rows": v} for k, v in grouped.items() if v]
 
-    def section_table(name: str) -> str:
-        rows = "".join(
-            f'<tr class="checkrow"><td>{esc(c.get("code"))}</td>'
-            f'<td>{esc(d.get("title"))}</td>'
-            f'<td class="{_STATUS_CLASS.get(c.get("status"), "")}">{esc(c.get("status"))}</td>'
-            f'<td class="num">{c.get("points_awarded", 0)}/{d.get("points", 0)}</td>'
-            f'<td>{esc(c.get("note"))}</td></tr>'
-            for c, d in sections[name]
-        )
-        if not rows:
-            return ""
-        return (f"<h2>{name.title()}</h2>"
-                f'<div class="sub">{section_subs.get(name, "")}</div>'
-                f"<table><tr><th>Code</th><th>What we looked at</th>"
-                f"<th>Result</th><th>Points</th><th>What we found</th></tr>{rows}</table>")
-
-    landing = audit.get("landing_url")
-    landing_note = ""
-    if landing:
-        from urllib.parse import urlparse
-
-        path = urlparse(landing).path or "/"
-        if path not in ("", "/"):
-            landing_note = (
-                f'<div class="banner">Scored against <a href="{esc(landing)}" '
-                f'target="_blank" rel="noopener noreferrer">{esc(path)}</a>, not the '
-                "front page. That is where their Google listing sends people, so it "
-                "is what a homeowner actually sees first.</div>")
-
-    findings_block = ""
-    if findings:
-        state = findings.get("status")
-        pool = list(findings.get("findings") or [])
-        selected = [int(o) for o in (findings.get("selected") or [])]
-        draft = state == "draft"
-
-        def card(f: Mapping[str, Any], position: int) -> str:
-            ordinal = int(f.get("ordinal") or 0)
-            flags = (f'<p class="muted">flagged: {esc(", ".join(f.get("mechanism_flags") or []))}</p>'
-                     if f.get("mechanism_flags") else "")
-            if draft:
-                # The top three are pre-ticked because that is the model's
-                # ranking, not because it is the answer. Rule 7 is the person
-                # changing it.
-                checked = " checked" if position <= 3 else ""
-                head = (f'<label class="pick"><input type="checkbox" name="selected" '
-                        f'value="{ordinal}"{checked}> '
-                        f'<strong>{esc(f.get("what_we_saw"))}</strong></label>')
-            else:
-                if ordinal in selected:
-                    tag = f'<span class="tag ok">report, number {selected.index(ordinal) + 1}</span>'
-                else:
-                    later = [o for o in
-                             [int(x.get("ordinal") or 0) for x in pool]
-                             if o not in selected]
-                    tag = (f'<span class="tag dim">follow up {later.index(ordinal) + 1}</span>'
-                           if ordinal in later else "")
-                head = f'<h3>{tag} {esc(f.get("what_we_saw"))}</h3>'
-            return (f'<div class="finding">{head}'
-                    f'<p>{esc(f.get("what_it_means"))}</p>'
-                    f'<p><strong>{esc(f.get("what_fixing_takes"))}</strong></p>{flags}</div>')
-
-        cards = "".join(card(f, i + 1) for i, f in enumerate(pool))
-
-        warn = ""
-        if findings_predate_audit(findings, audit):
-            warn += ('<div class="banner">This site was checked again after these '
-                     'were written, so they describe what we saw last time. Anything '
-                     'he has fixed since would still be named here. Write them again '
-                     'before sending this to him.</div>')
-        if findings.get("needs_review"):
-            warn = ('<div class="banner">Read this before approving. Some wording may '
-                    'describe how we found the problem rather than what the owner would '
-                    'notice. He should hear what a customer experiences, never how we '
-                    'measured it.</div>')
-
-        if draft:
-            action = ('<p class="hint">Tick the three he should read. They go in the '
-                      'report in the order they appear here. Whatever you leave '
-                      'unticked is held back, one per follow up, so each message '
-                      'after the first has something new in it. Choosing does not '
-                      'send or publish anything.</p>'
-                      f'<button type="submit">Use these three</button>')
-            cards = (f'<form method="post" action="/console/audits/{esc(audit_id)}/approve">'
-                     f'{csrf_field(csrf)}{cards}{action}</form>')
-            action = ""
-        elif state == "approved" and not audit.get("report_slug"):
-            action = (f'<form method="post" action="/console/audits/{esc(audit_id)}/publish">'
-                      f'{csrf_field(csrf)}<button type="submit">Create the shareable report</button></form>')
-        elif audit.get("report_slug"):
-            action = (f'<p><a href="/{esc(audit["report_slug"])}" target="_blank" '
-                      f'rel="noopener noreferrer">Open the report you can share</a></p>')
-        else:
-            action = ""
-
-        held = max(0, len(pool) - 3)
-        note = ""
-        if state != "draft" and held < 3:
-            note = (f'<p class="muted">{held} held back, so this company gets '
-                    f'{held + 1} message{"s" if held else ""} rather than four. '
-                    'There was not enough wrong with the site to say something new '
-                    'a fourth time.</p>')
-        findings_block = (f"<h2>Talking points <span class='tag'>{esc(state)}</span></h2>"
-                          f"{warn}{cards}{action}{note}")
-    else:
-        findings_block = (f"""<h2>Talking points</h2><div class="card">
-<p class="muted">Nothing written yet. We will rank the problems costing this company
-the most work and explain each in plain language. You pick the three he reads.</p>
-<form method="post" action="/console/audits/{esc(audit_id)}/draft">{csrf_field(csrf)}
-<button type="submit">Write talking points</button></form></div>""")
-
+    # ── evidence ──────────────────────────────────────────────────────────
     def evidence_item(e: Mapping[str, Any]) -> str:
         url = e.get("url")
         kb = round((e.get("size_bytes") or 0) / 1024)
         caption = (f'<p class="muted evidence-cap">{esc(e.get("kind"))} '
                    f'&middot; {kb} KB captured during the audit</p>')
         if url and e.get("kind") == "screenshot":
-            # The homepage exactly as the audit saw it, which is what the
-            # Chosen and vision checks were reading. Click through for full size.
             return (f'<a href="{esc(url)}" target="_blank" rel="noopener noreferrer">'
                     f'<img class="evidence-shot" src="{esc(url)}" '
-                    f'alt="Homepage as captured during the audit"></a>{caption}')
+                    f'alt="Landing page as captured during the audit"></a>{caption}')
         if url:
             return (f'<p><a href="{esc(url)}" target="_blank" rel="noopener noreferrer">'
                     f'{esc(e.get("kind"))}</a>{caption}')
@@ -732,64 +841,21 @@ the most work and explain each in plain language. You pick the three he reads.</
                 f'({kb} KB)' + (f' &middot; could not sign a link: {esc(problem)}'
                                 if problem else "") + "</p>")
 
-    shots = "".join(evidence_item(e) for e in evidence)
+    evidence_html = Markup("".join(evidence_item(e) for e in evidence))
 
-    # Google Business Profile. Places gives us googleMapsUri on every prospect,
-    # which opens the public profile: the same thing a homeowner searching for
-    # a roofer would land on, and where an operator checks reviews and hours.
-    maps_uri = prospect.get("maps_uri")
-    gbp_link = (
-        f' &middot; <a href="{esc(maps_uri)}" target="_blank" rel="noopener noreferrer">'
-        "Google Business Profile</a>"
-    ) if maps_uri else ""
+    h_vm = [{
+        "date": h["finished_at"].strftime("%b %d, %Y") if hasattr(h.get("finished_at"), "strftime") else "",
+        "sweep": h.get("sweep_label") or h.get("batch_id") or "",
+        "found": (h.get("scores") or {}).get("found", ""), "chosen": (h.get("scores") or {}).get("chosen", ""),
+        "booked": (h.get("scores") or {}).get("booked", ""), "total": (h.get("scores") or {}).get("total", ""),
+        "chip": Markup(chip(h.get("segment"))), "partial": bool(h.get("partial")),
+        "current": h.get("audit_id") == audit_id,
+    } for h in history]
 
-    warnings = ""
-    if audit.get("crawl_error"):
-        warnings += (f'<div class="banner"><strong>We had trouble reading this '
-                    f'site.</strong> {esc(audit["crawl_error"])}. Some checks below '
-                    f'may say "not checked" as a result.</div>')
-    partial_sections = audit.get("partial_sections") or []
-    if partial_sections:
-        noun = "section" if len(partial_sections) == 1 else "sections"
-        warnings += (f'<div class="banner"><strong>Incomplete check.</strong> We '
-                    f'could not finish enough of the {esc(", ".join(partial_sections))} '
-                    f'{noun} to score fairly. When Booked is affected we do not '
-                    f'label the opportunity type at all, rather than guess.</div>')
+    o_vm = outreach_context(audit=audit, prospect=prospect, findings=findings,
+                            sequence=sequence, touches=touches, replies=replies,
+                            report_url=report_url, signature=signature)
 
-    body = f"""
-<div class="lede"><a href="/console/batches/{esc(audit.get("batch_id"))}">&larr; back to the call list</a></div>
-<h1>{esc(prospect.get("business_name"))}</h1>
-<div class="lede">{esc(prospect.get("city") or "")} &middot;
-{esc(prospect.get("gbp_phone") or "")} &middot;
-<a href="{esc(prospect.get("website_url") or "#")}" target="_blank" rel="noopener noreferrer">{esc(prospect.get("domain") or "no website")}</a>{gbp_link}</div>
-
-{tiles([("found", scores.get("found", 0)), ("chosen", scores.get("chosen", 0)),
-        ("booked", scores.get("booked", 0)), ("total", scores.get("total", 0)),
-        ("band", audit.get("band") or ""), ("segment", audit.get("segment") or "incomplete")])}
-{landing_note}
-{warnings}
-
-<div class="card">
-  <form class="inline" method="post" action="/console/audits/{esc(audit_id)}/reaudit">
-    {csrf_field(csrf)}<button class="ghost" type="submit">Check this site again</button>
-  </form>
-  <form class="inline" method="post" action="/console/suppress"
-        onsubmit="return confirm('Never contact this company again? This cannot be undone here.');">
-    {csrf_field(csrf)}
-    <input type="hidden" name="value" value="{esc(audit.get("prospect_id"))}">
-    <input type="hidden" name="match_type" value="place_id">
-    <input type="hidden" name="reason" value="requested">
-    <button class="danger" type="submit">Never contact</button>
-  </form>
-</div>
-
-{findings_block}
-{section_table("found")}
-{section_table("chosen")}
-{section_table("booked")}
-{section_table("measurement")}
-
-<h2>What we saw</h2>
-<div class="card">{shots or '<p class="muted">No screenshot was saved for this check.</p>'}</div>
-"""
-    return shell(prospect.get("business_name") or "Audit", body, active="batches", notice=notice)
+    return _render("prospect.html", title=name, active="batches", csrf=csrf,
+                   p=p_vm, f=f_vm, o=o_vm, sections=sections, evidence_html=evidence_html,
+                   history=h_vm, notice=notice)

@@ -1,0 +1,66 @@
+{#- The Outreach card. Three steps a person cannot misread: compose the
+    email in their own mail client, record that they sent it, and see where
+    the sequence stands. Nothing here sends; the sentence saying so is fixed
+    and appears twice on purpose. -#}
+{% from "_components.html" import pill %}
+
+{% macro outreach_card(o, csrf, prospect_id, audit_id) -%}
+<div class="card" id="outreach">
+  <div class="pagehead">
+    <h2>Outreach {{ pill(o.state[0], o.state[1]) }}</h2>
+  </div>
+  <p class="muted">Email leaves your own mailbox. Nothing is sent from here.</p>
+
+  {% if o.step1.mode != "hidden" %}
+  <div class="step">
+    <h4>1. Compose email</h4>
+    {% if o.step1.mode == "unpublished" %}
+      <span class="btn disabled">Compose email</span>
+      <p class="muted">Publish the report first. The email carries its link.</p>
+    {% else %}
+      <a class="btn" href="{{ o.step1.href }}">Compose email</a>
+      {% if o.step1.mode == "no_address" %}
+        {{ pill("warn", "No address on record") }}
+        <p class="muted">Find an address, then paste it into the To field.</p>
+      {% else %}
+        <p class="muted">{{ o.step1.note }}</p>
+      {% endif %}
+      {% for w in o.step1.warnings %}{{ pill("warn", w) }}{% endfor %}
+      <p class="hint">Replace {Your name} before it goes out.</p>
+      <details>
+        <summary>Copy the text instead</summary>
+        <label for="draft-subject">Subject</label>
+        <input id="draft-subject" type="text" readonly value="{{ o.step1.subject }}">
+        <label for="draft-body">Body</label>
+        <textarea id="draft-body" readonly rows="10">{{ o.step1.body }}</textarea>
+      </details>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if o.step2.show %}
+  <div class="step">
+    <h4>2. Mark as sent</h4>
+    <form class="inline" method="post" action="/console/outreach/{{ prospect_id }}/log-touch"
+          onsubmit="{{ o.step2.confirm }}">
+      {{ csrf_field(csrf) }}
+      <input type="hidden" name="audit_id" value="{{ audit_id }}">
+      <button class="ghost" type="submit">Mark as sent</button>
+    </form>
+    <p class="muted">Records the send and schedules the next one: day 3, day 7, day 14.</p>
+  </div>
+  {% endif %}
+
+  <div class="step">
+    <h4>3. Timeline</h4>
+    {% if o.timeline %}
+    <ol class="tl">
+      {% for t in o.timeline %}<li class="{{ t.kind }}">{{ t.text }}</li>{% endfor %}
+    </ol>
+    {% else %}
+    <p class="muted">Nothing sent yet.</p>
+    {% endif %}
+    {% if o.next %}<p class="muted">{{ o.next }}</p>{% endif %}
+  </div>
+</div>
+{%- endmacro %}

@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% from "_components.html" import page_header, kpi, pill, table_wrap, empty_row %}
+{% from "_outreach.html" import outreach_card %}
+{% block body %}
+{{ page_header(p.name, p.lede, primary_html=p.primary,
+               crumbs=[("/console/batches", "Sweeps"), ("/console/batches/" ~ p.batch_id, p.sweep_label), (None, p.name)]) }}
+
+<div class="kpis">
+  {{ kpi("Found", p.scores.found, "of 30") }}
+  {{ kpi("Chosen", p.scores.chosen, "of 30") }}
+  {{ kpi("Booked", p.scores.booked, "of 40") }}
+  {{ kpi("Total", p.scores.total, "of 100") }}
+  <div class="kpi"><div class="l">Segment</div><div class="n" style="font-size:1.1rem;margin-top:10px">{{ p.chip }}</div></div>
+  {{ kpi("Band", p.band or "none yet", "") }}
+</div>
+
+{% if p.landing %}
+<div class="banner">Scored against <a href="{{ p.landing.url }}" target="_blank" rel="noopener noreferrer">{{ p.landing.path }}</a>, not the front page. That is where their Google listing sends people, so it is what a homeowner actually sees first.</div>
+{% endif %}
+{% if p.crawl_error %}
+<div class="banner"><strong>We had trouble reading this site.</strong> {{ p.crawl_error }}. Some checks below may say Skipped as a result.</div>
+{% endif %}
+{% if p.partial_sections %}
+<div class="banner"><strong>Partial audit.</strong> Not enough of the {{ p.partial_sections }} {{ "section" if p.partial_count == 1 else "sections" }} finished to score fairly. When Booked is affected the segment is left as Incomplete rather than guessed.</div>
+{% endif %}
+
+<div class="card">
+  <form class="inline" method="post" action="/console/audits/{{ p.audit_id }}/reaudit" onsubmit="{{ p.reaudit_confirm }}">
+    {{ csrf_field(csrf) }}<button class="ghost" type="submit">Re-audit</button>
+  </form>
+  <form class="inline" method="post" action="/console/suppress" onsubmit="{{ p.suppress_confirm }}">
+    {{ csrf_field(csrf) }}
+    <input type="hidden" name="value" value="{{ p.prospect_id }}">
+    <input type="hidden" name="match_type" value="place_id">
+    <input type="hidden" name="reason" value="requested">
+    <button class="danger" type="submit">Suppress prospect</button>
+  </form>
+  {% if p.audited %}<span class="muted" style="margin-left:10px">Audited {{ p.audited }}</span>{% endif %}
+</div>
+
+{% if history %}
+<h2>Score history</h2>
+{% call table_wrap() %}
+<tr><th>Date</th><th>Sweep</th><th>F</th><th>C</th><th>B</th><th>Total</th><th>Segment</th><th></th></tr>
+{% for h in history %}
+<tr{% if h.current %} class="current"{% endif %}>
+<td>{{ h.date }}</td><td>{{ h.sweep }}</td>
+<td class="num">{{ h.found }}</td><td class="num">{{ h.chosen }}</td><td class="num">{{ h.booked }}</td>
+<td class="num">{{ h.total }}</td><td>{{ h.chip }}</td>
+<td>{% if h.current %}<span class="muted">this audit</span>{% endif %}{% if h.partial %} <span class="tag warn">Partial</span>{% endif %}</td>
+</tr>
+{% endfor %}
+{% endcall %}
+{% endif %}
+
+<h2>Findings {{ pill(p.findings_state[0], p.findings_state[1]) }}</h2>
+{% if f %}
+  {% if f.stale %}<div class="banner">This site was checked again after these were written, so they describe what we saw last time. Anything the owner has fixed since would still be named here. Draft the findings again before composing an email.</div>{% endif %}
+  {% if f.needs_review %}<div class="banner">Read this before approving. Some wording may describe how we found the problem rather than what the owner would notice. The owner should hear what a customer experiences, never how we measured it.</div>{% endif %}
+  {% if f.draft %}<form method="post" action="/console/audits/{{ p.audit_id }}/approve">{{ csrf_field(csrf) }}{% endif %}
+  {% for c in f.cards %}
+  <div class="finding">
+    {% if f.draft %}
+    <label class="pick"><input type="checkbox" name="selected" value="{{ c.ordinal }}"{% if c.preticked %} checked{% endif %}> <strong>{{ c.saw }}</strong></label>
+    {% else %}
+    <h3>{% if c.tag %}<span class="tag {{ c.tag[0] }}">{{ c.tag[1] }}</span> {% endif %}{{ c.saw }}</h3>
+    {% endif %}
+    <p>{{ c.means }}</p>
+    <p><strong>{{ c.fix }}</strong></p>
+    {% if c.flags %}<p class="muted">flagged: {{ c.flags }}</p>{% endif %}
+  </div>
+  {% endfor %}
+  {% if f.draft %}
+  <p class="hint">Tick the three the owner should read. They go in the report in the order shown here. Whatever stays unticked is held back, one per follow-up email, so each email after the first says something new. Choosing does not send or publish anything.</p>
+  <button type="submit">Choose these three for the report</button>
+  </form>
+  {% elif f.can_publish %}
+  <form method="post" action="/console/audits/{{ p.audit_id }}/publish">{{ csrf_field(csrf) }}<button type="submit">Publish report</button></form>
+  {% elif p.report_slug %}
+  <p><a href="/{{ p.report_slug }}" target="_blank" rel="noopener noreferrer">Open report</a></p>
+  {% endif %}
+  {% if f.thin_note %}<p class="muted">{{ f.thin_note }}</p>{% endif %}
+{% else %}
+<div class="card">
+  <p class="muted">Nothing drafted yet. The model ranks the problems costing this prospect the most work and explains each in plain language. A person picks the three the owner reads.</p>
+  <form method="post" action="/console/audits/{{ p.audit_id }}/draft">{{ csrf_field(csrf) }}<button type="submit">Draft findings</button></form>
+</div>
+{% endif %}
+
+{{ outreach_card(o, csrf, p.prospect_id, p.audit_id) }}
+
+{% for section in sections %}
+<h2>{{ section.title }}</h2>
+<div class="sub">{{ section.sub }}</div>
+{% call table_wrap() %}
+<tr><th>Code</th><th>Check</th><th>Result</th><th>Points</th><th>Note</th></tr>
+{% for c in section.rows %}
+<tr class="checkrow"><td>{{ c.code }}</td><td>{{ c.title }}</td>
+<td class="{{ c.cls }}">{{ c.result }}</td>
+<td class="num">{{ c.points }}</td><td>{{ c.note }}</td></tr>
+{% endfor %}
+{% endcall %}
+{% endfor %}
+
+<h2>Evidence</h2>
+<div class="card">{% if evidence_html %}{{ evidence_html }}{% else %}<p class="muted">No screenshot was saved for this audit.</p>{% endif %}</div>
+{% endblock %}

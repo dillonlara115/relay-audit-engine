@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import re
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse
 
@@ -90,6 +91,30 @@ def _with_notice(path: str, code: str, detail: str = "") -> str:
     Firebase Hosting, so a flash rides the query string instead."""
     joiner = "&" if "?" in path else "?"
     return f"{path}{joiner}{urlencode({'notice': code, 'detail': str(detail)[:views.NOTICE_DETAIL_CAP]})}"
+
+
+def _soft(fn: Any, default: Any, *args: Any, **kwargs: Any) -> Any:
+    """A read whose failure degrades one card rather than the whole page.
+    Logged, never raised: an unpatched store call in a test, or a Firestore
+    hiccup in the ledger, must not take the prospect page down with it."""
+    try:
+        return fn(*args, **kwargs)
+    except Exception as exc:  # noqa: BLE001 - by design
+        log.warning("%s failed: %s: %s", getattr(fn, "__name__", fn), type(exc).__name__, exc)
+        return default
+
+
+def _report_url(request: Request, slug: str | None) -> str | None:
+    """The address a contractor opens. The configured public host when there
+    is one, else the host this request arrived on, which behind Firebase is
+    the custom domain and not the run.app name."""
+    if not slug:
+        return None
+    raw = get_config().public_report_host
+    first = next((part for part in re.split(r"[,;\s]+", raw) if part.strip()), "")
+    host = first.split(":")[0] if first else (_host(request) or request.url.netloc)
+    scheme = "https" if first else (request.headers.get("x-forwarded-proto") or request.url.scheme)
+    return f"{scheme}://{host}/{slug}"
 
 
 def _notice(request: Request) -> tuple[str, str] | None:
@@ -327,22 +352,29 @@ async def audit_screen(audit_id: str, request: Request) -> Response:
         if audit is None:
             return None
         audit = {"audit_id": audit_id, **audit}
+        pid = str(audit.get("prospect_id"))
         return (
             audit,
-            store.get_prospect(str(audit.get("prospect_id"))) or {},
+            store.get_prospect(pid) or {},
             store.audit_checks(audit_id),
             {d["code"]: d for d in store.all_check_defs()},
             store.get_draft_findings(audit_id),
             _evidence_with_urls(evidence_store, audit_id),
+            _soft(store.get_sequence, None, pid),
+            _soft(store.touches_for, [], pid),
+            _soft(store.replies_for, [], pid),
         )
 
     loaded = await asyncio.to_thread(load)
     if loaded is None:
         return Response(status_code=404)
-    audit, prospect, checks, definitions, findings, evidence = loaded
+    audit, prospect, checks, definitions, findings, evidence, sequence, touches, replies = loaded
     return _page(views.render_audit(
         audit=audit, prospect=prospect, checks=checks, definitions=definitions,
-        findings=findings, evidence=evidence, csrf=csrf_token(request), notice=_notice(request)
+        findings=findings, evidence=evidence, csrf=csrf_token(request), notice=_notice(request),
+        sequence=sequence, touches=touches, replies=replies,
+        report_url=_report_url(request, audit.get("report_slug")),
+        signature=get_config().outreach_signature,
     ))
 
 
@@ -462,9 +494,10 @@ async def log_touch(prospect_id: str, request: Request, audit_id: str = Form(Non
 
     blocked = await asyncio.to_thread(record)
     back = _back(request, "/console/batches")
-    if blocked:
-        return _redirect(_with_notice(back, "not_recorded", blocked))
-    return _redirect(back)
+    target = _with_notice(back, "not_recorded", blocked) if blocked else back
+    if back.startswith("/console/audits/"):
+        target += "#outreach"
+    return _redirect(target)
 
 
 # ── Suppression ───────────────────────────────────────────────────────────────

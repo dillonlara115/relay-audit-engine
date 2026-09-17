@@ -223,8 +223,8 @@ def test_approving_is_presented_as_the_human_act():
     page = views.render_audit(audit=audit, prospect={"business_name": "Peak"},
                               checks=[], definitions={}, findings=findings,
                               evidence=[], csrf="t")
-    assert "Use these three" in page
-    assert "Tick the three he should read" in page
+    assert "Choose these three for the report" in page
+    assert "Tick the three the owner should read" in page
     assert "does not send or publish" in page
 
 
@@ -1061,7 +1061,7 @@ def test_an_approved_pool_shows_which_three_the_contractor_reads():
 def test_a_thin_pool_says_the_company_gets_fewer_messages():
     """Four findings is two touches, and the screen should say so plainly."""
     page = _audit_page(_pool(4, status="approved", selected=[1, 2, 3]))
-    assert "2 messages rather than four" in page or "2 message rather than four" in page
+    assert "2 emails rather than four" in page
 
 
 def test_a_full_pool_does_not_apologise_for_itself():
@@ -2031,3 +2031,173 @@ def test_tab_counts_add_up_and_leave_excluded_out_until_counted():
     assert counts["all"] == 6 and counts["leaky-bucket"] == 2 and counts["incomplete"] == 3
     assert "excluded" not in counts
     assert calllist.tab_counts({}, excluded=4)["excluded"] == 4
+
+
+# ── The prospect page and the Outreach card ───────────────────────────────────
+
+
+def _prospect_page(*, findings=None, audit=None, prospect=None, **kw):
+    a = {"audit_id": "a1", "scores": {"found": 20, "chosen": 20, "booked": 10, "total": 50},
+         "batch_id": "b1", "prospect_id": "p1"}
+    a.update(audit or {})
+    pr = {"business_name": "Apex Roofing", "city": "Denver", "place_id": "p1"}
+    pr.update(prospect or {})
+    return views.render_audit(audit=a, prospect=pr, checks=[], definitions={},
+                              findings=findings, evidence=[], csrf="t", **kw)
+
+
+def _approved(n=6):
+    return _pool(n, status="approved", selected=[1, 2, 3])
+
+
+def test_the_prospect_page_speaks_the_new_vocabulary():
+    page = _prospect_page(findings=_approved(), audit={"report_slug": "abcdefghijklmnop"})
+    for present in ("Re-audit", "Suppress prospect", "Open report", "Findings", "Outreach", "Evidence"):
+        assert present in page, present
+    for gone in ("Check this site again", "Never contact<", "Talking points", "What we saw",
+                 "shareable report", " he ", " him "):
+        assert gone not in page, gone
+
+
+def test_compose_opens_the_mail_client_with_the_report_and_the_three_findings():
+    page = _prospect_page(findings=_approved(), audit={"report_slug": "abcdefghijklmnop"},
+                          prospect={"owner_email": "dave@apexroofingusa.com"},
+                          report_url="https://reports.relayforroofers.com/abcdefghijklmnop")
+    assert 'href="mailto:dave@apexroofingusa.com?subject=' in page
+    assert "body=" in page
+    assert "reports.relayforroofers.com%2Fabcdefghijklmnop" in page
+    assert "Nothing is sent from here" in page
+    assert "for dave@apexroofingusa.com" in page
+
+
+def test_without_an_address_compose_still_opens_but_says_so():
+    page = _prospect_page(findings=_approved(), audit={"report_slug": "abcdefghijklmnop"},
+                          report_url="https://x/abc")
+    assert 'href="mailto:?subject=' in page
+    assert "No address on record" in page
+    assert "paste it into the To field" in page
+
+
+def test_without_a_published_report_there_is_nothing_to_compose_or_mark():
+    page = _prospect_page(findings=_approved())
+    assert "mailto:" not in page
+    assert "Publish the report first" in page
+    assert "log-touch" not in page
+
+
+def test_mark_as_sent_confirms_the_recipient_and_that_nothing_is_sent(client, monkeypatch):
+    page = _prospect_page(findings=_approved(), audit={"report_slug": "abcdefghijklmnop"},
+                          prospect={"owner_email": "dave@apexroofingusa.com"},
+                          report_url="https://x/abc")
+    assert 'action="/console/outreach/p1/log-touch"' in page
+    assert "Mark as sent" in page
+    assert "Mark email 1 of 4 to dave@apexroofingusa.com as sent?" in page
+    assert "Nothing is sent from here." in page
+    assert 'name="audit_id" value="a1"' in page
+
+
+def test_the_timeline_lists_sends_and_replies_and_the_next_finding():
+    from datetime import datetime, timezone
+
+    from app import outreach
+
+    seq = outreach.advance(outreach.open_sequence("p1"),
+                           sent_at=datetime(2026, 9, 17, tzinfo=timezone.utc))
+    page = _prospect_page(
+        findings=_approved(), audit={"report_slug": "abcdefghijklmnop"},
+        prospect={"owner_email": "dave@apexroofingusa.com"}, report_url="https://x/abc",
+        sequence=seq.to_dict(),
+        touches=[{"ordinal": 1, "sent_at": datetime(2026, 9, 17, tzinfo=timezone.utc)}],
+        replies=[{"received_at": datetime(2026, 9, 18, tzinfo=timezone.utc),
+                  "intent": "interested", "from_email": "dave@apexroofingusa.com",
+                  "excerpt": "Sure, call me Thursday."}],
+    )
+    assert "Email 1 sent Sep 17" in page
+    assert "Reply Sep 18: Interested (dave@apexroofingusa.com)" in page
+    assert "Next due Sep 20, carrying follow-up finding 1: saw 4" in page
+    assert "Mark email 2 of 4" in page
+    assert "follow-up finding 1: saw 4" in page
+
+
+def test_a_closed_sequence_shows_why_and_offers_nothing():
+    from app import outreach
+
+    seq, _ = outreach.record_reply(outreach.advance(outreach.open_sequence("p1")),
+                                   outreach.NOT_INTERESTED)
+    page = _prospect_page(findings=_approved(), audit={"report_slug": "abcdefghijklmnop"},
+                          report_url="https://x/abc", sequence=seq.to_dict())
+    assert "Closed: Not interested" in page
+    assert "mailto:" not in page and "log-touch" not in page
+
+
+def test_a_parked_sequence_points_at_the_cli():
+    from app import outreach
+
+    seq, _ = outreach.record_reply(outreach.advance(outreach.open_sequence("p1")),
+                                   outreach.WRONG_PERSON)
+    page = _prospect_page(findings=_approved(), audit={"report_slug": "abcdefghijklmnop"},
+                          report_url="https://x/abc", sequence=seq.to_dict())
+    assert "Waiting: needs a new contact" in page
+    assert "python -m app.cli replies" in page
+
+
+def test_the_suppress_confirm_keeps_its_warning_and_survives_a_quote():
+    page = _prospect_page(prospect={"business_name": "Pete's Roofing"})
+    assert "return confirm(" in page and "cannot be undone" in page
+    assert "Never contact Pete" in page
+
+
+def test_check_results_read_as_words_with_their_classes():
+    checks = [{"code": "C16", "status": "fail", "points_awarded": 0, "note": "old year"},
+              {"code": "B1", "status": "skipped", "points_awarded": 0, "note": ""}]
+    defs = {"C16": {"section": "chosen", "title": "Footer copyright", "points": 1, "sort_order": 1},
+            "B1": {"section": "booked", "title": "Self-serve booking", "points": 10, "sort_order": 2}}
+    page = views.render_audit(audit={"audit_id": "a1", "scores": {}, "batch_id": "b1"},
+                              prospect={"business_name": "X"}, checks=checks, definitions=defs,
+                              findings=None, evidence=[], csrf="t")
+    assert '<td class="fail">Fail</td>' in page
+    assert '<td class="skip">Skipped</td>' in page
+    assert "<h2>Chosen</h2>" in page and "<h2>Booked</h2>" in page
+    assert "<h2>Found</h2>" not in page
+
+
+def test_the_partial_banner_names_the_sections():
+    page = _prospect_page(audit={"partial_sections": ["found", "booked"]})
+    assert "Partial audit." in page and "found, booked sections" in page
+    assert "left as Incomplete" in page
+
+
+def test_the_prospect_page_carries_no_forbidden_dash():
+    from app import outreach
+
+    seq = outreach.advance(outreach.open_sequence("p1"))
+    for page in (
+        _prospect_page(),
+        _prospect_page(findings=_pool()),
+        _prospect_page(findings=_approved(), audit={"report_slug": "abcdefghijklmnop"},
+                       prospect={"owner_email": "d@x.com"}, report_url="https://x/abc",
+                       sequence=seq.to_dict()),
+    ):
+        assert not contains_forbidden_dash(page)
+
+
+def test_a_touch_logged_from_the_prospect_page_lands_back_on_the_card(client, monkeypatch):
+    _ledger_store(monkeypatch)
+    csrf = sign_in(client)
+    response = client.post("/console/outreach/p1/log-touch", data={"csrf": csrf, "audit_id": "a1"},
+                           headers={"Referer": "http://testserver/console/audits/a1"},
+                           follow_redirects=False)
+    assert response.headers["location"] == "/console/audits/a1#outreach"
+
+
+def test_soft_reads_degrade_and_log_instead_of_raising(caplog):
+    import logging as _logging
+
+    import app.console.routes as routes
+
+    def boom():
+        raise RuntimeError("firestore hiccup")
+
+    with caplog.at_level(_logging.WARNING):
+        assert routes._soft(boom, "fallback") == "fallback"
+    assert "firestore hiccup" in caplog.text

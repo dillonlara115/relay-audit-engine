@@ -121,6 +121,11 @@ class Config:
     # Where `python -m app.cli smoke` points when no --url is given.
     smoke_base_url: str = field(default_factory=lambda: _str("SMOKE_BASE_URL"))
 
+    # The last line of a drafted email. The operator's own name goes above it
+    # by hand; this is the company line.
+    outreach_signature: str = field(
+        default_factory=lambda: _str("OUTREACH_SIGNATURE", "Relay for Roofers"))
+
     # Pub/Sub
     pubsub_audit_topic: str = field(
         default_factory=lambda: _str("PUBSUB_AUDIT_TOPIC", "run-audit")
@@ -176,6 +181,7 @@ _ENV_NAME = {
     "gmail_token_path": "GMAIL_TOKEN_PATH",
     "public_report_host": "PUBLIC_REPORT_HOST",
     "smoke_base_url": "SMOKE_BASE_URL",
+    "outreach_signature": "OUTREACH_SIGNATURE",
 }
 
 
