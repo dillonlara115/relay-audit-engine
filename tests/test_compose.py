@@ -160,3 +160,16 @@ def test_every_email_carries_the_sender_name_or_warns_that_it_is_missing(ordinal
     unnamed = compose(ordinal=ordinal, prospect={"business_name": "A"}, report_url=URL,
                       findings_doc=doc())
     assert any("Sender name is not set" in w for w in unnamed.warnings)
+
+
+def test_an_explicitly_empty_signature_means_no_signature_line(monkeypatch):
+    from app import config
+
+    monkeypatch.delenv("OUTREACH_SIGNATURE", raising=False)
+    assert config._str_unless_set("OUTREACH_SIGNATURE", "Relay for Roofers") == "Relay for Roofers"
+    monkeypatch.setenv("OUTREACH_SIGNATURE", "")
+    assert config._str_unless_set("OUTREACH_SIGNATURE", "Relay for Roofers") == ""
+    d = compose(ordinal=1, prospect={"business_name": "A"}, report_url=URL, findings_doc=doc(),
+                sender_name="Dillon", signature="")
+    assert d.body.rstrip().endswith("\r\nDillon"), d.body[-40:]
+    assert "Relay for Roofers" not in d.body

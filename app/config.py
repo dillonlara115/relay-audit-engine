@@ -28,6 +28,13 @@ def _str(name: str, default: str = "") -> str:
     return (os.getenv(name) or default).strip()
 
 
+def _str_unless_set(name: str, default: str) -> str:
+    """The default only when the variable is absent. An explicitly empty value
+    is a choice and stays empty."""
+    value = os.getenv(name)
+    return default if value is None else value.strip()
+
+
 def _int(name: str, default: int) -> int:
     raw = _str(name)
     if not raw:
@@ -123,8 +130,10 @@ class Config:
 
     # The last line of a drafted email. The operator's own name goes above it
     # by hand; this is the company line.
+    # Unset means the default; set and empty means no signature line at all,
+    # for a mailbox whose compliance footer already carries the company.
     outreach_signature: str = field(
-        default_factory=lambda: _str("OUTREACH_SIGNATURE", "Relay for Roofers"))
+        default_factory=lambda: _str_unless_set("OUTREACH_SIGNATURE", "Relay for Roofers"))
     # The address the console sends from, shown beside the Send button so the
     # operator knows whose mailbox it leaves. Display only; Gmail sets the real
     # From header from the connected account.
