@@ -2530,3 +2530,8 @@ def test_sort_arrows_come_from_aria_sort_not_a_span():
     assert 'th[data-sort][aria-sort="ascending"]::after' in css
     assert 'th[data-sort][aria-sort="descending"]::after' in css
     assert "className = 'arrow'" not in views.render_batch("b1", [], {}, csrf="t")
+
+
+def test_the_tab_title_names_the_sweep_not_the_id():
+    page = _list([_row()], sweep_label="Fort Collins, Sep 16")
+    assert "<title>Call list: Fort Collins, Sep 16</title>" in page

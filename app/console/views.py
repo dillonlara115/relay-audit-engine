@@ -564,7 +564,7 @@ def render_batch(batch_id: str, rows: Sequence[Mapping[str, Any]],
     for e in excluded_vm:
         e["attrs"] = Markup(f'data-business="{esc(e["needle"])}"')
 
-    return _render("calllist.html", title=f"Call list {batch_id}", active="batches", csrf=csrf,
+    return _render("calllist.html", title=f"Call list: {sweep_label or batch_id}", active="batches", csrf=csrf,
                    batch_id=batch_id, rows=vm, tab=tab,
                    tabs=calllist.visible_tabs(counts), progress=live,
                    check_options=Markup(_check_filter_options(check_defs)),
