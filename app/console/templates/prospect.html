@@ -42,16 +42,17 @@
 {% if history_note %}<p class="muted">{{ history_note }}</p>{% endif %}
 {% if history %}
 {% call table_wrap() %}
-<tr><th data-sort="date">Date</th><th data-sort="sweep">Sweep</th><th data-sort="f">F</th><th data-sort="c">C</th><th data-sort="b">B</th><th data-sort="total">Total</th><th data-sort="segment">Segment</th><th></th></tr>
+<thead><tr><th data-sort="date">Date</th><th data-sort="sweep">Sweep</th><th data-sort="f">F</th><th data-sort="c">C</th><th data-sort="b">B</th><th data-sort="total">Total</th><th data-sort="segment">Segment</th><th></th></tr></thead>
+<tbody>
 {% for h in history %}
 <tr{% if h.current %} class="current"{% endif %} data-sort_date="{{ h.date_iso }}">
 <td>{{ h.date }}</td><td>{{ h.sweep }}</td>
 <td class="num">{{ h.found }}</td><td class="num">{{ h.chosen }}</td><td class="num">{{ h.booked }}</td>
 <td class="num">{{ h.total }}</td><td>{{ h.chip }}</td>
-<td>{% if h.current %}<span class="muted">this audit</span>{% endif %}{% if h.partial %} <span class="tag warn">Partial</span>{% endif %}</td>
+<td>{% if h.current %}<span class="muted">this audit</span>{% endif %}{% if h.partial %} <span class="tag warn" title="{{ tag_titles['Partial'] }}">Partial</span>{% endif %}</td>
 </tr>
 {% endfor %}
-{% endcall %}
+</tbody>{% endcall %}
 {% endif %}
 
 <h2>Findings {{ pill(p.findings_state[0], p.findings_state[1]) }}</h2>
@@ -94,13 +95,14 @@
 <h2>{{ section.title }}</h2>
 <div class="sub">{{ section.sub }}</div>
 {% call table_wrap() %}
-<tr><th data-sort="code">Code</th><th data-sort="check">Check</th><th data-sort="result">Result</th><th data-sort="points">Points</th><th>Note</th></tr>
+<thead><tr><th data-sort="code">Code</th><th data-sort="check">Check</th><th data-sort="result">Result</th><th data-sort="points">Points</th><th>Note</th></tr></thead>
+<tbody>
 {% for c in section.rows %}
 <tr class="checkrow" data-sort_points="{{ c.points_awarded }}"><td>{{ c.code }}</td><td>{{ c.title }}</td>
 <td class="{{ c.cls }}">{{ c.result }}</td>
 <td class="num">{{ c.points }}</td><td>{{ c.note }}</td></tr>
 {% endfor %}
-{% endcall %}
+</tbody>{% endcall %}
 {% endfor %}
 
 <h2>Evidence</h2>

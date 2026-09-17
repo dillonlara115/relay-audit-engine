@@ -67,10 +67,16 @@
     if (!tbody) return;
     var headers = table.querySelectorAll('th[data-sort]');
     if (!headers.length) return;
-    var cols = table.tHead ? table.tHead.rows[0].cells.length : 0;
+    // The header row is whichever row holds the headers, wherever the markup
+    // put it. It never moves; only rows of data cells are reordered, and a
+    // one-cell empty-state row is left alone too.
+    var headerRow = headers[0].parentNode;
+    var cols = headerRow.cells.length;
     var state = {key: null, dir: 1};
     function rows() {
-      return Array.prototype.slice.call(tbody.rows).filter(function (r) { return r.cells.length >= cols; });
+      return Array.prototype.slice.call(tbody.rows).filter(function (r) {
+        return r !== headerRow && !r.querySelector('th') && r.cells.length >= cols;
+      });
     }
     function keyOf(row, th) {
       var v = row.dataset['sort_' + th.dataset.sort];

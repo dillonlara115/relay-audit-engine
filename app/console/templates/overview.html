@@ -76,13 +76,14 @@
 {% if jobs %}
 <h2>Jobs running</h2>
 {% call table_wrap() %}
-<tr><th data-sort="job">Job</th><th data-sort="status">Status</th><th>Latest line</th></tr>
+<thead><tr><th data-sort="job">Job</th><th data-sort="status">Status</th><th>Latest line</th></tr></thead>
+<tbody>
 {% for j in jobs %}
 <tr><td><a href="/console/jobs/{{ j.job_id }}">{{ j.label }}</a></td>
 <td>{{ status_pill(j.status) }}</td>
 <td class="muted">{{ j.latest }}</td></tr>
 {% endfor %}
-{% endcall %}
+</tbody>{% endcall %}
 {% endif %}
 
 <div class="pagehead" style="margin-top:26px">
@@ -90,7 +91,8 @@
   <div class="primary"><a href="/console/batches">All sweeps</a></div>
 </div>
 {% call table_wrap() %}
-<tr><th data-sort="sweep">Sweep</th><th data-sort="total">Prospects</th><th data-sort="done">Audited</th><th data-sort="pct">Progress</th><th data-sort="latest">Last activity</th></tr>
+<thead><tr><th data-sort="sweep">Sweep</th><th data-sort="total">Prospects</th><th data-sort="done">Audited</th><th data-sort="pct">Progress</th><th data-sort="latest">Last activity</th></tr></thead>
+<tbody>
 {% for b in sweeps %}
 <tr data-sort_pct="{{ b.pct }}" data-sort_latest="{{ b.latest_iso }}"><td><a href="/console/batches/{{ b.batch_id }}">{{ b.label }}</a></td>
 <td class="num">{{ b.total }}</td><td class="num">{{ b.done }}</td>
@@ -98,5 +100,5 @@
 {% else %}
 {{ empty_row(5, "No sweeps yet. Run one above.") }}
 {% endfor %}
-{% endcall %}
+</tbody>{% endcall %}
 {% endblock %}

@@ -10,8 +10,9 @@
 </div>
 
 {% call table_wrap() %}
-<tr><th data-sort="sweep">Sweep</th><th data-sort="status">Status</th><th data-sort="total">Prospects</th><th data-sort="done">Audited</th><th data-sort="running">Running</th>
-<th data-sort="pending">Waiting</th><th data-sort="failed">Failed</th><th data-sort="pct">Progress</th><th data-sort="latest">Last activity</th><th></th></tr>
+<thead><tr><th data-sort="sweep">Sweep</th><th data-sort="status">Status</th><th data-sort="total">Prospects</th><th data-sort="done">Audited</th><th data-sort="running">Running</th>
+<th data-sort="pending">Waiting</th><th data-sort="failed">Failed</th><th data-sort="pct">Progress</th><th data-sort="latest">Last activity</th><th></th></tr></thead>
+<tbody>
 {% for b in rows %}
 <tr data-sort_sweep="{{ b.title|lower }}" data-sort_pct="{{ b.pct }}" data-sort_latest="{{ b.latest_iso }}">
   <td><a href="/console/batches/{{ b.batch_id }}">{{ b.label }}</a></td>
@@ -26,5 +27,5 @@
 {% else %}
 {{ empty_row(10, 'No sweeps in this window. <a href="/console">Start one</a>; a small market finishes in a few minutes. Looking for an older sweep? Widen the window above.'|safe) }}
 {% endfor %}
-{% endcall %}
+</tbody>{% endcall %}
 {% endblock %}

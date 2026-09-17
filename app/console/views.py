@@ -132,6 +132,11 @@ def icon(name: str) -> Markup:
     return Markup(f'<svg class="ic" aria-hidden="true"><use href="#i-{esc(name)}"></use></svg>')
 
 
+
+def _tag_titles():
+    from app.console import calllist
+    return calllist.TAG_TITLES
+
 def _render(template: str, **ctx: Any) -> str:
     """Render one screen with the shared context every template expects."""
     ctx.setdefault("theme_css", Markup(theme_css()))
@@ -149,6 +154,7 @@ def _render(template: str, **ctx: Any) -> str:
     # from another file does not see the caller's context, and the Outreach
     # card is one. Idempotent, so every render can afford to call it.
     _env.globals.setdefault("icon", icon)
+    _env.globals.setdefault("tag_titles", _tag_titles())
     for name in ("csrf_field", "status_pill", "chip", "tiles", "progress_bar",
                  "scan_label", "score_headers", "score_legend", "contact_cell",
                  "outreach_cell"):
@@ -311,6 +317,9 @@ def score_legend(open_by_default: bool = False) -> str:
     else they know.</p>
     <p>{chip("incomplete")} We could not finish checking them, usually because
     the site blocked us or a form only opens in a popup. We do not guess.</p>
+    <h4>Tags</h4>
+    <p><span class="tag warn">Partial</span> {esc(_tag_titles()["Partial"])}</p>
+    <p><span class="tag">Agency</span> {esc(_tag_titles()["Agency"])}</p>
   </div>
 </details>"""
 

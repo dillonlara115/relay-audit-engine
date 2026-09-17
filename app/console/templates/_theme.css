@@ -94,7 +94,7 @@ summary:focus-visible {
 .side nav a:focus-visible { box-shadow:inset var(--focus-ring); }
 textarea { min-height:86px; resize:vertical; }
 button { font-family:'PT Sans',sans-serif; font-weight:700; letter-spacing:.01em;
-         font-size:1.02rem; background:var(--orange); color:var(--asphalt); border:0;
+         font-size:1.02rem; background:var(--orange); color:#fff; border:0;
          border-radius:9px; padding:10px 20px; cursor:pointer; margin-top:14px;
          box-shadow:var(--shadow-soft); }
 /* The orange glow that used to sit under every button read as a third
@@ -228,9 +228,9 @@ details.legend p { margin:0 0 5px; font-size:.93rem; }
 .pagehead .primary a, .pagehead .primary button { display:inline-block; }
 a.btn { display:inline-block; font-family:'PT Sans',sans-serif; font-weight:700;
         letter-spacing:.01em; font-size:1.02rem; background:var(--orange);
-        color:var(--asphalt); border-radius:9px; padding:10px 20px;
+        color:#fff; border-radius:9px; padding:10px 20px;
         text-decoration:none; }
-a.btn:hover { text-decoration:none; color:var(--asphalt); }
+a.btn:hover { text-decoration:none; color:#fff; filter:brightness(1.05); }
 .crumbs { font-size:.85rem; color:var(--ink2); margin-bottom:6px; }
 .crumbs a { color:var(--ink2); }
 .crumbs span { margin:0 6px; }

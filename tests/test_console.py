@@ -577,9 +577,16 @@ def test_ember_the_replacement_text_color_passes_everywhere_it_is_used():
     assert _contrast(ember, "#ffffff") >= 4.5, "ember on a white card"
 
 
-def test_button_text_passes_against_the_orange_fill():
-    """Buttons keep the orange fill; the text on it is asphalt, not white."""
-    assert _contrast("#16120E", "#F25C1F") >= 4.5
+def test_button_text_is_white_on_the_orange_fill_by_the_owners_choice():
+    """The owner asked for white text on the orange buttons (Sep 17). White on
+    #F25C1F is 3.3:1: above the 3:1 floor for large text and interface
+    components, below the 4.5:1 body-text bar. Button labels are bold and the
+    console is internal; the public report is not touched by this rule."""
+    import re
+    assert _contrast("#ffffff", "#F25C1F") >= 3.0
+    css = views.theme_css()
+    assert re.search(r"^button \{[^}]*color:#fff", css, re.M)
+    assert re.search(r"^a\.btn \{[^}]*color:#fff", css, re.M)
 
 
 # ── P1.1: double submit guard ─────────────────────────────────────────────────
@@ -2535,3 +2542,30 @@ def test_sort_arrows_come_from_aria_sort_not_a_span():
 def test_the_tab_title_names_the_sweep_not_the_id():
     page = _list([_row()], sweep_label="Fort Collins, Sep 16")
     assert "<title>Call list: Fort Collins, Sep 16</title>" in page
+
+
+def test_every_sortable_table_keeps_its_header_row_in_a_thead():
+    """Sorting once moved the header row into the middle of the checks table:
+    the rows were all in one tbody and the header went along for the ride."""
+    import re
+    pages = {
+        "overview": _overview(recent_batches=[_sweep()]),
+        "sweeps": views.render_batches([_sweep()]),
+        "jobs": views.render_jobs([]),
+        "prospect": _prospect_page(history=[_hist(2, 60), _hist(1, 50)]),
+    }
+    for name, page in pages.items():
+        tables = re.findall(r'<table class="sortable">(.*?)</table>', page, re.S)
+        assert tables, name
+        for table in tables:
+            assert table.startswith("<thead><tr>"), name
+            assert "</thead>\n<tbody>" in table and table.rstrip().endswith("</tbody>"), name
+    assert "r !== headerRow && !r.querySelector('th')" in pages["jobs"]
+
+
+def test_the_partial_tag_explains_itself():
+    page = _list([_row(partial=True)])
+    assert 'class="tag warn" title="Partial audit: not enough checks finished' in page
+    assert "<h4>Tags</h4>" in page and "Re-audit before trusting them." in page
+    prospect = _prospect_page(history=[dict(_hist(2, 60), partial=True), _hist(1, 50)])
+    assert 'title="Partial audit:' in prospect

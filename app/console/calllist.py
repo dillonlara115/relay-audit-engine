@@ -90,6 +90,15 @@ def findings_state(row: Mapping[str, Any]) -> tuple[str, str]:
     return "dim", "Not drafted"
 
 
+TAG_TITLES = {
+    "Partial": ("Partial audit: not enough checks finished in one or more sections to "
+                "score it fairly, usually because the site blocked the crawl or a page "
+                "timed out. The scores may read low. Re-audit before trusting them."),
+    "Agency": ("An agency already runs this site: its footer credits one. Expect a "
+               "harder sell and a slower switch."),
+}
+
+
 def row_tags(row: Mapping[str, Any]) -> list[str]:
     tags = []
     if row.get("incumbent_agency"):
