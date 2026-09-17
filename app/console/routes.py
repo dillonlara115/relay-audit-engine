@@ -283,12 +283,14 @@ async def batches_screen(request: Request, days: int = 14) -> Response:
 
 
 @router.get("/batches/{batch_id}")
-async def batch_screen(batch_id: str, request: Request) -> Response:
+async def batch_screen(batch_id: str, request: Request, tab: str = "all") -> Response:
     rows, segments, check_defs = await asyncio.to_thread(_assemble_batch, batch_id)
     overview = await asyncio.to_thread(store.batch_overview)
     progress = next((b for b in overview if b["batch_id"] == batch_id), None)
     return _page(views.render_batch(batch_id, rows, segments, check_defs,
-                                    csrf=csrf_token(request), progress=progress, notice=_notice(request)))
+                                    csrf=csrf_token(request), progress=progress,
+                                    notice=_notice(request), tab=tab,
+                                    sweep_label=views.scan_label(progress) if progress else None))
 
 
 # ── One audit, and the human decisions ────────────────────────────────────────

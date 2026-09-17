@@ -181,7 +181,8 @@ def csrf_field(token: str) -> str:
 def chip(segment: str | None) -> str:
     name = segment or "incomplete"
     color = SEGMENT_COLORS.get(name, SEGMENT_COLORS["incomplete"])
-    return f'<span class="chip"><i style="background:{color}"></i>{esc(name)}</span>'
+    label = "Incomplete" if name == "incomplete" else name
+    return f'<span class="chip"><i style="background:{color}"></i>{esc(label)}</span>'
 
 
 def progress_bar(done: int, total: int) -> str:
@@ -240,10 +241,10 @@ def score_legend(open_by_default: bool = False) -> str:
     """What the three numbers mean, written for someone who has never read the
     spec. Sits next to every table that shows them."""
     return f"""<details class="legend"{' open' if open_by_default else ''}>
-  <summary>What do these numbers mean?</summary>
+  <summary>What the scores mean</summary>
   <div class="inner">
     <p>Think of a homeowner whose roof is leaking. They go through three steps,
-    and each company is scored out of 100 on how well it handles them.</p>
+    and each prospect is scored out of 100 on how well it handles them.</p>
     <h4>Found, out of 30: can they be found at all?</h4>
     <p>Do they show up on Google with a healthy profile and recent reviews? Is
     the phone number on their site the same one on Google? Do they have pages
@@ -257,7 +258,7 @@ def score_legend(open_by_default: bool = False) -> str:
     Does the contact form actually work? If a call is missed, does anything
     follow up? This is worth the most because it is where jobs quietly go
     missing, and it is the part nobody else checks.</p>
-    <h4>Opportunity types</h4>
+    <h4>Segments</h4>
     <p>{chip("Leaky Bucket")} Easy to find, but leads slip away. The best call
     on the list: they already have customers trying to reach them, and the fix
     is quick.</p>
@@ -319,42 +320,37 @@ def contact_cell(contacts: Sequence[Mapping[str, Any]]) -> str:
 
 def outreach_cell(sequence: Mapping[str, Any] | None, *, prospect_id: str,
                   audit_id: str | None, csrf: str, can_start: bool) -> str:
-    """Where this prospect sits in the four-touch sequence.
+    """Where this prospect sits in the four-email sequence, as a pill.
 
-    The button records a touch an operator already sent by hand. It is not a
-    send button and the route behind it transmits nothing.
+    A pill and a link, never a form. The call list is for reading state; the
+    prospect page is where Compose email and Mark as sent live, with the
+    explanation around them. The old button here read as a send action and
+    was clicked as one. `csrf` stays in the signature for the callers that
+    pass it and is not used.
     """
     from app import outreach
 
-    state = ""
-    show_button = can_start
-    if sequence:
-        seq = outreach.Sequence.from_dict(sequence)
-        if seq.status == outreach.CLOSED:
-            reason = seq.closed_reason or "finished"
-            if seq.last_intent:
-                reason = outreach.INTENT_LABELS.get(seq.last_intent, seq.last_intent)
-            return f'<span class="muted">{esc(reason)}</span>'
-        if seq.status == outreach.WAITING:
-            return f'<span class="tag warn">{esc(outreach.park_reason(seq))}</span>'
-        show_button = seq.is_open
-        if seq.touch_count:
-            due = seq.next_due_at.strftime("%b %d") if seq.next_due_at else ""
-            state = (f'<span class="muted">{seq.touch_count} of '
-                     f'{outreach.MAX_TOUCHES} sent{", next " + esc(due) if due else ""}</span><br>')
+    href = f"/console/audits/{esc(audit_id or '')}#outreach"
 
-    if not show_button:
-        return state or '<span class="muted">not started</span>'
-    label = "I sent this" if state else "I sent the first one"
-    audit_field = (f'<input type="hidden" name="audit_id" value="{esc(audit_id)}">'
-                   if audit_id else "")
-    return (f'{state}<form class="inline" method="post" '
-            f'action="/console/outreach/{esc(prospect_id)}/log-touch">'
-            f'{csrf_field(csrf)}{audit_field}'
-            f'<button class="ghost" type="submit">{label}</button></form>')
+    def pill(kind: str, text: str) -> str:
+        return f'<a class="pill {kind}" href="{href}">{esc(text)}</a>'
 
-
-# ── Run screen ────────────────────────────────────────────────────────────────
+    if not sequence:
+        return pill("tint", "Due: first email") if can_start else pill("dim", "Not started")
+    seq = outreach.Sequence.from_dict(sequence)
+    if seq.status == outreach.CLOSED:
+        reason = outreach.INTENT_LABELS.get(seq.last_intent or "") or seq.closed_reason or "finished"
+        return pill("dim", f"Closed: {reason}")
+    if seq.status == outreach.WAITING:
+        return pill("warn", f"Waiting: {outreach.park_reason(seq)}")
+    if seq.touch_count == 0:
+        return pill("tint", "Due: first email") if can_start else pill("dim", "Not started")
+    label = f"{seq.touch_count} of {seq.max_touches} sent"
+    if seq.due():
+        return pill("warn", f"Due today, {label}")
+    if seq.next_due_at:
+        label += f", next {seq.next_due_at.strftime('%b %d')}"
+    return pill("tint", label)
 
 
 def render_run(*, csrf: str, markets: Sequence[str], active_jobs: Sequence[Mapping[str, Any]],
@@ -439,92 +435,6 @@ def render_jobs(jobs_list: Sequence[Mapping[str, Any]], *,
 # ── Batch screen, with actions ────────────────────────────────────────────────
 
 
-# Vanilla JS, no build step: a search box, a segment filter, a check/status
-# filter, and click-to-sort headers. Everything runs over the rows already in
-# the page, so switching filters costs nothing server side.
-_BATCH_FILTER_SCRIPT = """<script>
-(function () {
-  var table = document.getElementById('call-list');
-  if (!table) return;
-  var tbody = table.tBodies[0];
-  var rows = Array.prototype.slice.call(tbody.rows);
-  var q = document.getElementById('f-q');
-  var segSel = document.getElementById('f-segment');
-  var checkSel = document.getElementById('f-check');
-  var statusSel = document.getElementById('f-status');
-  var countEl = document.getElementById('f-count');
-
-  function apply() {
-    var needle = (q.value || '').trim().toLowerCase();
-    var seg = segSel.value;
-    var code = checkSel.value;
-    var status = statusSel.value;
-    var shown = 0;
-    rows.forEach(function (row) {
-      var visible = true;
-      if (needle && row.dataset.business.indexOf(needle) === -1) visible = false;
-      if (visible && seg && row.dataset.segment !== seg) visible = false;
-      if (visible && code) {
-        var checks = JSON.parse(row.dataset.checks || '{}');
-        var have = checks[code];
-        if (status) {
-          if (have !== status) visible = false;
-        } else if (have === undefined) {
-          visible = false;
-        }
-      }
-      row.style.display = visible ? '' : 'none';
-      if (visible) shown++;
-    });
-    if (countEl) countEl.textContent = shown + ' of ' + rows.length + ' shown';
-  }
-
-  [q, segSel, checkSel, statusSel].forEach(function (el) {
-    el.addEventListener('input', apply);
-    el.addEventListener('change', apply);
-  });
-
-  var sortState = {key: null, dir: 1};
-  function sortBy(th) {
-    var key = th.dataset.sort;
-    sortState.dir = sortState.key === key ? -sortState.dir : 1;
-    sortState.key = key;
-    // The arrow lives in its own element. The first version rewrote the
-    // header's textContent, which flattened the <abbr> tooltips and the
-    // sub-labels out of existence on the first click.
-    table.querySelectorAll('th[data-sort] .arrow').forEach(function (a) { a.remove(); });
-    var arrow = document.createElement('span');
-    arrow.className = 'arrow';
-    arrow.textContent = sortState.dir === 1 ? ' \u25B2' : ' \u25BC';
-    th.appendChild(arrow);
-    table.querySelectorAll('th[data-sort]').forEach(function (h) {
-      h.setAttribute('aria-sort', h === th ? (sortState.dir === 1 ? 'ascending' : 'descending') : 'none');
-    });
-    rows.sort(function (a, b) {
-      var av = a.dataset['sort_' + key], bv = b.dataset['sort_' + key];
-      var an = parseFloat(av), bn = parseFloat(bv);
-      var cmp = (!isNaN(an) && !isNaN(bn)) ? (an - bn) : String(av).localeCompare(String(bv));
-      return cmp * sortState.dir;
-    });
-    rows.forEach(function (row) { tbody.appendChild(row); });
-  }
-  table.querySelectorAll('th[data-sort]').forEach(function (th) {
-    // Keyboard operable: a header a mouse can click but a keyboard cannot
-    // reach is not operable at all for someone who does not use a mouse.
-    th.setAttribute('tabindex', '0');
-    th.setAttribute('role', 'button');
-    th.setAttribute('aria-sort', 'none');
-    th.addEventListener('click', function () { sortBy(th); });
-    th.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sortBy(th); }
-    });
-  });
-
-  apply();
-})();
-</script>"""
-
-
 def _check_filter_options(check_defs: Sequence[Mapping[str, Any]]) -> str:
     groups: dict[str, list[str]] = {}
     for d in check_defs:
@@ -539,159 +449,74 @@ def _check_filter_options(check_defs: Sequence[Mapping[str, Any]]) -> str:
     )
 
 
+def _reaudit_confirm(business_name: str) -> Markup:
+    """An onsubmit attribute whose string survives any name. json.dumps makes
+    the JS literal; esc makes the attribute. The browser undoes the second
+    before the first runs."""
+    text = f"Re-audit {business_name}? This queues a fresh audit and overwrites the scores on this call list."
+    return Markup(esc("return confirm(" + json.dumps(text) + ")"))
+
+
 def render_batch(batch_id: str, rows: Sequence[Mapping[str, Any]],
                  segments: Mapping[str, int], check_defs: Sequence[Mapping[str, Any]] = (),
                  *, csrf: str, progress: Mapping[str, Any] | None = None,
-                 notice: tuple[str, str] | None = None) -> str:
-    tile_pairs = [(name, segments.get(name, 0)) for name in
-                  ("Leaky Bucket", "Invisible Pro", "Both Broken", "Dialed", "incomplete")
-                  if segments.get(name)]
+                 notice: tuple[str, str] | None = None, tab: str = "all",
+                 counts: Mapping[str, int] | None = None,
+                 sweep_label: str | None = None) -> str:
+    """The call list: one sweep's prospects in call order, under tabs."""
+    from app.console import calllist
 
-    table_rows = []
-    for r in rows:
+    tab = calllist.normalize_tab(tab)
+    counts = dict(counts) if counts is not None else calllist.tab_counts(segments)
+    shown = calllist.filter_rows(rows, tab=tab)
+
+    vm = []
+    for r in shown:
         scores = r.get("scores") or {}
-        tags = []
-        if r.get("incumbent_agency"):
-            tags.append('<span class="tag">agency</span>')
-        if r.get("partial"):
-            tags.append('<span class="tag warn">partial</span>')
-
-        state = r.get("findings_status")
-        if r.get("report_slug"):
-            action = f'<a href="/{esc(r["report_slug"])}">report</a>'
-        elif state == "approved":
-            action = (f'<form class="inline" method="post" action="/console/audits/'
-                      f'{esc(r["audit_id"])}/publish">{csrf_field(csrf)}'
-                      f'<button type="submit">Publish</button></form>')
-        elif state == "draft":
-            action = f'<a href="/console/audits/{esc(r["audit_id"])}">review draft</a>'
-        else:
-            action = f'<a href="/console/audits/{esc(r["audit_id"])}">open</a>'
-
-        contact_html = contact_cell(r.get("contacts") or [])
-        # A touch can only be logged once a report exists to have sent.
-        outreach_html = outreach_cell(
-            r.get("sequence"),
-            prospect_id=r.get("prospect_id") or "",
-            audit_id=r.get("audit_id"),
-            csrf=csrf,
-            can_start=bool(r.get("report_slug")),
-        )
-        business_needle = esc(f'{r.get("business_name") or ""} {r.get("city") or ""}'.lower())
-        checks_json = esc(json.dumps(r.get("checks") or {}, separators=(",", ":")))
-        segment_value = esc(r.get("segment") or "incomplete")
-
-        table_rows.append(
-            f'<tr data-business="{business_needle}" data-segment="{segment_value}" '
-            f'data-checks="{checks_json}" '
+        needle = f'{r.get("business_name") or ""} {r.get("city") or ""}'.lower()
+        # These attributes are what the filter script and the sort read, and a
+        # test pins their exact escaping. Built here with esc() and marked, so
+        # they come out byte for byte as they always did.
+        attrs = (
+            f'data-business="{esc(needle)}" data-segment="{esc(r.get("segment") or "incomplete")}" '
+            f'data-checks="{esc(json.dumps(r.get("checks") or {}, separators=(",", ":")))}" '
             f'data-sort_rank="{esc(r.get("rank"))}" '
             f'data-sort_business="{esc((r.get("business_name") or "").lower())}" '
             f'data-sort_found="{scores.get("found", -1)}" '
             f'data-sort_chosen="{scores.get("chosen", -1)}" '
             f'data-sort_booked="{scores.get("booked", -1)}" '
-            f'data-sort_total="{scores.get("total", -1)}">'
-            f'<td class="num">{esc(r.get("rank"))}</td>'
-            f'<td><a href="/console/audits/{esc(r.get("audit_id"))}">'
-            f'{esc(r.get("business_name"))}</a><br>'
-            f'<span class="muted">{esc(r.get("city") or "")}</span></td>'
-            f"<td>{chip(r.get('segment'))}</td>"
-            f'<td class="num">{scores.get("found", "")}</td>'
-            f'<td class="num">{scores.get("chosen", "")}</td>'
-            f'<td class="num">{scores.get("booked", "")}</td>'
-            f'<td class="num">{scores.get("total", "")}</td>'
-            f'<td class="tel">{esc(r.get("phone") or "")}</td>'
-            f'<td>{contact_html}</td>'
-            f'<td>{outreach_html}</td>'
-            f"<td>{' '.join(tags)}</td>"
-            f"<td>{action}</td>"
-            "</tr>"
+            f'data-sort_total="{scores.get("total", -1)}"'
         )
+        vm.append({
+            "attrs": Markup(attrs),
+            "rank": r.get("rank"), "audit_id": r.get("audit_id") or "",
+            "business_name": r.get("business_name") or "", "city": r.get("city") or "",
+            "chip": Markup(chip(r.get("segment"))),
+            "found": scores.get("found", ""), "chosen": scores.get("chosen", ""),
+            "booked": scores.get("booked", ""), "total": scores.get("total", ""),
+            "phone": r.get("phone") or "",
+            "contact": Markup(contact_cell(r.get("contacts") or [])),
+            "outreach": Markup(outreach_cell(
+                r.get("sequence"), prospect_id=r.get("prospect_id") or "",
+                audit_id=r.get("audit_id"), csrf=csrf, can_start=bool(r.get("report_slug")))),
+            "findings": calllist.findings_state(r),
+            "tags": calllist.row_tags(r),
+            "report_slug": r.get("report_slug") or "",
+            "can_publish": (not r.get("report_slug")) and r.get("findings_status") == "approved",
+            "reaudit_confirm": _reaudit_confirm(str(r.get("business_name") or "this prospect")),
+        })
 
-    live = ""
+    live = None
     if progress and progress.get("total"):
-        done, total = progress.get("done", 0), progress["total"]
-        state = "Done." if done >= total else f"{done} of {total} websites checked."
-        live = (f'<div class="banner">{state} <div style="margin-top:6px">'
-                f'{progress_bar(done, total)}</div></div>')
+        done, total = int(progress.get("done", 0) or 0), int(progress["total"])
+        live = {"text": "All audits finished." if done >= total else f"{done} of {total} audits finished.",
+                "bar": Markup(progress_bar(done, total))}
 
-    body = f"""
-<div class="lede"><a href="/console/batches">&larr; all scans</a></div>
-<div class="topbar"><h1>Who to call, in order</h1></div>
-<p class="lede">The best call is first. We rank by the kind of problem a company
-has, not by score: a company customers already find, whose leads slip away, is a
-faster and easier conversation than one that needs everything rebuilt.
-<span class="muted">Scan {esc(batch_id)}.</span></p>
-{live}
-{tiles(tile_pairs or [("audits", len(rows))])}
-
-<div class="card">
-  <h3>Draft findings for the top prospects</h3>
-  <p class="muted">The model picks three failures per prospect and writes the
-  consequence in plain language. Every draft still needs a human to approve it.</p>
-  <form method="post" action="/console/draft">
-    {csrf_field(csrf)}
-    <input type="hidden" name="batch_id" value="{esc(batch_id)}">
-    <label for="top">How many companies?</label>
-    <input id="top" type="number" name="top" value="10" min="1" max="40">
-    <button type="submit">Write talking points</button>
-  </form>
-</div>
-
-<h2>Call list</h2>
-{score_legend()}
-
-<div class="card filterbar">
-  <div class="filterrow">
-    <div>
-      <label for="f-q">Search by name</label>
-      <input id="f-q" type="text" placeholder="Company or city">
-    </div>
-    <div>
-      <label for="f-segment">Opportunity type</label>
-      <select id="f-segment">
-        <option value="">Any type</option>
-        <option value="Leaky Bucket">Leaky Bucket</option>
-        <option value="Invisible Pro">Invisible Pro</option>
-        <option value="Both Broken">Both Broken</option>
-        <option value="Dialed">Dialed</option>
-        <option value="incomplete">incomplete</option>
-      </select>
-    </div>
-    <div>
-      <label for="f-check">Show companies where</label>
-      <select id="f-check">
-        <option value="">Anything</option>
-        {_check_filter_options(check_defs)}
-      </select>
-    </div>
-    <div>
-      <label for="f-status">is</label>
-      <select id="f-status">
-        <option value="">Any result</option>
-        <option value="fail">a problem</option>
-        <option value="pass">fine</option>
-        <option value="skipped">not checked</option>
-      </select>
-    </div>
-  </div>
-  <p class="muted" id="f-count" style="margin-top:8px"></p>
-  <p class="hint">For example, choose "C16: Footer copyright" and "a problem"
-  to list every company whose website still shows an old copyright year. Click
-  any column heading to sort by it.</p>
-</div>
-
-<table id="call-list"><thead><tr>
-<th data-sort="rank">#</th><th data-sort="business">Company</th>
-<th>Opportunity<span class="sub">what kind of problem</span></th>{score_headers()}
-<th data-sort="total">Total<span class="sub">out of 100</span></th><th>Phone</th>
-<th>Contact<span class="sub">who to write to</span></th>
-<th>Outreach<span class="sub">four touches, then stop</span></th><th></th><th>Next step</th></tr></thead>
-<tbody>
-{"".join(table_rows) or '<tr><td colspan="12" class="muted">No websites checked yet. This finishes on its own; check back in a few minutes or watch <a href="/console/jobs">Activity</a>.</td></tr>'}
-</tbody></table>
-{_BATCH_FILTER_SCRIPT}
-"""
-    return shell(f"Call list {batch_id}", body, active="batches", notice=notice)
+    return _render("calllist.html", title=f"Call list {batch_id}", active="batches", csrf=csrf,
+                   batch_id=batch_id, rows=vm, tab=tab,
+                   tabs=calllist.visible_tabs(counts), progress=live,
+                   check_options=Markup(_check_filter_options(check_defs)),
+                   sweep_label=sweep_label or batch_id, notice=notice)
 
 
 def _sweep_state(b: Mapping[str, Any]) -> tuple[str, str]:

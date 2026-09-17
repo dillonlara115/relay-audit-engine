@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% from "_components.html" import page_header, pill, empty_row %}
+{% from "_scripts.html" import calllist_script %}
+{% block body %}
+{{ page_header("Call list",
+               "Best call first. Ranked by the kind of problem, not the score: a prospect customers already find, whose leads slip away, is the quickest conversation.",
+               primary_html='<a class="btn" href="#draft">Draft findings</a>'|safe,
+               crumbs=[("/console/batches", "Sweeps"), (None, sweep_label)]) }}
+
+{% if progress %}
+<div class="banner">{{ progress.text }}<div style="margin-top:6px">{{ progress.bar }}</div></div>
+{% endif %}
+
+<div class="kpis">
+  {% for slug, label, count in tabs if slug != "all" %}
+  <a class="kpi" href="?tab={{ slug }}"><div class="l">{{ label }}</div><div class="n">{{ count }}</div></a>
+  {% endfor %}
+</div>
+
+<div class="card" id="draft">
+  <h3>Draft findings</h3>
+  <p class="muted">The model ranks up to six problems per prospect and writes the
+  consequence in plain language. You choose the three the owner reads. Nothing is
+  published by this step.</p>
+  <form method="post" action="/console/draft">
+    {{ csrf_field(csrf) }}
+    <input type="hidden" name="batch_id" value="{{ batch_id }}">
+    <label for="top">Top prospects to draft for</label>
+    <input id="top" type="number" name="top" value="10" min="1" max="40">
+    <button type="submit">Draft findings</button>
+  </form>
+</div>
+
+<div class="tabs">
+  {% for slug, label, count in tabs %}
+  <a class="{{ 'on' if slug == tab else '' }}" href="?tab={{ slug }}">{{ label }} <b>{{ count }}</b></a>
+  {% endfor %}
+</div>
+
+<div class="toolbar">
+  <div class="search">{{ icon("search") }}<input id="f-q" type="search" placeholder="Search prospect or city" aria-label="Search prospect or city"></div>
+  <details class="popover">
+    <summary>{{ icon("filter") }} Filter</summary>
+    <div class="inner">
+      <label for="f-check">Where check</label>
+      <select id="f-check"><option value="">Any check</option>{{ check_options }}</select>
+      <label for="f-status">Result</label>
+      <select id="f-status">
+        <option value="">Any result</option>
+        <option value="fail">Fail</option>
+        <option value="pass">Pass</option>
+        <option value="skipped">Skipped</option>
+      </select>
+      <p class="hint">Example: choose C16: Footer copyright and Fail to list every
+      site still showing an old copyright year. Click any column heading to sort.</p>
+    </div>
+  </details>
+  <span class="muted" id="f-count"></span>
+</div>
+
+{{ score_legend() }}
+
+<div class="table-wrap"><table id="call-list"><thead><tr>
+<th data-sort="rank">#</th><th data-sort="business">Prospect</th>
+<th>Segment</th>{{ score_headers() }}
+<th data-sort="total">Total<span class="sub">out of 100</span></th><th>Phone</th>
+<th>Contact<span class="sub">who to write to</span></th>
+<th>Outreach<span class="sub">four emails, then stop</span></th>
+<th>Findings</th><th></th><th></th></tr></thead>
+<tbody>
+{% for r in rows %}
+<tr {{ r.attrs }}>
+<td class="num">{{ r.rank }}</td>
+<td><a href="/console/audits/{{ r.audit_id }}">{{ r.business_name }}</a><br><span class="muted">{{ r.city }}</span></td>
+<td>{{ r.chip }}</td>
+<td class="num">{{ r.found }}</td><td class="num">{{ r.chosen }}</td><td class="num">{{ r.booked }}</td>
+<td class="num">{{ r.total }}</td>
+<td class="tel">{% if r.phone %}<a href="tel:{{ r.phone }}">{{ r.phone }}</a>{% endif %}</td>
+<td>{{ r.contact }}</td>
+<td>{{ r.outreach }}</td>
+<td>{{ pill(r.findings[0], r.findings[1]) }}</td>
+<td>{% for t in r.tags %}<span class="tag{{ ' warn' if t == 'Partial' else '' }}">{{ t }}</span> {% endfor %}</td>
+<td class="rowact">
+  <a href="/console/audits/{{ r.audit_id }}" title="Open prospect" aria-label="Open prospect">{{ icon("file") }}</a>
+  {% if r.report_slug %}<a href="/{{ r.report_slug }}" target="_blank" rel="noopener noreferrer" title="Open report" aria-label="Open report">{{ icon("external") }}</a>{% endif %}
+  {% if r.can_publish %}<form class="inline" method="post" action="/console/audits/{{ r.audit_id }}/publish">{{ csrf_field(csrf) }}<button class="ghost" type="submit">Publish report</button></form>{% endif %}
+  <form class="inline" method="post" action="/console/audits/{{ r.audit_id }}/reaudit" onsubmit="{{ r.reaudit_confirm }}">{{ csrf_field(csrf) }}<button class="icon" type="submit" title="Re-audit" aria-label="Re-audit">{{ icon("refresh") }}</button></form>
+</td>
+</tr>
+{% else %}
+{{ empty_row(14, 'No audits finished yet. This finishes on its own; check back in a few minutes or watch <a href="/console/jobs">Jobs</a>.'|safe) }}
+{% endfor %}
+</tbody></table></div>
+{{ calllist_script() }}
+{% endblock %}

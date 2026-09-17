@@ -53,3 +53,88 @@
 })();
 </script>
 {%- endmacro %}
+
+{#- The call list. A search box, a check/result filter and click-to-sort
+    headers, all over the rows already in the page, so switching a filter
+    costs nothing server side. Segment filtering moved to the tabs, which are
+    server side, so the old segment select is gone. -#}
+{% macro calllist_script() -%}
+<script>
+(function () {
+  var table = document.getElementById('call-list');
+  if (!table) return;
+  var tbody = table.tBodies[0];
+  var rows = Array.prototype.slice.call(tbody.rows).filter(function (r) { return r.dataset.business !== undefined; });
+  var q = document.getElementById('f-q');
+  var checkSel = document.getElementById('f-check');
+  var statusSel = document.getElementById('f-status');
+  var countEl = document.getElementById('f-count');
+
+  function apply() {
+    var needle = (q.value || '').trim().toLowerCase();
+    var code = checkSel.value;
+    var status = statusSel.value;
+    var shown = 0;
+    rows.forEach(function (row) {
+      var visible = true;
+      if (needle && row.dataset.business.indexOf(needle) === -1) visible = false;
+      if (visible && code) {
+        var checks = JSON.parse(row.dataset.checks || '{}');
+        var have = checks[code];
+        if (status) {
+          if (have !== status) visible = false;
+        } else if (have === undefined) {
+          visible = false;
+        }
+      }
+      row.style.display = visible ? '' : 'none';
+      if (visible) shown++;
+    });
+    if (countEl) countEl.textContent = shown + ' of ' + rows.length + ' shown';
+  }
+
+  [q, checkSel, statusSel].forEach(function (el) {
+    el.addEventListener('input', apply);
+    el.addEventListener('change', apply);
+  });
+
+  var sortState = {key: null, dir: 1};
+  function sortBy(th) {
+    var key = th.dataset.sort;
+    sortState.dir = sortState.key === key ? -sortState.dir : 1;
+    sortState.key = key;
+    // The arrow lives in its own element. The first version rewrote the
+    // header's textContent, which flattened the <abbr> tooltips and the
+    // sub-labels out of existence on the first click.
+    table.querySelectorAll('th[data-sort] .arrow').forEach(function (a) { a.remove(); });
+    var arrow = document.createElement('span');
+    arrow.className = 'arrow';
+    arrow.textContent = sortState.dir === 1 ? ' ▲' : ' ▼';
+    th.appendChild(arrow);
+    table.querySelectorAll('th[data-sort]').forEach(function (h) {
+      h.setAttribute('aria-sort', h === th ? (sortState.dir === 1 ? 'ascending' : 'descending') : 'none');
+    });
+    rows.sort(function (a, b) {
+      var av = a.dataset['sort_' + key], bv = b.dataset['sort_' + key];
+      var an = parseFloat(av), bn = parseFloat(bv);
+      var cmp = (!isNaN(an) && !isNaN(bn)) ? (an - bn) : String(av).localeCompare(String(bv));
+      return cmp * sortState.dir;
+    });
+    rows.forEach(function (row) { tbody.appendChild(row); });
+  }
+  table.querySelectorAll('th[data-sort]').forEach(function (th) {
+    // Keyboard operable: a header a mouse can click but a keyboard cannot
+    // reach is not operable at all for someone who does not use a mouse.
+    th.setAttribute('tabindex', '0');
+    th.setAttribute('role', 'button');
+    th.setAttribute('aria-sort', 'none');
+    th.addEventListener('click', function () { sortBy(th); });
+    th.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); sortBy(th); }
+    });
+  });
+
+  apply();
+})();
+</script>
+{%- endmacro %}

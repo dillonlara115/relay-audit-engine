@@ -1884,3 +1884,150 @@ def test_a_call_list_row_with_every_tag_carries_no_forbidden_dash():
     page = views.render_batch("b1", [row], {"Leaky Bucket": 1}, csrf="t")
     assert not contains_forbidden_dash(page)
     assert "Peak <script>" not in page and "&lt;script&gt;" in page
+
+
+# ── The call list on its template ─────────────────────────────────────────────
+
+
+def _row(i=1, segment="Leaky Bucket", **kw):
+    base = {"rank": i, "audit_id": f"a{i}", "prospect_id": f"p{i}",
+            "business_name": f"Roofer {i}", "city": "COS", "segment": segment,
+            "scores": {"found": 20, "chosen": 20, "booked": 10, "total": 50},
+            "phone": "(719) 555-0100", "checks": {"C16": "fail"}, "contacts": [],
+            "sequence": None, "report_slug": None, "findings_status": None}
+    base.update(kw)
+    return base
+
+
+def _list(rows, **kw):
+    segments = {}
+    for r in rows:
+        segments[r.get("segment") or "incomplete"] = segments.get(r.get("segment") or "incomplete", 0) + 1
+    return views.render_batch("b1", rows, segments, csrf="t", **kw)
+
+
+def test_the_call_list_speaks_the_new_vocabulary():
+    page = _list([_row()])
+    for present in ("<h1>Call list</h1>", "Draft findings", "Segment", "Prospect", "Re-audit"):
+        assert present in page, present
+    for gone in ("Who to call", "Opportunity", "Write talking points", "I sent",
+                 "Next step", "all scans", "review draft"):
+        assert gone not in page, gone
+
+
+def test_tabs_carry_counts_and_the_active_one_is_marked():
+    page = _list([_row(1), _row(2, segment="Dialed"), _row(3, segment=None)], tab="dialed")
+    assert 'href="?tab=all">All <b>3</b>' in page
+    assert 'href="?tab=leaky-bucket">Leaky Bucket <b>1</b>' in page
+    assert 'href="?tab=incomplete">Incomplete <b>1</b>' in page
+    assert 'class="on" href="?tab=dialed"' in page
+
+
+def test_a_segment_tab_shows_only_its_rows():
+    page = _list([_row(1), _row(2, segment="Dialed")], tab="dialed")
+    assert "Roofer 2" in page and "Roofer 1" not in page
+
+
+def test_an_unknown_tab_falls_back_to_all():
+    page = _list([_row(1), _row(2, segment="Dialed")], tab="nonsense")
+    assert "Roofer 1" in page and "Roofer 2" in page
+
+
+def test_the_excluded_tab_is_not_drawn_until_it_can_be_counted():
+    assert "Excluded" not in _list([_row()])
+
+
+def test_each_row_offers_open_and_reaudit_and_report_only_when_published():
+    page = _list([_row(1, business_name="Peak's \"Best\" Roofing", report_slug="abcdefghijklmnop")])
+    assert 'action="/console/audits/a1/reaudit"' in page
+    assert "Re-audit Peak" in page and "return confirm(" in page
+    assert 'href="/abcdefghijklmnop" target="_blank" rel="noopener noreferrer"' in page
+    assert "Publish report" not in page
+
+
+def test_an_approved_row_offers_publish():
+    page = _list([_row(findings_status="approved")])
+    assert 'action="/console/audits/a1/publish"' in page and "Publish report" in page
+
+
+@pytest.mark.parametrize("row,label", [
+    (dict(), "Not drafted"),
+    (dict(findings_status="draft"), "Draft"),
+    (dict(findings_status="approved"), "Approved"),
+    (dict(findings_status="approved", report_slug="abcdefghijklmnop"), "Published"),
+])
+def test_the_findings_pill_names_the_stage(row, label):
+    assert f">{label}<" in _list([_row(**row)])
+
+
+def test_tags_read_as_words():
+    page = _list([_row(partial=True, incumbent_agency="scorpion")])
+    assert ">Agency<" in page and ">Partial<" in page
+    assert ">agency<" not in page and ">partial<" not in page
+
+
+def test_the_segment_chip_reads_incomplete_as_a_word():
+    assert ">Incomplete<" in views.chip(None)
+    assert 'data-segment="incomplete"' in _list([_row(segment=None)])
+
+
+def test_the_progress_banner_counts_audits():
+    page = _list([_row()], progress={"total": 4, "done": 2})
+    assert "2 of 4 audits finished." in page
+    assert "All audits finished." in _list([_row()], progress={"total": 4, "done": 4})
+
+
+def test_the_outreach_cell_is_a_pill_that_links_to_the_prospect_page():
+    from app import outreach
+
+    seq = outreach.advance(outreach.open_sequence("p1"))
+    cell = views.outreach_cell(seq.to_dict(), prospect_id="p1", audit_id="a1", csrf="t",
+                               can_start=True)
+    assert 'href="/console/audits/a1#outreach"' in cell
+    assert "<form" not in cell and "log-touch" not in cell
+    assert "1 of 4 sent" in cell
+
+
+def test_a_published_prospect_with_nothing_sent_is_due_its_first_email():
+    cell = views.outreach_cell(None, prospect_id="p1", audit_id="a1", csrf="t", can_start=True)
+    assert "Due: first email" in cell
+
+
+def test_a_parked_sequence_says_why_in_the_pill():
+    from app import outreach
+
+    seq, _ = outreach.record_reply(outreach.advance(outreach.open_sequence("p1")),
+                                   outreach.WRONG_PERSON)
+    cell = views.outreach_cell(seq.to_dict(), prospect_id="p1", audit_id="a1", csrf="t",
+                               can_start=True)
+    assert "Waiting: needs a new contact" in cell
+
+
+def test_the_reaudit_confirm_survives_quotes_in_a_name():
+    attr = views._reaudit_confirm('Peak "Best" Roofing')
+    assert "&quot;Re-audit Peak" in attr
+    assert "\\&quot;Best\\&quot;" in attr
+
+
+# ── calllist: the pure filters ────────────────────────────────────────────────
+
+
+def test_filter_rows_by_tab_search_and_check():
+    from app.console import calllist
+
+    rows = [_row(1), _row(2, segment="Dialed", checks={"C16": "pass"}),
+            _row(3, business_name="Summit Roofing", city="Pueblo")]
+    assert [r["rank"] for r in calllist.filter_rows(rows, tab="dialed")] == [2]
+    assert [r["rank"] for r in calllist.filter_rows(rows, q="pueblo")] == [3]
+    assert [r["rank"] for r in calllist.filter_rows(rows, check="C16", status="fail")] == [1, 3]
+    assert [r["rank"] for r in calllist.filter_rows(rows, check="C16")] == [1, 2, 3]
+    assert calllist.filter_rows(rows, check="B1") == []
+
+
+def test_tab_counts_add_up_and_leave_excluded_out_until_counted():
+    from app.console import calllist
+
+    counts = calllist.tab_counts({"Leaky Bucket": 2, "Dialed": 1, "incomplete": 3})
+    assert counts["all"] == 6 and counts["leaky-bucket"] == 2 and counts["incomplete"] == 3
+    assert "excluded" not in counts
+    assert calllist.tab_counts({}, excluded=4)["excluded"] == 4
