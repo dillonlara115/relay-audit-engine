@@ -300,7 +300,7 @@ Route: `/{slug}` at the root of the public hostname, unauthenticated, unguessabl
 16-character slug. `/r/{slug}` 301s to it for reports published before the move.
 
 The public hostname is **`reports.relayforroofers.com`**, and it serves the report
-and nothing else: the console and dashboard stay on the Cloud Run URL, which is
+and nothing else: the console stays on the Cloud Run URL, which is
 not guessable. A URL is something a contractor reads, so the subdomain follows the
 same copy rule as the page. `leads.` was considered and rejected on those grounds,
 since it names what the tool does for us rather than what the page is for him.
@@ -361,7 +361,7 @@ Full plan, including the sending phase and the decisions behind it:
 - `cache`: TTL expiry and bypass.
 - Report DTO: assert scores and segments never appear in the public payload.
 - A `seed` command loading three synthetic prospects, one per segment, so the
-  dashboard is never empty in development.
+  console is never empty in development.
 
 ---
 

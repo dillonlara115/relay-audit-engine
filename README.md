@@ -115,7 +115,7 @@ app/
   agents/         audit_graph.py (the ADK graph), coordinator.py, vision.py, diagnostician.py
   checks/         one function per check (base.py, onpage.py, rendered.py, speed.py, vision.py, booked.py, serp.py)
   console/        the operator web app: routes.py, views.py, auth.py
-  report/         the public one-page report + the read-only dashboard
+  report/         the public one-page report
   store/          Firestore access (firestore.py) and GCS evidence (evidence.py)
   tools/          crawl.py, places.py, pagespeed.py, render.py, serp.py, phones.py, pubsub.py
   gate.py         the fit gate, a pure function
@@ -124,7 +124,7 @@ app/
   pipeline.py     orchestration shared by the CLI and the ADK graph
   tasks.py        per-prospect audit claim/lease/renew, survives a killed worker
   jobs.py         long-running operator jobs (sweep, dispatch, draft, agent runs)
-  worker.py       the FastAPI app: Pub/Sub push handlers, console, dashboard, report
+  worker.py       the FastAPI app: Pub/Sub push handlers, console, report
   cli.py          the operator CLI
 renderer/         the Playwright render service (Node)
 docs/             engine-spec.md, found-to-booked-audit-spec.md, outreach-plan.md, architecture.png
@@ -423,8 +423,7 @@ Visiting once converts the key into a session cookie and redirects to a clean UR
 so the password never sits in browser history after the first visit. From there:
 **Start a scan** → **Results** (the ranked call list, filterable by any check) →
 open a company → **Write talking points** → a human approves → **Create the
-shareable report**. `/dashboard` is the same data, read-only, with no buttons —
-useful for a screen nobody should be able to act from.
+shareable report**. `/dashboard` redirects to the console; the overview lives there now.
 
 Long jobs (a sweep, a coordinator run) are backed by Pub/Sub the same way audits
 are: the browser starts a job and polls it, so a slow sweep survives closing the

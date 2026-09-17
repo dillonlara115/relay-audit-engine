@@ -1,6 +1,6 @@
 """The operator console: a web app for running the engine.
 
-Read-only views live in app.report.dashboard. This package adds the actions,
+The read-only dashboard merged into this package. This package adds the actions,
 which is why it carries its own session gate and a CSRF token on every
 mutating form.
 

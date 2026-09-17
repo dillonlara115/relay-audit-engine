@@ -1,7 +1,7 @@
 """The console gate: a session cookie plus a double submit CSRF token.
 
 The console can start crawls, spend model quota and publish a page to a real
-contractor, so it needs more than the read only dashboard's gate.
+contractor, so it needs a proper gate.
 
 Session: a form at the page you asked for. Enter the password, receive an
 HttpOnly cookie holding a hash of it, and land on the page you were going to.

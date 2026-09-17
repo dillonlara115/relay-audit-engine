@@ -646,14 +646,6 @@ def test_tables_are_wrapped_so_only_the_table_scrolls_on_a_narrow_screen():
         assert '<div class="table-wrap"><table' in page
 
 
-def test_the_dashboard_tables_are_wrapped_too():
-    """Applied once in shell(), so both console and dashboard inherit it."""
-    from app.report import dashboard
-
-    assert '<div class="table-wrap"><table' in dashboard.render_overview([])
-    assert '<div class="table-wrap"><table' in dashboard.render_batch("b1", [], {})
-
-
 # ── P2: empty states, progress color, scan labels, sidebar texture ───────────
 
 
@@ -1858,3 +1850,37 @@ def test_the_ported_screens_carry_no_forbidden_dash():
                  views.render_job(_job(status="running"), csrf="t"),
                  views.render_job(_job(status="failed", error="x", result={}), csrf="t")):
         assert not contains_forbidden_dash(page)
+
+
+# ── The dashboard merged into the console ─────────────────────────────────────
+
+
+def test_the_old_dashboard_paths_redirect_permanently(client):
+    """A bookmark keeps working."""
+    sign_in(client)
+    top = client.get("/dashboard", follow_redirects=False)
+    assert (top.status_code, top.headers["location"]) == (301, "/console")
+    one = client.get("/dashboard/b1", follow_redirects=False)
+    assert (one.status_code, one.headers["location"]) == (301, "/console/batches/b1")
+
+
+def test_the_old_dashboard_paths_stay_gated(client):
+    """A stranger gets the password form, not a redirect that names a path."""
+    assert client.get("/dashboard", follow_redirects=False).status_code == 401
+    assert client.get("/dashboard/b1", follow_redirects=False).status_code == 401
+
+
+def test_the_dashboard_module_is_gone():
+    import importlib.util
+
+    assert importlib.util.find_spec("app.report.dashboard") is None
+
+
+def test_a_call_list_row_with_every_tag_carries_no_forbidden_dash():
+    """The old dashboard dash test, re-homed on the call list it duplicated."""
+    row = {"rank": 1, "audit_id": "a1", "business_name": "Peak <script>", "city": "COS",
+           "segment": "Leaky Bucket", "scores": {"found": 1, "chosen": 2, "booked": 3, "total": 6},
+           "phone": "x", "partial": True, "incumbent_agency": "scorpion", "checks": {}}
+    page = views.render_batch("b1", [row], {"Leaky Bucket": 1}, csrf="t")
+    assert not contains_forbidden_dash(page)
+    assert "Peak <script>" not in page and "&lt;script&gt;" in page

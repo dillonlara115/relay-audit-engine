@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import re
+from urllib.parse import quote
 import os
 
 from fastapi import FastAPI, Request, Response
@@ -186,103 +187,22 @@ def health() -> dict:
     return {"ok": True, "build": BUILD_SHA, "worker": WORKER}
 
 
-# ── operator dashboard ────────────────────────────────────────────────────────
+# ── the old dashboard ─────────────────────────────────────────────────────────
 #
-# Read only and internal. Same gate, same session cookie, same CONSOLE_PASSWORD
-# as /console: this and the console are one operator surface split across two
-# files, and signing into either signs into both.
+# The read-only overview merged into the console. The paths stay so a bookmark
+# keeps working, and they sit behind the same gate: a stranger gets the
+# password form rather than the redirect, and on the contractor-facing
+# hostname they remain a 404 like everything else that is not a report.
 
 
-def _batch_overview() -> list:
-    """Recent batches, aggregated from the task ledger client side. The ledger
-    is the truth about progress; the batches collection only counts sweeps."""
-    from datetime import timedelta
-
-    from google.cloud import firestore as gcf
-
-    from app.leases import AUDIT_TASKS
-
-    cutoff = store.utcnow() - timedelta(days=14)
-    grouped: dict = {}
-    query = store.get_client().collection(AUDIT_TASKS).where(
-        filter=gcf.FieldFilter("updated_at", ">=", cutoff)
-    )
-    for snap in query.stream():
-        task = snap.to_dict() or {}
-        batch_id = task.get("batch_id")
-        if not batch_id:
-            continue
-        row = grouped.setdefault(batch_id, {"batch_id": batch_id, "total": 0,
-                                            "done": 0, "running": 0, "pending": 0,
-                                            "failed": 0, "latest": None})
-        row["total"] += 1
-        row[task.get("status") or "pending"] = row.get(task.get("status") or "pending", 0) + 1
-        updated = task.get("updated_at")
-        if updated and (row["latest"] is None or updated > row["latest"]):
-            row["latest"] = updated
-    rows = sorted(grouped.values(), key=lambda r: r["latest"] or store.utcnow(), reverse=True)
-    for row in rows:
-        row["latest"] = row["latest"].strftime("%b %d %H:%M") if row["latest"] else ""
-    return rows
+@app.get("/dashboard", include_in_schema=False)
+def dashboard_moved() -> Response:
+    return RedirectResponse("/console", status_code=301)
 
 
-@app.get("/dashboard")
-async def dashboard(request: Request) -> Response:
-    import asyncio
-
-    from app.console.auth import authorize
-    from app.report.dashboard import render_overview
-
-    gate = authorize(request)
-    if gate is not None:
-        return gate
-    batches = await asyncio.to_thread(_batch_overview)
-    return Response(content=render_overview(batches),
-                    media_type="text/html; charset=utf-8",
-                    headers={"X-Robots-Tag": "noindex, nofollow",
-                             "Cache-Control": "private, no-store"})
-
-
-@app.get("/dashboard/{batch_id}")
-async def dashboard_batch(batch_id: str, request: Request) -> Response:
-    import asyncio
-
-    from app.console.auth import authorize
-    from app.ranker import rank
-    from app.report.dashboard import render_batch
-
-    gate = authorize(request)
-    if gate is not None:
-        return gate
-
-    def assemble():
-        audits = list(store.audits_for_batch(batch_id))
-        prospects = {}
-        for audit in audits:
-            pid = audit.get("prospect_id")
-            if pid and pid not in prospects:
-                prospects[pid] = store.get_prospect(pid) or {}
-        slugs = {a.get("audit_id"): a.get("report_slug") for a in audits}
-        ranked = rank(audits, prospects)
-        rows = []
-        segments: dict = {}
-        for r in ranked:
-            segments[r.segment or "incomplete"] = segments.get(r.segment or "incomplete", 0) + 1
-            findings = store.get_draft_findings(r.audit_id)
-            rows.append({
-                "rank": r.rank, "business_name": r.business_name, "city": r.city,
-                "segment": r.segment, "scores": dict(r.scores), "phone": r.phone,
-                "partial": r.partial, "incumbent_agency": r.incumbent_agency,
-                "report_slug": slugs.get(r.audit_id),
-                "findings_status": (findings or {}).get("status"),
-            })
-        return rows, segments
-
-    rows, segments = await asyncio.to_thread(assemble)
-    return Response(content=render_batch(batch_id, rows, segments),
-                    media_type="text/html; charset=utf-8",
-                    headers={"X-Robots-Tag": "noindex, nofollow",
-                             "Cache-Control": "private, no-store"})
+@app.get("/dashboard/{batch_id}", include_in_schema=False)
+def dashboard_batch_moved(batch_id: str) -> Response:
+    return RedirectResponse(f"/console/batches/{quote(batch_id, safe='')}", status_code=301)
 
 
 @app.post("/tick")
