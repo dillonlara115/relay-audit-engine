@@ -3260,3 +3260,12 @@ def test_tel_inputs_are_styled_like_the_others():
     css = views.theme_css()
     rule = _re.search(r"input\[type=text\],[^{]*\{", css).group(0)
     assert "input[type=tel]" in rule
+
+
+def test_dialogs_centre_despite_the_global_margin_reset():
+    import re as _re
+
+    css = views.theme_css()
+    assert _re.search(r"^\* \{[^}]*margin:0", css, _re.M), "the reset this guards against"
+    rule = _re.search(r"^dialog\.modal \{[^}]*\}", css, _re.M).group(0)
+    assert "margin:auto" in rule

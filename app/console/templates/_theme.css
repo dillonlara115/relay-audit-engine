@@ -378,7 +378,9 @@ details.vars-menu button.var.empty:hover { background:transparent; }
 .fieldrow details.vars-menu { margin-bottom:4px; }
 
 /* ── Dialogs. The three big cards on a prospect page open on demand. ── */
-dialog.modal { width:min(760px, calc(100vw - 32px)); max-height:calc(100vh - 48px);
+/* The global margin reset above strips the margin:auto a native dialog
+   centres itself with, so it is put back here. */
+dialog.modal { margin:auto; width:min(760px, calc(100vw - 32px)); max-height:calc(100vh - 48px);
   overflow:auto; border:1px solid var(--line); border-radius:14px; padding:22px 24px;
   background:var(--panel); color:var(--asphalt); box-shadow:0 20px 60px rgba(22,18,14,.25); }
 dialog.modal.wide { width:min(1100px, calc(100vw - 32px)); }
