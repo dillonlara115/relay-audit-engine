@@ -276,3 +276,34 @@ function sendConfirm(form) {
 })();
 </script>
 {%- endmacro %}
+
+{#- Dialogs. A button with data-open shows the dialog of that id; Escape,
+    the close button and a click on the backdrop close it. A redirect that
+    lands on #outreach or #text (the send and log routes do) opens the
+    dialog holding that anchor, so the notice and the form are in view. -#}
+{% macro modals() -%}
+<script>
+(function () {
+  function open(id) {
+    var d = document.getElementById(id);
+    while (d && d.tagName !== 'DIALOG') d = d.parentNode && d.parentNode.tagName ? d.parentNode : null;
+    if (!d || d.open) return;
+    if (typeof d.showModal === 'function') d.showModal(); else d.setAttribute('open', '');
+    var first = d.querySelector('input:not([type=hidden]), textarea, button:not([data-close])');
+    if (first) first.focus();
+  }
+  document.querySelectorAll('[data-open]').forEach(function (btn) {
+    btn.addEventListener('click', function () { open(btn.dataset.open); });
+  });
+  document.querySelectorAll('dialog.modal').forEach(function (d) {
+    d.querySelectorAll('[data-close]').forEach(function (b) { b.addEventListener('click', function () { d.close(); }); });
+    d.addEventListener('click', function (e) {
+      var r = d.getBoundingClientRect();
+      var inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+      if (!inside && e.target === d) d.close();
+    });
+  });
+  if (location.hash) open(location.hash.slice(1));
+})();
+</script>
+{%- endmacro %}

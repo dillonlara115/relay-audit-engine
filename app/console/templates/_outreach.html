@@ -2,12 +2,13 @@
     the next email and press Send on it, or mark one sent from elsewhere,
     and see where the sequence stands. The one sentence about what sends
     and when is fixed and appears beside the button on purpose. -#}
-{% from "_components.html" import pill, variables_menu %}
+{% from "_components.html" import pill, variables_menu, modal_close %}
 
 {% macro outreach_card(o, csrf, prospect_id, audit_id) -%}
-<div class="card" id="outreach">
+<dialog class="modal" id="outreach" aria-labelledby="outreach-title">
   <div class="pagehead">
-    <h2>Outreach {{ pill(o.state[0], o.state[1]) }}</h2>
+    <h2 id="outreach-title">Outreach {{ pill(o.state[0], o.state[1]) }}</h2>
+    <div class="primary">{{ modal_close() }}</div>
   </div>
   <p class="muted">Sends from {{ o.mailbox }} when you press Send on an email you have read. Nothing goes out on its own.</p>
 
@@ -101,5 +102,5 @@
     {% endif %}
     {% if o.next %}<p class="muted">{{ o.next }}</p>{% endif %}
   </div>
-</div>
+</dialog>
 {%- endmacro %}

@@ -82,7 +82,7 @@ h3 { font-size:1.1rem; margin:0 0 6px; }
 
 label { display:block; font-size:.85rem; color:var(--ink2); margin:12px 0 4px; font-weight:600; }
 input[type=text], input[type=number], input[type=email], input[type=password],
-input[type=search], input[type=url], textarea, select {
+input[type=search], input[type=url], input[type=tel], textarea, select {
   width:100%; min-height:44px; padding:10px 14px; border:1px solid var(--line);
   border-radius:9px; font-family:'Work Sans',sans-serif; font-size:16px;
   line-height:1.4; background:#fff; color:var(--asphalt);
@@ -376,3 +376,23 @@ details.vars-menu button.var.empty:hover { background:transparent; }
 .fieldrow { display:flex; justify-content:space-between; align-items:end; gap:12px; }
 .fieldrow label { margin-bottom:6px; }
 .fieldrow details.vars-menu { margin-bottom:4px; }
+
+/* ── Dialogs. The three big cards on a prospect page open on demand. ── */
+dialog.modal { width:min(760px, calc(100vw - 32px)); max-height:calc(100vh - 48px);
+  overflow:auto; border:1px solid var(--line); border-radius:14px; padding:22px 24px;
+  background:var(--panel); color:var(--asphalt); box-shadow:0 20px 60px rgba(22,18,14,.25); }
+dialog.modal.wide { width:min(1100px, calc(100vw - 32px)); }
+dialog.modal::backdrop { background:rgba(22,18,14,.45); }
+dialog.modal .pagehead { margin-bottom:8px; }
+dialog.modal .pagehead .primary { display:flex; gap:8px; align-items:center; }
+dialog.modal .pagehead .primary button { margin-top:0; }
+dialog.modal button.icon.close { width:36px; height:36px; padding:0; display:inline-flex;
+  align-items:center; justify-content:center; background:transparent; border:1px solid var(--line);
+  border-radius:9px; color:var(--ink2); box-shadow:none; }
+dialog.modal button.icon.close:hover { background:var(--field); color:var(--asphalt); }
+dialog.modal .step { margin-top:16px; }
+.openers { display:inline-flex; gap:8px; flex-wrap:wrap; margin-left:auto; }
+.card .openers { float:right; }
+button.opener { margin-top:0; display:inline-flex; align-items:center; gap:6px; }
+button.opener .pill { margin-left:2px; }
+@media (max-width: 720px) { .card .openers { float:none; display:flex; margin-top:10px; } }

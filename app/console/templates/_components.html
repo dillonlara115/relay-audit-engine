@@ -51,3 +51,13 @@
   </div>
 </details>
 {%- endmacro %}
+
+{#- A button that opens the dialog with this id. The pill, when given, is
+    the state the reader would otherwise have had to open it to see. -#}
+{% macro modal_open(target, label, icon_name, pill_html=None) -%}
+<button type="button" class="ghost opener" data-open="{{ target }}" aria-haspopup="dialog" aria-controls="{{ target }}">{{ icon(icon_name) }} {{ label }}{% if pill_html %} {{ pill_html }}{% endif %}</button>
+{%- endmacro %}
+
+{% macro modal_close() -%}
+<button type="button" class="icon close" data-close aria-label="Close">{{ icon("x") }}</button>
+{%- endmacro %}

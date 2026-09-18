@@ -1,7 +1,7 @@
 {% extends "base.html" %}
-{% from "_components.html" import page_header, kpi, pill, table_wrap, empty_row %}
+{% from "_components.html" import page_header, kpi, pill, table_wrap, empty_row, modal_open, modal_close %}
 {% from "_outreach.html" import outreach_card %}
-{% from "_scripts.html" import insert_variables, copy_button, send_confirm %}
+{% from "_scripts.html" import insert_variables, copy_button, send_confirm, modals %}
 {% block body %}
 {{ page_header(p.name, p.lede, primary_html=p.primary,
                crumbs=[("/console/batches", "Sweeps"), ("/console/batches/" ~ p.batch_id, p.sweep_label), (None, p.name)]) }}
@@ -37,6 +37,11 @@
     <button class="danger" type="submit">Suppress prospect</button>
   </form>
   {% if p.audited %}<span class="muted" style="margin-left:10px">Audited {{ p.audited }}</span>{% endif %}
+  <span class="openers">
+    {{ modal_open("outreach", "Outreach", "mail", pill(o.state[0], o.state[1])) }}
+    {{ modal_open("callnotes", "Call notes", "phone") }}
+    {{ modal_open("evidence", "Screenshots", "file", pill("dim", evidence_count ~ "") if evidence_count else None) }}
+  </span>
 </div>
 
 <h2>Score history</h2>
@@ -90,10 +95,10 @@
 </div>
 {% endif %}
 
-<div class="card" id="callnotes">
+<dialog class="modal" id="callnotes" aria-labelledby="callnotes-title">
   <div class="pagehead">
-    <h2>Call notes</h2>
-    <div class="primary"><button type="button" class="ghost" id="copy-notes" data-source="callnotes-text">Copy notes</button></div>
+    <h2 id="callnotes-title">Call notes</h2>
+    <div class="primary"><button type="button" class="ghost" id="copy-notes" data-source="callnotes-text">Copy notes</button> {{ modal_close() }}</div>
   </div>
   <p class="muted">What to say if you pick up the phone. Built from the findings and the checks on this page, nothing else.</p>
   <div class="notes">
@@ -119,9 +124,18 @@
     <ul>{% for r in notes.rules %}<li>{{ r }}</li>{% endfor %}</ul>
   </div>
   <textarea id="callnotes-text" class="visually-hidden" readonly aria-hidden="true" tabindex="-1">{{ notes.text }}</textarea>
-</div>
+</dialog>
 
 {{ outreach_card(o, csrf, p.prospect_id, p.audit_id) }}
+
+<dialog class="modal wide" id="evidence" aria-labelledby="evidence-title">
+  <div class="pagehead">
+    <h2 id="evidence-title">Evidence</h2>
+    <div class="primary">{{ modal_close() }}</div>
+  </div>
+  {% if evidence_html %}{{ evidence_html }}{% else %}<p class="muted">No screenshot was saved for this audit.</p>{% endif %}
+</dialog>
+{{ modals() }}
 {{ insert_variables() }}
 {{ send_confirm() }}
 {{ copy_button() }}
@@ -140,6 +154,4 @@
 </tbody>{% endcall %}
 {% endfor %}
 
-<h2>Evidence</h2>
-<div class="card">{% if evidence_html %}{{ evidence_html }}{% else %}<p class="muted">No screenshot was saved for this audit.</p>{% endif %}</div>
 {% endblock %}

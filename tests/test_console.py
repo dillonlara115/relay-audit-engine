@@ -2847,7 +2847,7 @@ def test_the_send_notice_reads_as_a_sentence():
 def test_the_prospect_page_carries_call_notes_and_a_copy_button():
     page = _prospect_page(findings=_approved(), audit={"report_slug": "abcdefghijklmnop"},
                           report_url="https://x/abc")
-    assert "<h2>Call notes</h2>" in page
+    assert '<h2 id="callnotes-title">Call notes</h2>' in page
     assert 'id="copy-notes" data-source="callnotes-text"' in page
     assert 'id="callnotes-text" class="visually-hidden"' in page
     assert "CALL NOTES:" in page and "Offer to send the write-up: https://x/abc" in page
@@ -3224,3 +3224,39 @@ def test_no_website_and_gate_override_show_as_tags_with_a_meaning():
     page = _list([_row(no_website=True, gate_override=True)])
     assert 'title="The Google profile lists no website' in page
     assert 'title="The gate excluded this prospect and a person chose' in page
+
+
+# ── Modals on the prospect page ───────────────────────────────────────────────
+
+
+def test_call_notes_outreach_and_screenshots_open_as_dialogs():
+    page = _prospect_page(findings=_approved(), audit={"report_slug": "abcdefghijklmnop"},
+                          prospect={"owner_email": "d@x.com", "gbp_phone": "(970) 224-1200"},
+                          report_url="https://x/abc")
+    for target in ("outreach", "callnotes", "evidence"):
+        assert f' id="{target}"' in page and 'class="modal' in page, target
+        assert f'data-open="{target}"' in page, target
+    assert page.count("data-close") >= 3
+    assert "d.showModal()" in page and "if (location.hash) open(location.hash.slice(1))" in page
+    assert 'data-open="outreach" aria-haspopup="dialog"' in page
+    assert "Due: first email" in page.split('data-open="outreach"')[1].split("</button>")[0], "state on the button"
+
+
+def test_the_screenshot_button_counts_them():
+    evidence = [{"kind": "screenshot", "gcs_path": "evidence/p/a/homepage.jpg", "signed_url": "https://s/1"},
+                {"kind": "screenshot", "gcs_path": "evidence/p/a/contact.jpg", "signed_url": "https://s/2"}]
+    page = views.render_audit(audit={"audit_id": "a1", "scores": {}}, prospect={"business_name": "X"},
+                              checks=[], definitions={}, findings=None, evidence=evidence, csrf="t")
+    opener = page.split('data-open="evidence"')[1].split("</button>")[0]
+    assert "Screenshots" in opener and ">2</span>" in opener
+    none = _prospect_page()
+    opener = none.split('data-open="evidence"')[1].split("</button>")[0]
+    assert "pill" not in opener
+
+
+def test_tel_inputs_are_styled_like_the_others():
+    import re as _re
+
+    css = views.theme_css()
+    rule = _re.search(r"input\[type=text\],[^{]*\{", css).group(0)
+    assert "input[type=tel]" in rule

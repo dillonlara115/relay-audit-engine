@@ -1047,6 +1047,7 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                             report_url=report_url, intent_labels=_outreach.INTENT_LABELS)
 
     return _render("prospect.html", title=name, active="batches", csrf=csrf,
+                   evidence_count=len(list(evidence or ())),
                    p=p_vm, f=f_vm, o=o_vm, notes=notes, sections=sections, evidence_html=evidence_html,
                    history=h_vm if len(h_vm) > 1 else [], history_note=history_note,
                    notice=notice)
