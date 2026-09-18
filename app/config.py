@@ -145,6 +145,13 @@ class Config:
     outreach_daily_cap: int = field(default_factory=lambda: _int("OUTREACH_DAILY_CAP", 40))
     # A hosted PNG for the HTML part's signature block. Empty means no logo.
     outreach_logo_url: str = field(default_factory=lambda: _str("OUTREACH_LOGO_URL"))
+    # Quo (OpenPhone): the API key from workspace settings, the number texts
+    # go out from in +1 form, the webhook signing key (whsec_...), and the
+    # texts a person may send in one UTC day. See app/tools/quo.py.
+    quo_api_key: str = field(default_factory=lambda: _str("QUO_API_KEY"))
+    quo_from: str = field(default_factory=lambda: _str("QUO_FROM"))
+    quo_webhook_key: str = field(default_factory=lambda: _str("QUO_WEBHOOK_KEY"))
+    outreach_text_daily_cap: int = field(default_factory=lambda: _int("OUTREACH_TEXT_DAILY_CAP", 20))
 
     # Pub/Sub
     pubsub_audit_topic: str = field(
@@ -206,6 +213,10 @@ _ENV_NAME = {
     "outreach_sender_name": "OUTREACH_SENDER_NAME",
     "outreach_daily_cap": "OUTREACH_DAILY_CAP",
     "outreach_logo_url": "OUTREACH_LOGO_URL",
+    "quo_api_key": "QUO_API_KEY",
+    "quo_from": "QUO_FROM",
+    "quo_webhook_key": "QUO_WEBHOOK_KEY",
+    "outreach_text_daily_cap": "OUTREACH_TEXT_DAILY_CAP",
 }
 
 
