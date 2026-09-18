@@ -187,6 +187,8 @@
     if (bulk) bulk.classList.toggle('show', ids.length > 0);
     if (bulkCount) bulkCount.textContent = ids.length + ' selected';
     if (bulkExport && exportLink) bulkExport.href = withFilters(exportLink.href) + '&ids=' + ids.join(',');
+    var includeIds = document.getElementById('include-ids');
+    if (includeIds) includeIds.value = ids.join(',');
   }
   table.addEventListener('change', function (e) {
     if (e.target && e.target.classList.contains('pick-row')) syncExport();

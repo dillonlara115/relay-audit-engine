@@ -124,6 +124,8 @@ NOTICES = {
     "text_not_sent": "Text not sent.",
     "quo_added": "Added to Quo.",
     "quo_failed": "Not added to Quo.",
+    "queued": "Audits queued.",
+    "not_queued": "Nothing was queued.",
     "templates_saved": "Templates saved.",
     "templates_rejected": "Templates not saved.",
 }

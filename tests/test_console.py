@@ -2304,7 +2304,7 @@ def test_the_excluded_tab_lists_gated_out_prospects_with_their_reasons():
 def test_the_excluded_tab_distinguishes_empty_from_unknown():
     empty = views.render_batch("b1", [], {}, csrf="t", tab="excluded", excluded=[],
                                counts={"all": 0, "excluded": 0}, excluded_known=True)
-    assert "Nothing was excluded from this sweep." in empty
+    assert "Every prospect in this market is on the call list." in empty
     unknown = views.render_batch("b1", [], {}, csrf="t", tab="excluded", excluded=[],
                                  counts={"all": 0}, excluded_known=False)
     assert "This sweep has no gate record." in unknown
@@ -2324,23 +2324,30 @@ def test_the_export_link_and_bulk_bar_are_on_the_call_list():
     assert 'id="pick-all"' in page
 
 
-def test_excluded_scoping_and_order(monkeypatch):
+def test_the_excluded_tab_is_everything_the_sweep_did_not_audit(monkeypatch):
+    """Twenty-five 'Needs review' prospects sat on the Excluded tab while also
+    being on the call list, because the dispatcher audits review prospects
+    and the tab was built from gate results. Membership is the task ledger."""
     import app.console.routes as routes
+    import app.leases as leases
 
     monkeypatch.setattr(routes.store, "get_batch", lambda b: {"market_id": "m1"})
-    calls = []
+    monkeypatch.setattr(leases, "tasks_for_batch",
+                        lambda b, status=None: [{"prospect_id": "p-beta"}, {"prospect_id": "p-apex"}])
 
     def prospects(market_id, *, gate_result=None, suppressed=False):
-        calls.append(gate_result)
-        if gate_result == "fail":
-            return iter([_gated("Zed", "fail", latest_batch_id="b1"),
-                         _gated("Old", "fail", latest_batch_id="b0")])
-        return iter([_gated("Beta", "review")])
+        assert gate_result is None, "one query, not one per verdict"
+        return iter([
+            dict(_gated("Beta", "review"), place_id="p-beta"),           # audited: not excluded
+            dict(_gated("Apex", "pass"), place_id="p-apex"),             # audited: not excluded
+            dict(_gated("Zed", "fail", latest_batch_id="b1"), place_id="p-zed"),
+            dict(_gated("Old", "fail", latest_batch_id="b0"), place_id="p-old"),   # another sweep
+            dict(_gated("Left out", "review"), place_id="p-left"),       # passed, limit dropped it
+        ])
 
     monkeypatch.setattr(routes.store, "prospects_for_market", prospects)
     rows = routes._excluded_for_batch("b1")
-    assert [r["business_name"] for r in rows] == ["Beta", "Zed"], "review first, other sweep dropped"
-    assert sorted(calls) == ["fail", "review"]
+    assert [r["business_name"] for r in rows] == ["Left out", "Zed"], "review first, audited and other-sweep dropped"
 
 
 def test_a_sweep_without_a_market_has_no_gate_record(monkeypatch):
@@ -3118,3 +3125,102 @@ def test_the_public_report_carries_the_favicon_too():
 def pathlib_read(rel):
     import pathlib as _pl
     return (_pl.Path(__file__).resolve().parent.parent / rel).read_text()
+
+
+# ── Audit selected on the Excluded tab ────────────────────────────────────────
+
+
+def test_the_excluded_tab_offers_audit_selected_and_explains_itself():
+    page = views.render_batch("b1", [], {}, csrf="t", tab="excluded",
+                              excluded=[_gated("Kessler Roofing", "fail")], counts={"all": 0, "excluded": 1})
+    assert 'action="/console/batches/b1/include"' in page and 'id="include-ids"' in page
+    assert ">Audit selected</button>" in page or "Audit selected</button>" in page
+    assert "the sweep did not audit" in page
+    assert "includeIds.value = ids.join(',')" in page
+    plain = views.render_batch("b1", [], {}, csrf="t", tab="all", counts={"all": 0})
+    assert "include-form" not in plain, "only on the Excluded tab"
+
+
+def test_an_overridden_prospect_shows_as_queued_on_the_tab():
+    row = _gated("Kessler", "fail", gate_override="pass")
+    page = views.render_batch("b1", [], {}, csrf="t", tab="excluded", excluded=[row], counts={"all": 0, "excluded": 1})
+    assert "Override, queued" in page
+
+
+def test_include_records_the_override_and_queues_a_dispatch_job(client, monkeypatch):
+    import app.console.routes as routes
+
+    overrides, created = [], []
+    monkeypatch.setattr(routes.store, "get_prospect", lambda pid: {"business_name": pid, "domain": f"{pid}.com"})
+    monkeypatch.setattr(routes.store, "load_suppressions",
+                        lambda: {"place_id": {"p-supp"}, "domain": set(), "phone": set(), "email": set()})
+    monkeypatch.setattr(routes.store, "set_gate_override", lambda pid, **kw: overrides.append(pid))
+    monkeypatch.setattr(routes.jobs, "create",
+                        lambda kind, params, **kw: created.append((kind, params, kw.get("label"))) or "job-9")
+    csrf = sign_in(client)
+    response = client.post("/console/batches/b1/include",
+                           data={"csrf": csrf, "ids": "p-kessler,p-supp, p-two ,"}, follow_redirects=False)
+    assert response.status_code == 303
+    loc = response.headers["location"]
+    assert loc.startswith("/console/batches/b1?") and "tab=excluded" in loc and "notice=queued" in loc
+    assert overrides == ["p-kessler", "p-two"], "the suppressed one is never overridden"
+    kind, params, label = created[0]
+    assert kind == "dispatch" and params == {"batch_id": "b1", "prospect_ids": ["p-kessler", "p-two"]}
+    assert label == "Audit 2 excluded prospects"
+
+
+def test_include_with_nothing_selected_or_only_suppressed_queues_nothing(client, monkeypatch):
+    import app.console.routes as routes
+
+    created = []
+    monkeypatch.setattr(routes.jobs, "create", lambda *a, **k: created.append(a) or "j")
+    monkeypatch.setattr(routes.store, "get_prospect", lambda pid: {"domain": "x.com"})
+    monkeypatch.setattr(routes.store, "load_suppressions",
+                        lambda: {"place_id": {"p-supp"}, "domain": set(), "phone": set(), "email": set()})
+    monkeypatch.setattr(routes.store, "set_gate_override", lambda pid, **kw: None)
+    csrf = sign_in(client)
+    r = client.post("/console/batches/b1/include", data={"csrf": csrf, "ids": ""}, follow_redirects=False)
+    assert "notice=not_queued" in r.headers["location"]
+    r = client.post("/console/batches/b1/include", data={"csrf": csrf, "ids": "p-supp"}, follow_redirects=False)
+    assert "notice=not_queued" in r.headers["location"] and "suppressed" in r.headers["location"]
+    assert created == []
+    assert client.post("/console/batches/b1/include", data={"csrf": "wrong", "ids": "p1"}).status_code == 403
+
+
+def test_the_dispatcher_audits_an_explicit_list_and_honours_overrides_on_sweeps(monkeypatch):
+    import asyncio
+
+    import app.job_runner as jr
+
+    seeded, published, logged = [], [], []
+    monkeypatch.setattr(jr.store, "load_suppressions",
+                        lambda: {"place_id": {"p-supp"}, "domain": set(), "phone": set(), "email": set()})
+    monkeypatch.setattr(jr.store, "get_prospect", lambda pid: {"domain": f"{pid}.com"})
+    monkeypatch.setattr(jr.jobs, "log", lambda jid, line: logged.append(line))
+    monkeypatch.setattr("app.leases.seed_tasks", lambda b, ids: seeded.append((b, ids)) or len(ids))
+    monkeypatch.setattr("app.tools.pubsub.publish_batch", lambda b, ids: published.append((b, ids)) or len(ids))
+    out = asyncio.run(jr.run_dispatch_job("j1", {"batch_id": "b1", "prospect_ids": ["p-kessler", "p-supp"]}))
+    assert seeded == [("b1", ["p-kessler"])] and published == [("b1", ["p-kessler"])]
+    assert out["published"] == 1 and any("suppressed" in l for l in logged)
+
+    # A later sweep of the market keeps an overridden prospect in.
+    monkeypatch.setattr(jr.store, "market_id_for", lambda name: "m1")
+    monkeypatch.setattr("app.markets.resolve_market", lambda m: type("M", (), {"name": m})())
+    monkeypatch.setattr(jr.store, "prospects_for_market", lambda mid, **kw: iter([
+        {"place_id": "p-fail", "gate_result": "fail"},
+        {"place_id": "p-over", "gate_result": "fail", "gate_override": "pass"},
+        {"place_id": "p-pass", "gate_result": "pass"},
+    ]))
+    seeded.clear()
+    asyncio.run(jr.run_dispatch_job("j2", {"batch_id": "b2", "market": "Fort Collins"}))
+    assert sorted(seeded[0][1]) == ["p-over", "p-pass"]
+
+
+def test_no_website_and_gate_override_show_as_tags_with_a_meaning():
+    from app.console import calllist
+
+    assert calllist.row_tags({"no_website": True}) == ["No website"]
+    assert calllist.row_tags({"gate_override": True, "partial": True}) == ["Partial", "Gate override"]
+    page = _list([_row(no_website=True, gate_override=True)])
+    assert 'title="The Google profile lists no website' in page
+    assert 'title="The gate excluded this prospect and a person chose' in page

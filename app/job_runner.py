@@ -78,15 +78,30 @@ async def run_dispatch_job(job_id: str, params: Mapping[str, Any]) -> dict[str, 
     market = str(params.get("market") or "")
     limit = int(params.get("limit") or 0)
 
-    market_id = store.market_id_for(resolve_market(market).name)
-    eligible = [
-        p for p in store.prospects_for_market(market_id, suppressed=False)
-        if p.get("gate_result") in ("pass", "review")
-    ]
-    eligible.sort(key=lambda p: -(p.get("review_count") or 0))
-    if limit:
-        eligible = eligible[:limit]
-    ids = [p["place_id"] for p in eligible]
+    chosen = [str(x) for x in (params.get("prospect_ids") or []) if x]
+    if chosen:
+        # A person picked these on the Excluded tab and overrode the gate.
+        # Suppression is still checked; an override never reaches a
+        # suppressed prospect.
+        rules = store.load_suppressions()
+        ids = []
+        for pid in chosen:
+            prospect = store.get_prospect(pid) or {}
+            if store.suppression_hit(rules, place_id=pid, domain=prospect.get("domain"),
+                                     phone=prospect.get("gbp_phone"), email=prospect.get("owner_email")):
+                await asyncio.to_thread(jobs.log, job_id, f"Skipped {pid}: suppressed")
+                continue
+            ids.append(pid)
+    else:
+        market_id = store.market_id_for(resolve_market(market).name)
+        eligible = [
+            p for p in store.prospects_for_market(market_id, suppressed=False)
+            if p.get("gate_result") in ("pass", "review") or p.get("gate_override") == "pass"
+        ]
+        eligible.sort(key=lambda p: -(p.get("review_count") or 0))
+        if limit:
+            eligible = eligible[:limit]
+        ids = [p["place_id"] for p in eligible]
     if not ids:
         raise RuntimeError("no gated prospects in this market; run a sweep first")
 

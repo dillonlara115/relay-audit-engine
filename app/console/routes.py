@@ -303,29 +303,42 @@ def _assemble_batch(
             "prospect_id": r.prospect_id,
             "contacts": (prospects.get(r.prospect_id) or {}).get("contacts") or [],
             "sequence": sequences.get(r.prospect_id),
+            "no_website": not (prospects.get(r.prospect_id) or {}).get("website_url"),
+            "gate_override": (prospects.get(r.prospect_id) or {}).get("gate_override") == "pass",
         })
     return rows, segments, check_defs
 
 
 def _excluded_for_batch(batch_id: str) -> list[dict[str, Any]] | None:
-    """Prospects the gate turned away for this sweep, review first.
+    """Prospects in this sweep's market that the sweep is not auditing.
+
+    The dispatcher audits every "pass" and "review" prospect, so a "Needs
+    review" prospect is normally on the call list, not here. What belongs
+    here is anything with no audit task in this batch: the gate's "fail"
+    verdicts, and any prospect a limit left out. Membership is decided by
+    the task ledger rather than by gate result so the tab and the call list
+    never overlap, which they did for a while.
 
     None when the sweep has no batch document or market, which is what a
     CLI-built batch looks like: the tab then says there is no gate record
-    rather than claiming nothing was excluded. Scoped by latest_batch_id, so
-    a market swept twice shows each sweep its own.
+    rather than claiming nothing was excluded.
     """
     from app.console import calllist
+    from app.leases import tasks_for_batch
 
     batch = store.get_batch(batch_id) or {}
     market_id = batch.get("market_id")
     if not market_id:
         return None
+    in_sweep = {str(t.get("prospect_id")) for t in tasks_for_batch(batch_id)}
     rows: list[dict[str, Any]] = []
-    for result in ("review", "fail"):
-        for prospect in store.prospects_for_market(market_id, gate_result=result):
-            if prospect.get("latest_batch_id") in (None, batch_id):
-                rows.append(prospect)
+    for prospect in store.prospects_for_market(market_id):
+        pid = str(prospect.get("place_id") or "")
+        if pid in in_sweep:
+            continue
+        if prospect.get("latest_batch_id") not in (None, batch_id):
+            continue
+        rows.append(prospect)
     return calllist.sort_excluded(rows)
 
 
@@ -357,6 +370,51 @@ async def batch_screen(batch_id: str, request: Request, tab: str = "all") -> Res
                                     notice=_notice(request), tab=tab, counts=counts,
                                     excluded=excluded or (), excluded_known=excluded is not None,
                                     sweep_label=views.scan_title(progress) if progress else None))
+
+
+@router.post("/batches/{batch_id}/include")
+async def include_prospects(batch_id: str, request: Request, ids: str = Form(""),
+                            csrf: str = Form(None)) -> Response:
+    """Audit prospects the gate turned away. A person overrode it; that is
+    recorded on each prospect, and a dispatch job queues the audits so they
+    appear on this call list as they finish. Nothing is contacted."""
+    if not check_csrf(request, csrf):
+        return Response(status_code=403, content="stale form, reload the page")
+    wanted = [i.strip() for i in ids.split(",") if i.strip()][:100]
+    back = f"/console/batches/{batch_id}?tab=excluded"
+    if not wanted:
+        return _redirect(_with_notice(back, "not_queued", "Select at least one prospect."))
+
+    def mark() -> list[str]:
+        rules = store.load_suppressions()
+        kept = []
+        for pid in wanted:
+            prospect = store.get_prospect(pid) or {}
+            if not prospect:
+                continue
+            if store.suppression_hit(rules, place_id=pid, domain=prospect.get("domain"),
+                                     phone=prospect.get("gbp_phone"), email=prospect.get("owner_email")):
+                continue
+            store.set_gate_override(pid)
+            kept.append(pid)
+        return kept
+
+    kept = await asyncio.to_thread(mark)
+    if not kept:
+        return _redirect(_with_notice(back, "not_queued",
+                                      "Every selected prospect is suppressed or unknown."))
+    label = f"Audit {len(kept)} excluded prospect{'s' if len(kept) != 1 else ''}"
+    job_id = await asyncio.to_thread(jobs.create, jobs.KIND_DISPATCH,
+                                     {"batch_id": batch_id, "prospect_ids": kept}, label=label)
+    try:
+        await asyncio.to_thread(publish_job, job_id, jobs.KIND_DISPATCH)
+    except Exception as exc:  # noqa: BLE001 - a job nobody will run must say so
+        await asyncio.to_thread(jobs.fail, job_id, f"could not queue: {exc}")
+        return _redirect(_with_notice(back, "not_queued", f"The job could not be queued: {exc}"))
+    return _redirect(_with_notice(
+        back, "queued",
+        f"{len(kept)} audit{'s' if len(kept) != 1 else ''} queued. They appear on the call list "
+        f"as they finish, usually within a few minutes."))
 
 
 @router.get("/batches/{batch_id}/export.csv")

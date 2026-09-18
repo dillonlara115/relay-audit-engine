@@ -167,6 +167,15 @@ def get_prospect(place_id: str) -> dict[str, Any] | None:
     return snap.to_dict() if snap.exists else None
 
 
+def set_gate_override(place_id: str, *, by: str = "console") -> None:
+    """A person decided the gate was wrong for this prospect. The verdict and
+    its reasons stay on record; the override sits beside them so the
+    dispatcher includes the prospect and the console can say why."""
+    get_client().collection(PROSPECTS).document(place_id).set(
+        {"gate_override": "pass", "gate_override_by": by, "gate_override_at": utcnow(),
+         "updated_at": utcnow()}, merge=True)
+
+
 def set_gate_result(place_id: str, result: str, reasons: list[Mapping[str, Any]]) -> None:
     get_client().collection(PROSPECTS).document(place_id).set(
         {

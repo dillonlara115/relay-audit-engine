@@ -37,6 +37,9 @@
   {% endfor %}
 </div>
 
+{% if tab == "excluded" %}
+<p class="muted">Prospects in this market the sweep did not audit: the gate ruled them out, or a limit left them off. Tick any worth a look and choose Audit selected; the gate's reasons stay on their record.</p>
+{% endif %}
 <div class="toolbar">
   <div class="search">{{ icon("search") }}<input id="f-q" type="search" placeholder="Search prospect or city" aria-label="Search prospect or city"></div>
   {% if tab != "excluded" %}
@@ -64,6 +67,14 @@
 <div class="bulkbar" id="bulkbar">
   <span class="muted" id="bulk-count">0 selected</span>
   <a class="btn ghost" id="bulk-export" href="{{ export_href }}">{{ icon("download") }} Export selected</a>
+  {% if tab == "excluded" %}
+  <form class="inline" method="post" action="/console/batches/{{ batch_id }}/include" id="include-form"
+        onsubmit="return confirm('Audit the selected prospects anyway? The gate\'s reasons stay on record. Nothing is contacted.')">
+    {{ csrf_field(csrf) }}
+    <input type="hidden" name="ids" id="include-ids" value="">
+    <button class="ghost" type="submit">{{ icon("play") }} Audit selected</button>
+  </form>
+  {% endif %}
 </div>
 
 {% if tab == "excluded" %}
@@ -83,7 +94,7 @@
 <td class="rowact">{% if e.maps_uri %}<a href="{{ e.maps_uri }}" target="_blank" rel="noopener noreferrer" title="Open Google profile" aria-label="Open Google profile">{{ icon("external") }}</a>{% endif %}</td>
 </tr>
 {% else %}
-{{ empty_row(7, "Nothing was excluded from this sweep." if excluded_known else "This sweep has no gate record.") }}
+{{ empty_row(7, "Every prospect in this market is on the call list." if excluded_known else "This sweep has no gate record.") }}
 {% endfor %}
 </tbody></table></div>
 {% else %}

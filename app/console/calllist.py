@@ -96,6 +96,11 @@ TAG_TITLES = {
                 "timed out. The scores may read low. Re-audit before trusting them."),
     "Agency": ("An agency already runs this site: its footer credits one. Expect a "
                "harder sell and a slower switch."),
+    "No website": ("The Google profile lists no website, so only the Found checks could run "
+                   "and the segment reads Incomplete. A business with good reviews and no "
+                   "site is a lead of a different kind: they need one."),
+    "Gate override": ("The gate excluded this prospect and a person chose to audit it anyway. "
+                      "The gate's reasons are still on the prospect's record."),
 }
 
 
@@ -105,6 +110,10 @@ def row_tags(row: Mapping[str, Any]) -> list[str]:
         tags.append("Agency")
     if row.get("partial"):
         tags.append("Partial")
+    if row.get("no_website"):
+        tags.append("No website")
+    if row.get("gate_override"):
+        tags.append("Gate override")
     return tags
 
 
@@ -116,7 +125,11 @@ def visible_tabs(counts: Mapping[str, int]) -> Sequence[tuple[str, str, int]]:
 
 # ── The Excluded tab ──────────────────────────────────────────────────────────
 
-GATE_LABEL = {"fail": ("bad", "Excluded"), "review": ("warn", "Needs review")}
+# What the pill says about a prospect this sweep did not audit. "Needs review"
+# and "Passed" here mean the gate let them through but the sweep's limit or
+# a later re-run left them out; "Excluded" means a blocking rule failed.
+GATE_LABEL = {"fail": ("bad", "Excluded"), "review": ("warn", "Needs review"),
+              "pass": ("ok", "Passed")}
 
 
 def excluded_rows_vm(prospects: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
@@ -131,6 +144,8 @@ def excluded_rows_vm(prospects: Iterable[Mapping[str, Any]]) -> list[dict[str, A
         detail = "; ".join(f"{r.get('label') or r.get('code')}: {r.get('detail')}"
                            for r in reasons if r.get("detail"))
         kind, label = GATE_LABEL.get(str(p.get("gate_result") or ""), ("dim", "Unknown"))
+        if p.get("gate_override") == "pass":
+            kind, label = "info", "Override, queued"
         out.append({
             "prospect_id": p.get("place_id") or "",
             "business_name": p.get("business_name") or "",
@@ -139,6 +154,7 @@ def excluded_rows_vm(prospects: Iterable[Mapping[str, Any]]) -> list[dict[str, A
             "website": p.get("website_url") or "",
             "domain": p.get("domain") or "",
             "gate": (kind, label),
+            "overridden": p.get("gate_override") == "pass",
             "reasons": "; ".join(failed or advisory) or "No reason recorded",
             "detail": detail,
             "maps_uri": p.get("maps_uri") or "",
