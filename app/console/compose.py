@@ -192,3 +192,27 @@ def fit_mailto(draft: Draft) -> str:
     while body and len(mailto_url(Draft(draft.to, draft.subject, body))) > MAX_MAILTO:
         body = _cut(body[: max(0, len(body) - 200)], len(body))
     return mailto_url(Draft(draft.to, draft.subject, body))
+
+
+def compose_text(*, prospect: Mapping[str, Any], report_url: str,
+                 findings_doc: Mapping[str, Any] | None, signature: str = DEFAULT_SIGNATURE,
+                 sender_name: str = "", templates: Mapping[str, Any] | None = None) -> Draft:
+    """The one text for this prospect, rendered from the text template. Same
+    checks as an email; `to` is the number in +1 form when we have one."""
+    from app import outreach_templates as tpl
+    from app.tools.quo import e164_of
+
+    values = tpl.values_for(ordinal=1, prospect=prospect, report_url=report_url,
+                            findings_doc=findings_doc, sender_name=sender_name,
+                            signature=signature)
+    warnings: list[str] = []
+    if not values["sender_name"]:
+        warnings.append("Sender name is not set (OUTREACH_SENDER_NAME). A text should say who it is from.")
+    body, unknown = tpl.render(tpl.text_template(templates), values)
+    for name in unknown:
+        warnings.append(f"{{{{{name}}}}} is not a variable and was left as written.")
+    body, _ = sanitize(" ".join(body.split()))
+    if len(body) > tpl.TEXT_CAP:
+        warnings.append(f"This text is {len(body)} characters; the limit is {tpl.TEXT_CAP}. Shorten it.")
+    to = e164_of(prospect.get("gbp_phone") or prospect.get("phone")) or None
+    return Draft(to=to, subject="", body=body, warnings=tuple(warnings))

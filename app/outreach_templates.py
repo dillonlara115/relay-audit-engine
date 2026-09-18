@@ -83,6 +83,14 @@ _FOLLOWUP_BODY = (
 for _n in range(2, MAX_TOUCHES + 1):
     DEFAULTS[_n] = {"subject": "Re: " + _FIRST_SUBJECT, "body": _FOLLOWUP_BODY}
 
+# The one text. Short, signed, with the report link and the opt-out the
+# carriers require. Sent by hand, one prospect at a time, like the emails.
+TEXT_KEY = "sms"
+TEXT_CAP = 320
+DEFAULT_TEXT = ("Hi {{first_name}}, {{sender_name}} with Relay for Roofers here. I looked at how "
+                "homeowners in {{city}} find {{business}} and wrote up three things costing you "
+                "jobs: {{report_url}} Reply STOP to opt out.")
+
 _VAR = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 
 
@@ -149,6 +157,21 @@ def template_for(ordinal: int, saved: Mapping[str, Any] | None) -> dict[str, str
             "body": str(row.get("body") or base["body"])}
 
 
+def text_template(saved: Mapping[str, Any] | None) -> str:
+    row = (saved or {}).get(TEXT_KEY) or {}
+    return str(row.get("body") or DEFAULT_TEXT)
+
+
+def text_problems(body: str) -> list[str]:
+    """Why a text template cannot be saved. The opt-out line is required."""
+    out = [p for p in problems("text", body) if "subject" not in p.lower()]
+    if len(body or "") > TEXT_CAP:
+        out.append(f"A text is at most {TEXT_CAP} characters.")
+    if "stop" not in (body or "").lower():
+        out.append("A text must tell them how to opt out (for example: Reply STOP to opt out).")
+    return out
+
+
 def problems(subject: str, body: str) -> list[str]:
     """Why a template cannot be saved, in sentences. Empty means it can."""
     out: list[str] = []
@@ -183,6 +206,8 @@ def normalise(form: Mapping[str, str]) -> dict[str, dict[str, str]]:
     for n in range(1, MAX_TOUCHES + 1):
         out[str(n)] = {"subject": clean(form.get(f"subject_{n}", "")).strip(),
                        "body": clean(form.get(f"body_{n}", "")).strip()}
+    if f"body_{TEXT_KEY}" in form:
+        out[TEXT_KEY] = {"body": " ".join(clean(form.get(f"body_{TEXT_KEY}", "")).split())}
     return out
 
 
@@ -192,6 +217,9 @@ def all_problems(templates: Mapping[str, Mapping[str, str]]) -> list[str]:
         row = templates.get(str(n)) or {}
         for p in problems(row.get("subject", ""), row.get("body", "")):
             out.append(f"Email {n}: {p}")
+    if TEXT_KEY in templates:
+        for p in text_problems((templates.get(TEXT_KEY) or {}).get("body", "")):
+            out.append(f"Text: {p}")
     return out
 
 

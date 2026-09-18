@@ -120,6 +120,10 @@ NOTICES = {
     "reaudit_queued": "Re-audit queued.",
     "sent": "Email sent.",
     "not_sent": "Email not sent.",
+    "text_sent": "Text sent.",
+    "text_not_sent": "Text not sent.",
+    "quo_added": "Added to Quo.",
+    "quo_failed": "Not added to Quo.",
     "templates_saved": "Templates saved.",
     "templates_rejected": "Templates not saved.",
 }
@@ -358,7 +362,8 @@ def render_templates(templates: Mapping[str, Any] | None, *, csrf: str,
                               4: "Day 14, one held-back finding, then the sequence closes"}[n]})
     return _render("templates.html", title="Email templates", active="templates", csrf=csrf,
                    notice=notice, rows=rows, variables=list(tpl.VARIABLES.items()),
-                   menu=variable_menu(), saved=bool(templates))
+                   menu=variable_menu(), saved=bool(templates),
+                   text_body=tpl.text_template(templates), text_cap=tpl.TEXT_CAP)
 
 
 def render_login(*, next_path: str = "/console", error: str | None = None) -> str:
@@ -705,7 +710,7 @@ def outreach_context(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                      replies: Sequence[Mapping[str, Any]],
                      report_url: str | None, signature: str, sender_name: str = "",
                      templates: Mapping[str, Any] | None = None,
-                     mailbox: str = "") -> dict[str, Any]:
+                     mailbox: str = "", quo_from: str = "") -> dict[str, Any]:
     """Everything the Outreach card shows, computed once and testable.
 
     Step 1 is the next email, rendered from the template, in editable fields
@@ -769,11 +774,22 @@ def outreach_context(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
     for t in touches:
         when = t.get("sent_at")
         stamp = when.strftime("%b %d") if hasattr(when, "strftime") else ""
-        text = f"Email {t.get('ordinal', '?')} sent {stamp}".strip()
-        if t.get("to"):
-            text += f" to {t['to']}"
-        if t.get("sent_via") == "console":
-            text += " from the console"
+        channel = t.get("channel") or "email"
+        if channel == "sms":
+            text = f"Text sent {stamp}".strip()
+            if t.get("to"):
+                text += f" to {t['to']}"
+        elif channel == "call":
+            mins = int(t.get("duration") or 0) // 60
+            text = f"Call {stamp}".strip() + (f", {mins} min" if mins else "") if t.get("answered", True) else f"Call {stamp}, no answer".strip()
+            if t.get("summary"):
+                text += ". " + " ".join(str(x) for x in t["summary"])[:160]
+        else:
+            text = f"Email {t.get('ordinal', '?')} sent {stamp}".strip()
+            if t.get("to"):
+                text += f" to {t['to']}"
+            if t.get("sent_via") == "console":
+                text += " from the console"
         events.append((when, "sent", text))
     for r in replies:
         when = r.get("received_at")
@@ -804,9 +820,23 @@ def outreach_context(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
         else:
             nxt = f"Next due {due}. No findings left for another email; the sequence closes after this one."
 
+    text: dict[str, Any] = {"show": False}
+    if is_open or not seq:
+        draft = composer.compose_text(prospect=prospect, report_url=report_url or "",
+                                      findings_doc=findings, signature=signature,
+                                      sender_name=sender_name, templates=templates)
+        text = {"show": True, "to": draft.to or "", "body": draft.body,
+                "warnings": list(draft.warnings), "published": published,
+                "in_quo": bool(prospect.get("quo_contact_id")),
+                "confirm": (f"Send this text to {{to}}{' from ' + quo_from if quo_from else ''}? "
+                            "It leaves your Quo number now."),
+                "menu": variable_menu(tpl_values(1, prospect, report_url or "", findings,
+                                                 sender_name, signature))}
+
     return {"state": outreach_state(sequence, can_start=published),
             "step1": step1, "step2": step2, "timeline": timeline, "next": nxt,
-            "mailbox": mailbox or "your connected mailbox"}
+            "mailbox": mailbox or "your connected mailbox",
+            "quo_from": quo_from, "text": text}
 
 
 def tpl_values(ordinal: int, prospect: Mapping[str, Any], report_url: str,
@@ -856,7 +886,7 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                  report_url: str | None = None,
                  signature: str = "Relay for Roofers", sender_name: str = "",
                  templates: Mapping[str, Any] | None = None, mailbox: str = "",
-                 sweep_label: str | None = None) -> str:
+                 quo_from: str = "", sweep_label: str | None = None) -> str:
     """One prospect: scores, findings, outreach, every check, the evidence."""
     from urllib.parse import urlparse
 
@@ -1006,7 +1036,8 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
     o_vm = outreach_context(audit=audit, prospect=prospect, findings=findings,
                             sequence=sequence, touches=touches, replies=replies,
                             report_url=report_url, signature=signature,
-                            sender_name=sender_name, templates=templates, mailbox=mailbox)
+                            sender_name=sender_name, templates=templates, mailbox=mailbox,
+                            quo_from=quo_from)
     from app import outreach as _outreach
     from app.console import callnotes
     notes = callnotes.build(prospect=prospect, audit=audit, checks=checks, definitions=definitions,

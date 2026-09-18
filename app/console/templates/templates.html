@@ -27,6 +27,15 @@
     <textarea id="body-{{ r.n }}" name="body_{{ r.n }}" rows="14" required>{{ r.body }}</textarea>
   </div>
   {% endfor %}
+  <div class="card tpl">
+    <h3>Text message <span class="muted">One per prospect, sent by hand from your Quo number</span></h3>
+    <div class="fieldrow">
+      <label for="body-sms">Text</label>
+      {{ variables_menu(menu, ["body-sms"]) }}
+    </div>
+    <textarea id="body-sms" name="body_sms" rows="4" maxlength="{{ text_cap }}" required>{{ text_body }}</textarea>
+    <p class="hint">At most {{ text_cap }} characters, and it must say who it is from and how to opt out. Quo honours STOP on its own; the ledger does too.</p>
+  </div>
   <button type="submit">Save templates</button>
   <p class="hint">Saving changes the next email drafted for every prospect. Emails already sent are not affected. {% if not saved %}These are the defaults; nothing has been saved yet.{% endif %}</p>
 </form>

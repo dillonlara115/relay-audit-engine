@@ -155,7 +155,9 @@ def test_every_console_route_is_gated(client):
 # has read and pressed Send on (rule 4 as amended Sep 17, 2026). The ledger
 # route records a send made from somewhere else and transmits nothing.
 SEND_ROUTE = "/console/outreach/{prospect_id}/send"
-LEDGER_ROUTES = {"/console/outreach/{prospect_id}/log-touch", SEND_ROUTE}
+TEXT_ROUTE = "/console/outreach/{prospect_id}/text"          # one text, same discipline
+CONTACT_ROUTE = "/console/outreach/{prospect_id}/quo-contact"  # creates a contact, sends nothing
+LEDGER_ROUTES = {"/console/outreach/{prospect_id}/log-touch", SEND_ROUTE, TEXT_ROUTE, CONTACT_ROUTE}
 
 
 def test_the_send_route_is_the_only_route_that_sends(client):
@@ -187,6 +189,9 @@ def test_only_the_send_route_calls_the_one_function_that_sends():
                      if "send_message(" in p.read_text())
     assert callers == ["console/routes.py", "tools/gmail.py"], callers
     assert "def send_message(" in (root / "tools" / "gmail.py").read_text()
+    texters = sorted(str(p.relative_to(root)) for p in root.rglob("*.py")
+                     if "send_text(" in p.read_text())
+    assert texters == ["console/routes.py", "tools/quo.py"], texters
 
 
 def test_nothing_in_the_app_can_transmit_mail():
@@ -2627,10 +2632,11 @@ def test_the_partial_tag_explains_itself():
 
 def test_the_templates_screen_lists_four_editors_and_the_variables():
     page = views.render_templates(None, csrf="t")
-    assert page.count('name="subject_') == 4 and page.count('name="body_') == 4
+    assert page.count('name="subject_') == 4 and page.count('name="body_') == 5
+    assert 'name="body_sms"' in page and "Reply STOP to opt out" in page
     assert "{{first_name}}" in page and "{{report_url}}" in page
     assert 'class="popover vars-menu" data-fields="subject-1,body-1"' in page
-    assert page.count('data-insert="first_name"') == 4
+    assert page.count('data-insert="first_name"') == 5, "four emails and the text"
     assert "<h5>Their info</h5>" in page and "<h5>The report</h5>" in page and "<h5>Your info</h5>" in page
     assert 'class="var empty"' not in page, "no prospect, so nothing is empty"
     assert "These are the defaults; nothing has been saved yet." in page
@@ -2912,3 +2918,176 @@ def test_pages_are_gzipped_when_the_browser_accepts_it(client):
     assert response.headers.get("content-encoding") == "gzip"
     assert "Overview" in response.text, "transparently decoded"
     assert "content-encoding" not in client.get("/health", headers={"accept-encoding": "gzip"}).headers
+
+
+# ── Quo: contacts and texts from the prospect page ────────────────────────────
+
+
+def _quo_store(monkeypatch, *, suppressions=None, texts_today=0, quo_error=None, contact_error=None):
+    import app.console.routes as routes
+    from app.tools import quo
+
+    written = _ledger_store(monkeypatch, suppressions=suppressions)
+    written["texts"] = []
+    written["contacts"] = []
+    written["bumps"] = 0
+    monkeypatch.setattr(routes.store, "get_prospect",
+                        lambda pid: {"business_name": "Whitaker Roofing", "domain": "whitakerroofing.com",
+                                     "gbp_phone": "(970) 224-1200", "owner_email": "dave@whitakerroofing.com",
+                                     "city": "Fort Collins"})
+    monkeypatch.setattr(routes.store, "get_audit", lambda aid: {"report_slug": "abcdefghijklmnop"})
+    monkeypatch.setattr(routes.store, "daily_texts", lambda day: texts_today)
+    monkeypatch.setattr(routes.store, "bump_daily_texts", lambda day: written.__setitem__("bumps", written["bumps"] + 1))
+    monkeypatch.setattr(routes.store, "set_quo_contact",
+                        lambda pid, cid, phone="": written["contacts"].append((pid, cid, phone)))
+
+    def fake_text(**kw):
+        if quo_error:
+            raise quo_error
+        written["texts"].append(kw)
+        return quo.SentText("AC1", "CN1", "queued")
+
+    def fake_contact(prospect, **kw):
+        if contact_error:
+            raise contact_error
+        return "CT1"
+
+    monkeypatch.setattr(quo, "send_text", fake_text)
+    monkeypatch.setattr(quo, "ensure_contact", fake_contact)
+    return written
+
+
+def _text(client, csrf, **over):
+    data = {"csrf": csrf, "audit_id": "a1", "to": "(970) 224-1200",
+            "body": "Hi {{first_name}}, Dillon with Relay for Roofers here: {{report_url}} Reply STOP to opt out."}
+    data.update(over)
+    return client.post("/console/outreach/p1/text", data=data, follow_redirects=False,
+                       headers={"referer": "http://testserver/console/audits/a1"})
+
+
+def test_a_text_sends_once_and_is_recorded_without_moving_the_email_schedule(client, monkeypatch):
+    written = _quo_store(monkeypatch)
+    csrf = sign_in(client)
+    response = _text(client, csrf)
+    assert response.status_code == 303
+    assert "notice=text_sent" in response.headers["location"] and response.headers["location"].endswith("#text")
+    assert len(written["texts"]) == 1
+    assert written["texts"][0]["to"] == "+19702241200"
+    assert written["texts"][0]["content"].startswith("Hi there, Dillon with Relay for Roofers here: http")
+    touch = written["touches"][0][1]
+    assert touch["channel"] == "sms" and touch["to"] == "+19702241200" and touch["message_id"] == "AC1"
+    assert "ordinal" not in touch, "a text is not one of the four emails"
+    assert written["bumps"] == 1
+    assert written["sequences"] and written["sequences"][0].touch_count == 0, "opened, not advanced"
+
+
+def test_a_text_is_refused_when_suppressed_by_number_or_prospect(client, monkeypatch):
+    written = _quo_store(monkeypatch, suppressions={"place_id": set(), "domain": set(),
+                                                    "phone": {"+19702241200"}, "email": set()})
+    csrf = sign_in(client)
+    response = _text(client, csrf)
+    assert "notice=text_not_sent" in response.headers["location"] and "suppressed" in response.headers["location"]
+    assert written["texts"] == []
+
+
+def test_a_text_stops_at_its_own_daily_cap(client, monkeypatch):
+    written = _quo_store(monkeypatch, texts_today=20)
+    csrf = sign_in(client)
+    response = _text(client, csrf)
+    assert "notice=text_not_sent" in response.headers["location"] and written["texts"] == []
+
+
+def test_a_text_is_checked_like_an_email(client, monkeypatch):
+    written = _quo_store(monkeypatch)
+    csrf = sign_in(client)
+    for body, word in (("Your Leaky Bucket score is 40. Reply STOP", "vocabulary"),
+                       ("Hi {{frist}}", "frist"), ("", "empty"), ("x" * 330, "characters")):
+        response = _text(client, csrf, body=body)
+        assert "notice=text_not_sent" in response.headers["location"], body[:20]
+        assert word in response.headers["location"], word
+    assert written["texts"] == []
+
+
+def test_quo_errors_send_nothing_and_say_why(client, monkeypatch):
+    from app.tools.quo import QuoUnavailable
+
+    written = _quo_store(monkeypatch, quo_error=QuoUnavailable("the Quo number is not approved for A2P 10DLC texting yet"))
+    csrf = sign_in(client)
+    response = _text(client, csrf)
+    assert "notice=text_not_sent" in response.headers["location"] and "10DLC" in response.headers["location"]
+    assert written["touches"] == []
+
+
+def test_the_text_route_needs_csrf_and_a_session(client, monkeypatch):
+    written = _quo_store(monkeypatch)
+    assert client.post("/console/outreach/p1/text", data={"to": "+19702241200", "body": "x"}).status_code == 401
+    sign_in(client)
+    assert _text(client, "wrong").status_code == 403 and written["texts"] == []
+
+
+def test_add_to_quo_creates_the_contact_and_remembers_it(client, monkeypatch):
+    written = _quo_store(monkeypatch)
+    csrf = sign_in(client)
+    response = client.post("/console/outreach/p1/quo-contact", data={"csrf": csrf, "audit_id": "a1"},
+                           follow_redirects=False, headers={"referer": "http://testserver/console/audits/a1"})
+    assert "notice=quo_added" in response.headers["location"]
+    assert written["contacts"] == [("p1", "CT1", "+19702241200")]
+    assert written["texts"] == [] and written["touches"] == []
+
+
+def test_add_to_quo_respects_suppression_and_reports_failures(client, monkeypatch):
+    from app.tools.quo import QuoUnavailable
+
+    written = _quo_store(monkeypatch, suppressions={"place_id": {"p1"}, "domain": set(), "phone": set(), "email": set()})
+    csrf = sign_in(client)
+    response = client.post("/console/outreach/p1/quo-contact", data={"csrf": csrf, "audit_id": "a1"}, follow_redirects=False)
+    assert "notice=quo_failed" in response.headers["location"] and written["contacts"] == []
+    written = _quo_store(monkeypatch, contact_error=QuoUnavailable("QUO_API_KEY is not set"))
+    response = client.post("/console/outreach/p1/quo-contact", data={"csrf": csrf, "audit_id": "a1"}, follow_redirects=False)
+    assert "notice=quo_failed" in response.headers["location"] and "QUO_API_KEY" in response.headers["location"]
+
+
+def test_the_card_offers_text_and_call_with_the_number_prefilled():
+    page = _prospect_page(findings=_approved(), audit={"report_slug": "abcdefghijklmnop"},
+                          prospect={"owner_email": "dave@apexroofingusa.com", "gbp_phone": "(970) 224-1200",
+                                    "business_name": "Apex Roofing", "city": "Fort Collins"},
+                          report_url="https://x/abc", quo_from="+15732569991")
+    assert 'action="/console/outreach/p1/text"' in page and 'action="/console/outreach/p1/quo-contact"' in page
+    assert 'name="to" type="tel" value="+19702241200"' in page
+    assert "Reply STOP to opt out." in page
+    assert 'data-confirm="Send this text to {to} from +15732569991? It leaves your Quo number now."' in page
+    assert ">Add to Quo</button>" in page and "Calls happen in the Quo app" in page
+    assert "A text does not move the email schedule" in page
+
+
+def test_the_card_shows_in_quo_once_the_contact_exists():
+    page = _prospect_page(findings=_approved(), audit={"report_slug": "abcdefghijklmnop"},
+                          prospect={"gbp_phone": "(970) 224-1200", "quo_contact_id": "CT1"},
+                          report_url="https://x/abc")
+    assert "In Quo" in page and ">Add to Quo</button>" not in page
+
+
+def test_the_timeline_reads_texts_and_calls():
+    from datetime import datetime, timezone
+
+    when = datetime(2026, 9, 18, tzinfo=timezone.utc)
+    page = _prospect_page(findings=_approved(), audit={"report_slug": "abcdefghijklmnop"},
+                          report_url="https://x/abc",
+                          touches=[{"channel": "sms", "sent_at": when, "to": "+19702241200"},
+                                   {"channel": "call", "sent_at": when, "duration": 184, "answered": True,
+                                    "summary": ["Owner interested.", "Send the report."]},
+                                   {"channel": "call", "sent_at": when, "duration": 0, "answered": False}])
+    assert "Text sent Sep 18 to +19702241200" in page
+    assert "Call Sep 18, 3 min. Owner interested. Send the report." in page
+    assert "Call Sep 18, no answer" in page
+
+
+def test_the_text_template_must_carry_the_opt_out():
+    from app import outreach_templates as tpl
+
+    assert tpl.text_problems(tpl.DEFAULT_TEXT) == []
+    out = tpl.text_problems("Hi {{first_name}}, call me.")
+    assert any("opt out" in p for p in out)
+    assert any("characters" in p for p in tpl.text_problems("x " * 200 + "STOP"))
+    saved = tpl.normalise({"body_sms": "Hi  there\n — Reply STOP to opt out"})
+    assert saved["sms"]["body"] == "Hi there , Reply STOP to opt out" or saved["sms"]["body"] == "Hi there, Reply STOP to opt out"

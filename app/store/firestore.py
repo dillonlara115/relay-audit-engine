@@ -635,6 +635,54 @@ def bump_daily_sends(day: str) -> None:
         {day: firestore.Increment(1), "updated_at": utcnow()}, merge=True)
 
 
+def set_quo_contact(prospect_id: str, contact_id: str, phone_e164: str = "") -> None:
+    """Remember the Quo contact for a prospect, and its number in +1 form so an
+    inbound text or call can be matched back by either."""
+    payload: dict[str, Any] = {"quo_contact_id": contact_id, "quo_added_at": utcnow(),
+                               "updated_at": utcnow()}
+    if phone_e164:
+        payload["phone_e164"] = phone_e164
+    get_client().collection(PROSPECTS).document(prospect_id).set(payload, merge=True)
+
+
+def prospect_by_quo_contact(contact_id: str) -> dict[str, Any] | None:
+    snaps = list(get_client().collection(PROSPECTS)
+                 .where(filter=firestore.FieldFilter("quo_contact_id", "==", contact_id))
+                 .limit(1).stream())
+    return {"place_id": snaps[0].id, **(snaps[0].to_dict() or {})} if snaps else None
+
+
+def prospect_by_phone(phone_e164: str) -> dict[str, Any] | None:
+    snaps = list(get_client().collection(PROSPECTS)
+                 .where(filter=firestore.FieldFilter("phone_e164", "==", phone_e164))
+                 .limit(1).stream())
+    return {"place_id": snaps[0].id, **(snaps[0].to_dict() or {})} if snaps else None
+
+
+def daily_texts(day: str) -> int:
+    snap = get_client().collection(SETTINGS).document(SEND_LOG_DOC).get()
+    return int(((snap.to_dict() or {}) if snap.exists else {}).get(f"text:{day}") or 0)
+
+
+def bump_daily_texts(day: str) -> None:
+    get_client().collection(SETTINGS).document(SEND_LOG_DOC).set(
+        {f"text:{day}": firestore.Increment(1), "updated_at": utcnow()}, merge=True)
+
+
+def touch_by_resource(prospect_id: str, resource_id: str) -> tuple[str, dict[str, Any]] | None:
+    """A touch recorded from a Quo event, by Quo's id for it, so a later event
+    about the same call can add to it rather than duplicate it."""
+    parent = get_client().collection(OUTREACH).document(prospect_id).collection(TOUCHES)
+    snaps = list(parent.where(filter=firestore.FieldFilter("resource_id", "==", resource_id))
+                 .limit(1).stream())
+    return (snaps[0].id, snaps[0].to_dict() or {}) if snaps else None
+
+
+def update_touch(prospect_id: str, touch_id: str, fields: Mapping[str, Any]) -> None:
+    (get_client().collection(OUTREACH).document(prospect_id).collection(TOUCHES)
+     .document(touch_id).set(_plain(dict(fields)), merge=True))
+
+
 def get_sequence(prospect_id: str) -> dict[str, Any] | None:
     snap = get_client().collection(OUTREACH).document(prospect_id).get()
     return snap.to_dict() if snap.exists else None

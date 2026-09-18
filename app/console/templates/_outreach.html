@@ -47,6 +47,36 @@
   </div>
   {% endif %}
 
+  {% if o.text.show %}
+  <div class="step" id="text">
+    <h4>Text or call</h4>
+    <p class="muted">Calls happen in the Quo app: click the number at the top of the page. A text goes from {{ o.quo_from or "your Quo number" }} when you press Send on it.</p>
+    <form class="inline" method="post" action="/console/outreach/{{ prospect_id }}/quo-contact">
+      {{ csrf_field(csrf) }}
+      <input type="hidden" name="audit_id" value="{{ audit_id }}">
+      {% if o.text.in_quo %}{{ pill("ok", "In Quo") }}{% else %}<button class="ghost" type="submit">Add to Quo</button>{% endif %}
+    </form>
+    <p class="muted">{% if o.text.in_quo %}The contact carries the business, the number and the report link, so a call shows who it is.{% else %}Creates a Quo contact with the business, the number and the report link, so a call shows who it is. Sends nothing.{% endif %}</p>
+    <form method="post" action="/console/outreach/{{ prospect_id }}/text" id="text-form"
+          data-confirm="{{ o.text.confirm }}" onsubmit="return sendConfirm(this)">
+      {{ csrf_field(csrf) }}
+      <input type="hidden" name="audit_id" value="{{ audit_id }}">
+      <label for="text-to">To</label>
+      <input id="text-to" name="to" type="tel" value="{{ o.text.to }}" required placeholder="+19705551234">
+      {% if not o.text.to %}{{ pill("warn", "No number on record") }}{% endif %}
+      <div class="fieldrow">
+        <label for="text-body">Text</label>
+        {{ variables_menu(o.text.menu, ["text-body"]) }}
+      </div>
+      <textarea id="text-body" name="body" rows="4" maxlength="320" required>{{ o.text.body }}</textarea>
+      {% for w in o.text.warnings %}<p>{{ pill("warn", w) }}</p>{% endfor %}
+      {% if not o.text.published %}<p>{{ pill("warn", "The report is not published, so the link in this text will not work yet") }}</p>{% endif %}
+      <button type="submit">Send text</button>
+    </form>
+    <p class="hint">A text does not move the email schedule. It is recorded below, and a reply by text lands there too.</p>
+  </div>
+  {% endif %}
+
   {% if o.step2.show %}
   <div class="step">
     <h4>2. Sent it from somewhere else?</h4>

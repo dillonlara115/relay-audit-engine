@@ -500,6 +500,7 @@ async def audit_screen(audit_id: str, request: Request) -> Response:
         sender_name=get_config().outreach_sender_name,
         templates=templates,
         mailbox=get_config().outreach_mailbox,
+        quo_from=get_config().quo_from,
     ))
 
 
@@ -779,6 +780,122 @@ async def send_email(prospect_id: str, request: Request, audit_id: str = Form(No
     if back.startswith("/console/audits/"):
         target += "#outreach"
     return _redirect(target)
+
+
+# ── Quo: contacts and texts ───────────────────────────────────────────────────
+
+
+@router.post("/outreach/{prospect_id}/quo-contact")
+async def add_quo_contact(prospect_id: str, request: Request, audit_id: str = Form(None),
+                          csrf: str = Form(None)) -> Response:
+    """Create (or reuse) the Quo contact for this prospect. Sends nothing."""
+    if not check_csrf(request, csrf):
+        return Response(status_code=403, content="stale form, reload the page")
+    from app.tools import quo
+
+    def add() -> str | None:
+        prospect = store.get_prospect(prospect_id) or {}
+        hit = store.suppression_hit(store.load_suppressions(), place_id=prospect_id,
+                                    domain=prospect.get("domain"), phone=prospect.get("gbp_phone"),
+                                    email=prospect.get("owner_email"))
+        if hit:
+            return f"This prospect is suppressed ({hit})."
+        slug = (store.get_audit(audit_id) or {}).get("report_slug") if audit_id else None
+        try:
+            contact_id = quo.ensure_contact(
+                {**prospect, "place_id": prospect_id},
+                report_url=_report_url(request, slug) or "",
+                console_url=f"{str(request.base_url).rstrip('/')}/console/audits/{audit_id}" if audit_id else "")
+        except (quo.QuoUnavailable, ValueError) as exc:
+            return str(exc)
+        store.set_quo_contact(prospect_id, contact_id,
+                              quo.e164_of(prospect.get("gbp_phone") or prospect.get("phone")))
+        return None
+
+    blocked = await asyncio.to_thread(add)
+    back = _back(request, f"/console/audits/{audit_id}" if audit_id else "/console/batches")
+    target = _with_notice(back, "quo_failed" if blocked else "quo_added", blocked or "")
+    return _redirect(target + "#text" if back.startswith("/console/audits/") else target)
+
+
+@router.post("/outreach/{prospect_id}/text")
+async def send_text(prospect_id: str, request: Request, audit_id: str = Form(None),
+                    to: str = Form(""), body: str = Form(""), csrf: str = Form(None)) -> Response:
+    """Send the one text on the form, now, from the operator's Quo number.
+
+    The only place that texts. Same discipline as the email route: a person
+    pressed Send on this message after reading it. In order: CSRF,
+    suppression (the number in +1 form too), the number, the daily text
+    cap, unknown variables, internal vocabulary, the length, then one call
+    to quo.send_text, then the ledger. A text is recorded as its own touch
+    and does not advance the email schedule.
+    """
+    if not check_csrf(request, csrf):
+        return Response(status_code=403, content="stale form, reload the page")
+
+    from datetime import datetime, timezone
+
+    from app import outreach_templates as tpl
+    from app.copy_rules import sanitize
+    from app.report.data import forbidden_terms_in
+    from app.tools import quo
+
+    def send() -> tuple[str | None, str]:
+        prospect = store.get_prospect(prospect_id) or {}
+        number = quo.e164_of(to)
+        if not number:
+            return "The To field needs one phone number.", ""
+        rules = store.load_suppressions()
+        hit = (store.suppression_hit(rules, place_id=prospect_id, domain=prospect.get("domain"),
+                                     phone=prospect.get("gbp_phone"), email=prospect.get("owner_email"))
+               or store.suppression_hit(rules, phone=number))
+        if hit:
+            return f"This prospect is suppressed ({hit}).", ""
+        cfg = get_config()
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if store.daily_texts(today) >= cfg.outreach_text_daily_cap:
+            return (f"The daily limit of {cfg.outreach_text_daily_cap} texts has been reached. "
+                    "It resets at midnight UTC (OUTREACH_TEXT_DAILY_CAP)."), ""
+        findings_doc = store.get_draft_findings(audit_id) if audit_id else None
+        slug = (store.get_audit(audit_id) or {}).get("report_slug") if audit_id else None
+        values = tpl.values_for(ordinal=1, prospect=prospect, report_url=_report_url(request, slug) or "",
+                                findings_doc=findings_doc, sender_name=cfg.outreach_sender_name,
+                                signature=cfg.outreach_signature)
+        text, unknown = tpl.render(tpl.clean(body), values)
+        if unknown:
+            return "Not a variable: " + ", ".join("{{" + u + "}}" for u in unknown) + ". Fix or remove it.", ""
+        text, _ = sanitize(" ".join(text.split()))
+        if not text:
+            return "The text is empty.", ""
+        leaked = forbidden_terms_in(text)
+        if leaked:
+            return ("The text names internal vocabulary a contractor should never read: "
+                    + ", ".join(leaked) + ". Edit it and try again."), ""
+        if len(text) > tpl.TEXT_CAP:
+            return f"The text is {len(text)} characters; the limit is {tpl.TEXT_CAP}.", ""
+        try:
+            sent = quo.send_text(to=number, content=text)
+        except (quo.QuoUnavailable, ValueError) as exc:
+            return f"Quo did not send it: {exc}", ""
+        sent_at = store.utcnow()
+        store.add_touch(prospect_id, {
+            "channel": "sms", "sent_at": sent_at, "audit_id": audit_id, "logged_via": "console",
+            "sent_via": "console", "to": number, "body": text,
+            "message_id": sent.message_id, "resource_id": sent.message_id,
+            "conversation_id": sent.conversation_id,
+        })
+        if not store.get_sequence(prospect_id):
+            pool = len((findings_doc or {}).get("findings") or [])
+            from app import outreach
+            store.save_sequence(outreach.open_sequence(prospect_id, audit_id=audit_id,
+                                                       max_touches=outreach.touches_supported(pool) or 1))
+        store.bump_daily_texts(today)
+        return None, f"Text to {number}."
+
+    blocked, detail = await asyncio.to_thread(send)
+    back = _back(request, f"/console/audits/{audit_id}" if audit_id else "/console/batches")
+    target = _with_notice(back, "text_not_sent" if blocked else "text_sent", blocked or detail)
+    return _redirect(target + "#text" if back.startswith("/console/audits/") else target)
 
 
 # ── Suppression ───────────────────────────────────────────────────────────────
