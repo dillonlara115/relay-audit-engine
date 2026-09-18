@@ -78,14 +78,24 @@ _env = Environment(
 _env.filters["mon_d"] = lambda dt: dt.strftime("%b %d") if dt else ""
 
 
+STYLES = TEMPLATES.parent.parent / "styles" / "console.css"
+BUILT_CSS = TEMPLATES.parent.parent / "static" / "console.css"
+
+
 def theme_css() -> str:
-    """The one stylesheet, raw. The palette tests read it from here."""
-    return (TEMPLATES / "_theme.css").read_text(encoding="utf-8")
+    """The stylesheet source: the daisyUI theme and the component rules.
+    The palette tests read it from here; pages link the built file."""
+    return STYLES.read_text(encoding="utf-8")
 
 
-def _theme_css_stripped() -> str:
-    """The sheet without its comments, for the page that must say nothing."""
-    return re.sub(r"/\*.*?\*/", "", theme_css(), flags=re.S)
+@functools.lru_cache(maxsize=1)
+def css_href() -> str:
+    """The built sheet's URL with a content hash, so a deploy never pairs
+    new templates with a browser's cached old sheet."""
+    import hashlib
+
+    digest = hashlib.sha256(BUILT_CSS.read_bytes()).hexdigest()[:10] if BUILT_CSS.exists() else "0"
+    return f"/static/console.css?v={digest}"
 
 
 # One vocabulary for the rail: Overview, Sweeps, Jobs. Icon names are sprite
@@ -150,7 +160,7 @@ def _tag_titles():
 
 def _render(template: str, **ctx: Any) -> str:
     """Render one screen with the shared context every template expects."""
-    ctx.setdefault("theme_css", Markup(theme_css()))
+    ctx.setdefault("css_href", css_href())
     ctx.setdefault("badges", {})
     ctx.setdefault("nav_groups", NAV_GROUPS)
     ctx.setdefault("csrf", None)
@@ -238,7 +248,8 @@ def progress_bar(done: int, total: int) -> str:
     tells 'finished' from 'still running' without reading the numbers."""
     pct = int((done / total) * 100) if total else 0
     complete = " done" if total and done >= total else ""
-    return f'<div class="bar{complete}"><i style="width:{pct}%"></i></div>'
+    return (f'<progress class="bar{complete}" value="{pct}" max="100" '
+            f'aria-label="{pct} percent"></progress>')
 
 
 def scan_label(batch: Mapping[str, Any]) -> str:
@@ -268,8 +279,8 @@ def scan_title(batch: Mapping[str, Any]) -> str:
 
 
 def tiles(pairs: Sequence[tuple[str, Any]]) -> str:
-    return '<div class="tiles">' + "".join(
-        f'<div class="tile"><div class="n">{esc(n)}</div><div class="l">{esc(l)}</div></div>'
+    return '<div class="kpis tiles">' + "".join(
+        f'<div class="kpi tile"><div class="n">{esc(n)}</div><div class="l">{esc(l)}</div></div>'
         for l, n in pairs
     ) + "</div>"
 
@@ -335,8 +346,14 @@ def score_legend(open_by_default: bool = False) -> str:
 </details>"""
 
 
+_STATUS_BADGE = {"running": "badge-primary", "done": "badge-success", "failed": "badge-error",
+                 "queued": "badge-ghost"}
+
+
 def status_pill(status: str) -> str:
-    return f'<span class="status {esc(status)}">{esc(status)}</span>'
+    kind = _STATUS_BADGE.get(status, "badge-ghost")
+    return (f'<span class="badge badge-soft {kind} font-display font-bold status {esc(status)}">'
+            f'{esc(status)}</span>')
 
 
 _CONTACT_TAG = {"valid": "ok", "risky": "warn", "invalid": "bad", "unknown": "dim"}
@@ -374,11 +391,11 @@ def render_login(*, next_path: str = "/console", error: str | None = None) -> st
     Deliberately says nothing about what is behind it. Whoever is looking at
     this either knows already or has no business finding out, and the same page
     answers a trimmed report URL as answers a bookmark to the call list. So it
-    renders on the bare shell, with the stylesheet stripped of its comments.
+    renders on the bare shell: no sprite, no nav, no wordmark, and the
+    stylesheet it links is checked for the same words by a test.
     """
     return _env.get_template("login.html").render(
-        theme_css=Markup(_theme_css_stripped()), next_path=next_path,
-        error=error, login_path=LOGIN_PATH)
+        css_href=css_href(), next_path=next_path, error=error, login_path=LOGIN_PATH)
 
 
 def contact_cell(contacts: Sequence[Mapping[str, Any]]) -> str:
@@ -909,7 +926,7 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                  'rel="noopener noreferrer">Google Business Profile</a>')
     state = (findings or {}).get("status")
     if audit.get("report_slug"):
-        primary = Markup(f'<a class="btn" href="/{esc(audit["report_slug"])}" target="_blank" '
+        primary = Markup(f'<a class="btn btn-primary" href="/{esc(audit["report_slug"])}" target="_blank" '
                          'rel="noopener noreferrer">Open report</a>')
     elif state == "approved":
         primary = Markup(f'<form method="post" action="/console/audits/{esc(audit_id)}/publish">'

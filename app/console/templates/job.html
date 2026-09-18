@@ -2,18 +2,18 @@
 {% from "_components.html" import page_header %}
 {% block body %}
 {{ page_header(job.label, crumbs=[("/console/jobs", "Jobs"), (None, job.label)]) }}
-<div class="sub">Job {{ job.job_id }} &middot; {{ status_pill(job.status) }}
-<span id="job-status" style="display:none"></span></div>
+<div class="muted mb-3">Job {{ job.job_id }} &middot; {{ status_pill(job.status) }}
+<span id="job-status" class="hidden"></span></div>
 
 {% if job.error %}
-<div class="banner"><strong>Failed.</strong> {{ job.error }}</div>
+<div class="alert alert-error alert-soft mb-3.5"><span><strong>Failed.</strong> {{ job.error }}</span></div>
 {% endif %}
 
 <pre class="log" id="job-log">{{ job.lines or "Waiting for a worker to pick this up..." }}</pre>
 
 {% if job.answer %}
 <div class="card"><h3>What the coordinator reported</h3>
-<div style="white-space:pre-wrap">{{ job.answer }}</div></div>
+<div class="whitespace-pre-wrap">{{ job.answer }}</div></div>
 {% endif %}
 
 {% if job.followup == "sweep" %}
@@ -26,8 +26,8 @@
     <input type="hidden" name="batch_id" value="{{ job.batch_id }}">
     <input type="hidden" name="market" value="{{ job.market }}">
     <label for="dlimit">Audits at most</label>
-    <input id="dlimit" type="number" name="limit" value="40" min="1" max="200">
-    <button type="submit">Audit passed prospects</button>
+    <input id="dlimit" type="number" name="limit" value="40" min="1" max="200" class="input w-full">
+    <button type="submit" class="btn btn-primary mt-3.5">Audit passed prospects</button>
   </form>
 </div>
 {% elif job.followup == "batch" %}

@@ -1,6 +1,6 @@
 {#- The shell for the one page a stranger can reach: the password prompt.
-    No sprite, no nav, no wordmark, and the stylesheet arrives with its
-    comments stripped. Nothing here may name what the tool is for. -#}
+    No sprite, no nav, no wordmark. The linked stylesheet is public, so a
+    test reads it for the same words this page must not say. -#}
 <!doctype html>
 <html lang="en">
 <head>
@@ -13,7 +13,7 @@
 <link rel="apple-touch-icon" href="/static/relay-mark.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=PT+Sans:wght@400;700&family=Work+Sans:wght@400;600&display=swap" rel="stylesheet">
-<style>{{ theme_css }}</style>
+<link rel="stylesheet" href="{{ css_href }}">
 </head>
-<body><main class="main">{% block body %}{% endblock %}</main></body>
+<body class="min-h-screen"><main class="main">{% block body %}{% endblock %}</main></body>
 </html>

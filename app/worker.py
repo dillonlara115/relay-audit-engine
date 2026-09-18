@@ -82,7 +82,8 @@ OPEN_PREFIXES = (
 # test_no_route_can_be_mistaken_for_a_report walks the app and forbids it.
 # Files an email or a public page may point at. A whitelist, not a directory
 # listing: nothing else under app/static is reachable, whatever lands there.
-STATIC_FILES = {"relay-mark.png": "image/png", "favicon.svg": "image/svg+xml"}
+STATIC_FILES = {"relay-mark.png": "image/png", "favicon.svg": "image/svg+xml",
+                "console.css": "text/css; charset=utf-8"}
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 

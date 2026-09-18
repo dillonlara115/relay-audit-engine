@@ -3,7 +3,7 @@
 {% block body %}
 {{ page_header("Sweeps",
                "Every sweep and how far its audits have got. Open one for its call list.",
-               primary_html='<a class="btn" href="/console#run">Run sweep</a>'|safe) }}
+               primary_html='<a class="btn btn-primary" href="/console#run">Run sweep</a>'|safe) }}
 
 <div class="windows">Showing
   {% for d, label in windows %}<a class="{{ 'on' if d == days else '' }}" href="/console/batches?days={{ d }}">{{ label }}</a>{% endfor %}
@@ -22,7 +22,7 @@
   <td class="num">{{ b.failed }}</td>
   <td>{{ b.bar }}</td>
   <td class="muted">{{ b.latest }}</td>
-  <td class="rowact"><a href="/console/batches/{{ b.batch_id }}" title="Open sweep" aria-label="Open sweep">{{ icon("external") }}</a></td>
+  <td class="rowact"><a class="btn btn-ghost btn-sm btn-square" href="/console/batches/{{ b.batch_id }}" title="Open sweep" aria-label="Open sweep">{{ icon("external") }}</a></td>
 </tr>
 {% else %}
 {{ empty_row(10, 'No sweeps in this window. <a href="/console">Start one</a>; a small market finishes in a few minutes. Looking for an older sweep? Widen the window above.'|safe) }}

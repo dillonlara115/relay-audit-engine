@@ -1,16 +1,16 @@
 {% extends "bare.html" %}
 {% set title = "Relay" %}
 {% block body %}
-<div class="login">
-  <h1>Relay</h1>
+<div class="max-w-[340px] mx-auto mt-[14vh]">
+  <h1 class="text-4xl mb-0.5">Relay</h1>
   <p class="muted">Enter the password to continue.</p>
-  {% if error %}<div class="banner">{{ error }}</div>{% endif %}
+  {% if error %}<div class="alert alert-error alert-soft my-3">{{ error }}</div>{% endif %}
   <form method="post" action="{{ login_path }}">
     <input type="hidden" name="next" value="{{ next_path }}">
     <label for="password">Password</label>
     <input id="password" type="password" name="password" autocomplete="current-password"
-           autofocus required>
-    <button type="submit">Continue</button>
+           class="input input-lg w-full" autofocus required>
+    <button type="submit" class="btn btn-primary btn-block mt-3.5">Continue</button>
   </form>
 </div>
 {% endblock %}

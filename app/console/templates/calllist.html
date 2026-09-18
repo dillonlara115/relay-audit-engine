@@ -4,11 +4,11 @@
 {% block body %}
 {{ page_header("Call list",
                "Best call first. Ranked by the kind of problem, not the score: a prospect customers already find, whose leads slip away, is the quickest conversation.",
-               primary_html='<a class="btn" href="#draft">Draft findings</a>'|safe,
+               primary_html='<a class="btn btn-primary" href="#draft">Draft findings</a>'|safe,
                crumbs=[("/console/batches", "Sweeps"), (None, sweep_label)]) }}
 
 {% if progress %}
-<div class="banner">{{ progress.text }}<div style="margin-top:6px">{{ progress.bar }}</div></div>
+<div class="banner"><div>{{ progress.text }}<div class="mt-1.5">{{ progress.bar }}</div></div></div>
 {% endif %}
 
 <div class="kpis">
@@ -26,14 +26,14 @@
     {{ csrf_field(csrf) }}
     <input type="hidden" name="batch_id" value="{{ batch_id }}">
     <label for="top">Top prospects to draft for</label>
-    <input id="top" type="number" name="top" value="10" min="1" max="40">
-    <button type="submit">Draft findings</button>
+    <input id="top" type="number" name="top" value="10" min="1" max="40" class="input w-full">
+    <button type="submit" class="btn btn-primary mt-3.5">Draft findings</button>
   </form>
 </div>
 
-<div class="tabs">
+<div class="tabs-row" role="tablist">
   {% for slug, label, count in tabs %}
-  <a class="{{ 'on' if slug == tab else '' }}" href="?tab={{ slug }}">{{ label }} <b>{{ count }}</b></a>
+  <a role="tab" class="tab {{ 'tab-active on' if slug == tab else '' }}" href="?tab={{ slug }}">{{ label }} <b>{{ count }}</b></a>
   {% endfor %}
 </div>
 
@@ -41,15 +41,15 @@
 <p class="muted">Prospects in this market the sweep did not audit: the gate ruled them out, or a limit left them off. Tick any worth a look and choose Audit selected; the gate's reasons stay on their record.</p>
 {% endif %}
 <div class="toolbar">
-  <div class="search">{{ icon("search") }}<input id="f-q" type="search" placeholder="Search prospect or city" aria-label="Search prospect or city"></div>
+  <label class="input search">{{ icon("search") }}<input id="f-q" type="search" class="grow" placeholder="Search prospect or city" aria-label="Search prospect or city"></label>
   {% if tab != "excluded" %}
   <details class="popover">
     <summary>{{ icon("filter") }} Filter</summary>
     <div class="inner">
       <label for="f-check">Where check</label>
-      <select id="f-check"><option value="">Any check</option>{{ check_options }}</select>
+      <select id="f-check" class="select w-full"><option value="">Any check</option>{{ check_options }}</select>
       <label for="f-status">Result</label>
-      <select id="f-status">
+      <select id="f-status" class="select w-full">
         <option value="">Any result</option>
         <option value="fail">Fail</option>
         <option value="pass">Pass</option>
@@ -60,38 +60,38 @@
     </div>
   </details>
   {% endif %}
-  <a class="btn ghost" id="export-link" href="{{ export_href }}">{{ icon("download") }} Export CSV</a>
+  <a class="btn btn-sm" id="export-link" href="{{ export_href }}">{{ icon("download") }} Export CSV</a>
   <span class="muted" id="f-count"></span>
 </div>
 
 <div class="bulkbar" id="bulkbar">
   <span class="muted" id="bulk-count">0 selected</span>
-  <a class="btn ghost" id="bulk-export" href="{{ export_href }}">{{ icon("download") }} Export selected</a>
+  <a class="btn btn-sm" id="bulk-export" href="{{ export_href }}">{{ icon("download") }} Export selected</a>
   {% if tab == "excluded" %}
   <form class="inline" method="post" action="/console/batches/{{ batch_id }}/include" id="include-form"
         onsubmit="return confirm('Audit the selected prospects anyway? The gate\'s reasons stay on record. Nothing is contacted.')">
     {{ csrf_field(csrf) }}
     <input type="hidden" name="ids" id="include-ids" value="">
-    <button class="ghost" type="submit">{{ icon("play") }} Audit selected</button>
+    <button class="btn btn-sm btn-primary" type="submit">{{ icon("play") }} Audit selected</button>
   </form>
   {% endif %}
 </div>
 
 {% if tab == "excluded" %}
 <div class="table-wrap"><table id="call-list" class="sortable"><thead><tr>
-<th class="pick"><input type="checkbox" id="pick-all" aria-label="Select all"></th>
+<th class="pick"><input type="checkbox" id="pick-all" class="checkbox checkbox-primary checkbox-sm" aria-label="Select all"></th>
 <th data-sort="business">Prospect</th><th>Phone</th><th data-sort="website">Website</th>
 <th data-sort="gate">Gate</th><th data-sort="reasons">Reasons</th><th></th></tr></thead>
 <tbody>
 {% for e in excluded %}
 <tr {{ e.attrs }} data-sort_business="{{ e.business_name|lower }}">
-<td class="pick"><input type="checkbox" class="pick-row" name="pick" value="{{ e.prospect_id }}"></td>
+<td class="pick"><input type="checkbox" class="checkbox checkbox-primary checkbox-sm pick-row" name="pick" value="{{ e.prospect_id }}"></td>
 <td>{{ e.business_name }}<br><span class="muted">{{ e.city }}</span></td>
 <td class="tel">{% if e.phone %}<a href="tel:{{ e.phone }}">{{ e.phone }}</a>{% endif %}</td>
 <td>{% if e.website %}<a href="{{ e.website }}" target="_blank" rel="noopener noreferrer">{{ e.domain or e.website }}</a>{% endif %}</td>
 <td>{{ pill(e.gate[0], e.gate[1]) }}</td>
 <td{% if e.detail %} title="{{ e.detail }}"{% endif %}>{{ e.reasons }}</td>
-<td class="rowact">{% if e.maps_uri %}<a href="{{ e.maps_uri }}" target="_blank" rel="noopener noreferrer" title="Open Google profile" aria-label="Open Google profile">{{ icon("external") }}</a>{% endif %}</td>
+<td class="rowact">{% if e.maps_uri %}<a class="btn btn-ghost btn-sm btn-square" href="{{ e.maps_uri }}" target="_blank" rel="noopener noreferrer" title="Open Google profile" aria-label="Open Google profile">{{ icon("external") }}</a>{% endif %}</td>
 </tr>
 {% else %}
 {{ empty_row(7, "Every prospect in this market is on the call list." if excluded_known else "This sweep has no gate record.") }}
@@ -101,7 +101,7 @@
 {{ score_legend() }}
 
 <div class="table-wrap"><table id="call-list" class="sortable"><thead><tr>
-<th class="pick"><input type="checkbox" id="pick-all" aria-label="Select all"></th>
+<th class="pick"><input type="checkbox" id="pick-all" class="checkbox checkbox-primary checkbox-sm" aria-label="Select all"></th>
 <th data-sort="rank">#</th><th data-sort="business">Prospect</th>
 <th data-sort="segment">Segment</th>{{ score_headers() }}
 <th data-sort="total">Total<span class="sub">out of 100</span></th><th>Phone</th>
@@ -111,7 +111,7 @@
 <tbody>
 {% for r in rows %}
 <tr {{ r.attrs }}>
-<td class="pick"><input type="checkbox" class="pick-row" name="pick" value="{{ r.audit_id }}"></td>
+<td class="pick"><input type="checkbox" class="checkbox checkbox-primary checkbox-sm pick-row" name="pick" value="{{ r.audit_id }}"></td>
 <td class="num">{{ r.rank }}</td>
 <td><a href="/console/audits/{{ r.audit_id }}">{{ r.business_name }}</a><br><span class="muted">{{ r.city }}</span></td>
 <td>{{ r.chip }}</td>
@@ -123,10 +123,10 @@
 <td>{{ pill(r.findings[0], r.findings[1]) }}</td>
 <td>{% for t in r.tags %}<span class="tag{{ ' warn' if t == 'Partial' else '' }}"{% if t in tag_titles %} title="{{ tag_titles[t] }}"{% endif %}>{{ t }}</span> {% endfor %}</td>
 <td class="rowact">
-  <a href="/console/audits/{{ r.audit_id }}" title="Open prospect" aria-label="Open prospect">{{ icon("file") }}</a>
-  {% if r.report_slug %}<a href="/{{ r.report_slug }}" target="_blank" rel="noopener noreferrer" title="Open report" aria-label="Open report">{{ icon("external") }}</a>{% endif %}
-  {% if r.can_publish %}<form class="inline" method="post" action="/console/audits/{{ r.audit_id }}/publish">{{ csrf_field(csrf) }}<button class="ghost" type="submit">Publish report</button></form>{% endif %}
-  <form class="inline" method="post" action="/console/audits/{{ r.audit_id }}/reaudit" onsubmit="{{ r.reaudit_confirm }}">{{ csrf_field(csrf) }}<button class="icon" type="submit" title="Re-audit" aria-label="Re-audit">{{ icon("refresh") }}</button></form>
+  <a class="btn btn-ghost btn-sm btn-square" href="/console/audits/{{ r.audit_id }}" title="Open prospect" aria-label="Open prospect">{{ icon("file") }}</a>
+  {% if r.report_slug %}<a class="btn btn-ghost btn-sm btn-square" href="/{{ r.report_slug }}" target="_blank" rel="noopener noreferrer" title="Open report" aria-label="Open report">{{ icon("external") }}</a>{% endif %}
+  {% if r.can_publish %}<form class="inline" method="post" action="/console/audits/{{ r.audit_id }}/publish">{{ csrf_field(csrf) }}<button class="btn btn-sm" type="submit">Publish report</button></form>{% endif %}
+  <form class="inline" method="post" action="/console/audits/{{ r.audit_id }}/reaudit" onsubmit="{{ r.reaudit_confirm }}">{{ csrf_field(csrf) }}<button class="btn btn-ghost btn-sm btn-square icon" type="submit" title="Re-audit" aria-label="Re-audit">{{ icon("refresh") }}</button></form>
 </td>
 </tr>
 {% else %}

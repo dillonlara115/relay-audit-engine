@@ -22,9 +22,9 @@
       <label for="subject-{{ r.n }}">Subject</label>
       {{ variables_menu(menu, ["subject-" ~ r.n, "body-" ~ r.n]) }}
     </div>
-    <input id="subject-{{ r.n }}" name="subject_{{ r.n }}" type="text" value="{{ r.subject }}" maxlength="120" required>
+    <input id="subject-{{ r.n }}" name="subject_{{ r.n }}" type="text" value="{{ r.subject }}" maxlength="120" class="input w-full" required>
     <label for="body-{{ r.n }}">Body</label>
-    <textarea id="body-{{ r.n }}" name="body_{{ r.n }}" rows="14" required>{{ r.body }}</textarea>
+    <textarea id="body-{{ r.n }}" name="body_{{ r.n }}" rows="14" class="textarea w-full" required>{{ r.body }}</textarea>
   </div>
   {% endfor %}
   <div class="card tpl">
@@ -33,10 +33,10 @@
       <label for="body-sms">Text</label>
       {{ variables_menu(menu, ["body-sms"]) }}
     </div>
-    <textarea id="body-sms" name="body_sms" rows="4" maxlength="{{ text_cap }}" required>{{ text_body }}</textarea>
+    <textarea id="body-sms" name="body_sms" rows="4" maxlength="{{ text_cap }}" class="textarea w-full" required>{{ text_body }}</textarea>
     <p class="hint">At most {{ text_cap }} characters, and it must say who it is from and how to opt out. Quo honours STOP on its own; the ledger does too.</p>
   </div>
-  <button type="submit">Save templates</button>
+  <button type="submit" class="btn btn-primary mt-3.5">Save templates</button>
   <p class="hint">Saving changes the next email drafted for every prospect. Emails already sent are not affected. {% if not saved %}These are the defaults; nothing has been saved yet.{% endif %}</p>
 </form>
 {{ insert_variables() }}

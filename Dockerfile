@@ -15,6 +15,13 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
+COPY assets ./assets
+
+# The console stylesheet: Tailwind's standalone CLI (no Node) with the daisyUI
+# plugin files in assets/. Pinned to the same version as scripts/build_css.sh.
+ADD https://github.com/tailwindlabs/tailwindcss/releases/download/v4.3.3/tailwindcss-linux-x64 /usr/local/bin/tailwindcss
+RUN chmod +x /usr/local/bin/tailwindcss \
+    && tailwindcss -i app/styles/console.css -o app/static/console.css --minify
 
 # Cloud Run sets PORT. Concurrency is capped at the service level rather than
 # here, because per host politeness is enforced by a Firestore lease and not by

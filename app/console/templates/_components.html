@@ -13,8 +13,13 @@
 <div class="kpi"><div class="l">{{ label }}</div><div class="n">{{ value }}</div>{% if context %}<div class="c">{{ context }}</div>{% endif %}</div>
 {%- endmacro %}
 
+{#- Pills are daisyUI soft badges: a tinted ground with the status colour as
+    text. The kinds are the console's own words for them. -#}
+{% set PILL = {"ok": "badge-success", "warn": "badge-warning", "bad": "badge-error",
+               "dim": "badge-ghost", "tint": "badge-secondary", "info": "badge-info",
+               "running": "badge-primary"} %}
 {% macro pill(kind, text) -%}
-<span class="pill {{ kind }}">{{ text }}</span>
+<span class="badge badge-soft {{ PILL.get(kind, 'badge-ghost') }} pill {{ kind }}">{{ text }}</span>
 {%- endmacro %}
 
 {#- The wrapper and the table open on the same line on purpose: a test pins
@@ -28,14 +33,14 @@
 {%- endmacro %}
 
 {% macro notice_banner(notice) -%}
-<div class="banner"><strong>{{ notice[0] }}</strong>{% if notice[1] %} {{ notice[1] }}{% endif %}</div>
+<div class="alert alert-info alert-soft mb-3.5 notice" role="status"><span><strong>{{ notice[0] }}</strong>{% if notice[1] %} {{ notice[1] }}{% endif %}</span></div>
 {%- endmacro %}
 
 {#- The Variables menu beside a subject or body box. `fields` names the
     inputs it can insert into; the script inserts into whichever of them was
     focused last, the last one listed by default. -#}
 {% macro variables_menu(groups, fields) -%}
-<details class="popover vars-menu" data-fields="{{ fields|join(',') }}">
+<details class="popover vars-menu dropdown dropdown-end" data-fields="{{ fields|join(',') }}">
   <summary>{{ icon("braces") }} Variables {{ icon("down") }}</summary>
   <div class="inner">
     {% for g in groups %}
@@ -55,9 +60,15 @@
 {#- A button that opens the dialog with this id. The pill, when given, is
     the state the reader would otherwise have had to open it to see. -#}
 {% macro modal_open(target, label, icon_name, pill_html=None) -%}
-<button type="button" class="ghost opener" data-open="{{ target }}" aria-haspopup="dialog" aria-controls="{{ target }}">{{ icon(icon_name) }} {{ label }}{% if pill_html %} {{ pill_html }}{% endif %}</button>
+<button type="button" class="btn btn-sm opener" data-open="{{ target }}" aria-haspopup="dialog" aria-controls="{{ target }}">{{ icon(icon_name) }} {{ label }}{% if pill_html %} {{ pill_html }}{% endif %}</button>
 {%- endmacro %}
 
 {% macro modal_close() -%}
-<button type="button" class="icon close" data-close aria-label="Close">{{ icon("x") }}</button>
+<button type="button" class="btn btn-sm btn-circle btn-ghost close" data-close aria-label="Close">{{ icon("x") }}</button>
+{%- endmacro %}
+
+{#- A dialog's backdrop: daisyUI closes on a click outside through this
+    form, so no geometry in the script. -#}
+{% macro modal_backdrop() -%}
+<form method="dialog" class="modal-backdrop"><button type="submit" aria-label="Close">close</button></form>
 {%- endmacro %}

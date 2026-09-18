@@ -2,12 +2,13 @@
     the next email and press Send on it, or mark one sent from elsewhere,
     and see where the sequence stands. The one sentence about what sends
     and when is fixed and appears beside the button on purpose. -#}
-{% from "_components.html" import pill, variables_menu, modal_close %}
+{% from "_components.html" import pill, variables_menu, modal_close, modal_backdrop %}
 
 {% macro outreach_card(o, csrf, prospect_id, audit_id) -%}
 <dialog class="modal" id="outreach" aria-labelledby="outreach-title">
+  <div class="modal-box">
   <div class="pagehead">
-    <h2 id="outreach-title">Outreach {{ pill(o.state[0], o.state[1]) }}</h2>
+    <h2 id="outreach-title" class="mt-0">Outreach {{ pill(o.state[0], o.state[1]) }}</h2>
     <div class="primary">{{ modal_close() }}</div>
   </div>
   <p class="muted">Sends from {{ o.mailbox }} when you press Send on an email you have read. Nothing goes out on its own.</p>
@@ -16,7 +17,7 @@
   <div class="step">
     <h4>1. Read, edit, send</h4>
     {% if o.step1.mode == "unpublished" %}
-      <span class="btn disabled">Send email</span>
+      <span class="btn btn-disabled">Send email</span>
       <p class="muted">Publish the report first. The email carries its link.</p>
     {% else %}
       <form method="post" action="/console/outreach/{{ prospect_id }}/send" id="send-form"
@@ -25,23 +26,25 @@
         <input type="hidden" name="audit_id" value="{{ audit_id }}">
         <input type="hidden" name="ordinal" value="{{ o.step1.ordinal }}">
         <label for="send-to">To</label>
-        <input id="send-to" name="to" type="email" value="{{ o.step1.to }}" required
+        <input id="send-to" name="to" type="email" value="{{ o.step1.to }}" class="input w-full" required
                placeholder="owner@their-domain.com">
         {% if o.step1.mode == "no_address" %}
-          {{ pill("warn", "No address on record") }}
+          <p class="mt-1">{{ pill("warn", "No address on record") }}</p>
           <p class="muted">Find an address and type it in. It is kept with the record of the send.</p>
         {% endif %}
         <div class="fieldrow">
           <label for="send-subject">Subject</label>
           {{ variables_menu(o.step1.menu, ["send-subject", "send-body"]) }}
         </div>
-        <input id="send-subject" name="subject" type="text" value="{{ o.step1.subject }}" maxlength="120" required>
+        <input id="send-subject" name="subject" type="text" value="{{ o.step1.subject }}" maxlength="120" class="input w-full" required>
         <label for="send-body">Body</label>
-        <textarea id="send-body" name="body" rows="16" required>{{ o.step1.body }}</textarea>
-        {% for w in o.step1.warnings %}<p>{{ pill("warn", w) }}</p>{% endfor %}
+        <textarea id="send-body" name="body" rows="16" class="textarea w-full" required>{{ o.step1.body }}</textarea>
+        {% for w in o.step1.warnings %}<div class="warn-line" role="status">{{ w }}</div>{% endfor %}
         <p class="muted">Email {{ o.step1.ordinal }} of {{ o.step1.max }}. {{ o.step1.note }} Variables you type are filled in when it sends.</p>
-        <button type="submit">Send email</button>
-        <a class="btn ghost" href="{{ o.step1.href }}">Open in my mail client instead</a>
+        <div class="flex gap-2 items-center mt-3.5 flex-wrap">
+        <button type="submit" class="btn btn-primary">Send email</button>
+        <a class="btn btn-sm" href="{{ o.step1.href }}">Open in my mail client instead</a>
+        </div>
       </form>
       <p class="hint">Sending records it below and schedules the next one: day 3, day 7, day 14. Edit the wording for every prospect under <a href="/console/templates">Email templates</a>.</p>
     {% endif %}
@@ -55,7 +58,7 @@
     <form class="inline" method="post" action="/console/outreach/{{ prospect_id }}/quo-contact">
       {{ csrf_field(csrf) }}
       <input type="hidden" name="audit_id" value="{{ audit_id }}">
-      {% if o.text.in_quo %}{{ pill("ok", "In Quo") }}{% else %}<button class="ghost" type="submit">Add to Quo</button>{% endif %}
+      {% if o.text.in_quo %}{{ pill("ok", "In Quo") }}{% else %}<button class="btn btn-sm" type="submit">Add to Quo</button>{% endif %}
     </form>
     <p class="muted">{% if o.text.in_quo %}The contact carries the business, the number and the report link, so a call shows who it is.{% else %}Creates a Quo contact with the business, the number and the report link, so a call shows who it is. Sends nothing.{% endif %}</p>
     <form method="post" action="/console/outreach/{{ prospect_id }}/text" id="text-form"
@@ -63,16 +66,16 @@
       {{ csrf_field(csrf) }}
       <input type="hidden" name="audit_id" value="{{ audit_id }}">
       <label for="text-to">To</label>
-      <input id="text-to" name="to" type="tel" value="{{ o.text.to }}" required placeholder="+19705551234">
-      {% if not o.text.to %}{{ pill("warn", "No number on record") }}{% endif %}
+      <input id="text-to" name="to" type="tel" value="{{ o.text.to }}" class="input w-full" required placeholder="+19705551234">
+      {% if not o.text.to %}<p class="mt-1">{{ pill("warn", "No number on record") }}</p>{% endif %}
       <div class="fieldrow">
         <label for="text-body">Text</label>
         {{ variables_menu(o.text.menu, ["text-body"]) }}
       </div>
-      <textarea id="text-body" name="body" rows="4" maxlength="320" required>{{ o.text.body }}</textarea>
-      {% for w in o.text.warnings %}<p>{{ pill("warn", w) }}</p>{% endfor %}
-      {% if not o.text.published %}<p>{{ pill("warn", "The report is not published, so the link in this text will not work yet") }}</p>{% endif %}
-      <button type="submit">Send text</button>
+      <textarea id="text-body" name="body" rows="4" maxlength="320" class="textarea w-full" required>{{ o.text.body }}</textarea>
+      {% for w in o.text.warnings %}<div class="warn-line" role="status">{{ w }}</div>{% endfor %}
+      {% if not o.text.published %}<div class="warn-line" role="status">The report is not published, so the link in this text will not work yet.</div>{% endif %}
+      <button type="submit" class="btn btn-primary mt-3.5">Send text</button>
     </form>
     <p class="hint">A text does not move the email schedule. It is recorded below, and a reply by text lands there too.</p>
   </div>
@@ -85,7 +88,7 @@
           onsubmit="{{ o.step2.confirm }}">
       {{ csrf_field(csrf) }}
       <input type="hidden" name="audit_id" value="{{ audit_id }}">
-      <button class="ghost" type="submit">Mark as sent</button>
+      <button class="btn btn-sm" type="submit">Mark as sent</button>
     </form>
     <p class="muted">Records a send you made from your own mail client, so the sequence clock moves. Nothing is sent from here.</p>
   </div>
@@ -102,5 +105,7 @@
     {% endif %}
     {% if o.next %}<p class="muted">{{ o.next }}</p>{% endif %}
   </div>
+  </div>
+  {{ modal_backdrop() }}
 </dialog>
 {%- endmacro %}

@@ -3,7 +3,7 @@
 {% block body %}
 {{ page_header("Overview",
                "Sweeps, audits and jobs at a glance. Nothing here contacts anyone.",
-               primary_html='<a class="btn" href="#run">Run sweep</a>'|safe) }}
+               primary_html='<a class="btn btn-primary" href="#run">Run sweep</a>'|safe) }}
 
 <div class="kpis">
   {% for label, value, context in kpis %}{{ kpi(label, value, context) }}{% endfor %}
@@ -17,7 +17,7 @@
     <form method="post" action="/console/sweep">
       {{ csrf_field(csrf) }}
       <label for="market">Market</label>
-      <input id="market" name="market" type="text" list="known-markets"
+      <input id="market" name="market" type="text" list="known-markets" class="input w-full"
              value="Colorado Springs, CO" autocomplete="off"
              placeholder="Colorado Springs, CO">
       <datalist id="known-markets">{% for m in markets %}<option value="{{ m }}, CO">{% endfor %}</datalist>
@@ -26,8 +26,8 @@
       else, the local-operator check says "not sure" instead of excluding, so
       expect a few extra companies to reach the call list.</p>
       <label for="limit">Prospects at most</label>
-      <input id="limit" type="number" name="limit" value="100" min="1" max="300">
-      <button type="submit">Run sweep</button>
+      <input id="limit" type="number" name="limit" value="100" min="1" max="300" class="input w-full">
+      <button type="submit" class="btn btn-primary mt-3.5">Run sweep</button>
     </form>
     <details class="legend">
       <summary>How a sweep works</summary>
@@ -67,8 +67,8 @@
     <form method="post" action="/console/agent">
       {{ csrf_field(csrf) }}
       <label for="prompt">Describe the job in a sentence</label>
-      <textarea id="prompt" name="prompt">Find roofing companies in Colorado Springs, audit the sites of the 20 best ones, and show me who to call first.</textarea>
-      <button type="submit">Run coordinator</button>
+      <textarea id="prompt" name="prompt" class="textarea w-full">Find roofing companies in Colorado Springs, audit the sites of the 20 best ones, and show me who to call first.</textarea>
+      <button type="submit" class="btn btn-primary mt-3.5">Run coordinator</button>
     </form>
   </div>
 </div>
@@ -86,7 +86,7 @@
 </tbody>{% endcall %}
 {% endif %}
 
-<div class="pagehead" style="margin-top:26px">
+<div class="pagehead mt-6">
   <h2>Recent sweeps</h2>
   <div class="primary"><a href="/console/batches">All sweeps</a></div>
 </div>

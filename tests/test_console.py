@@ -600,13 +600,12 @@ def test_ember_the_replacement_text_color_passes_everywhere_it_is_used():
 def test_button_text_is_white_on_the_orange_fill_by_the_owners_choice():
     """The owner asked for white text on the orange buttons (Sep 17). White on
     #F25C1F is 3.3:1: above the 3:1 floor for large text and interface
-    components, below the 4.5:1 body-text bar. Button labels are bold and the
-    console is internal; the public report is not touched by this rule."""
-    import re
+    components, below the 4.5:1 body-text bar. In the daisyUI theme that is
+    primary and primary-content."""
     assert _contrast("#ffffff", "#F25C1F") >= 3.0
     css = views.theme_css()
-    assert re.search(r"^button \{[^}]*color:#fff", css, re.M)
-    assert re.search(r"^a\.btn \{[^}]*color:#fff", css, re.M)
+    assert "--color-primary: #F25C1F;" in css
+    assert "--color-primary-content: #ffffff;" in css
 
 
 # ── P1.1: double submit guard ─────────────────────────────────────────────────
@@ -677,6 +676,7 @@ def test_progress_bar_turns_green_only_when_actually_complete():
     assert 'class="bar done"' in views.progress_bar(40, 40)
     assert 'class="bar done"' not in views.progress_bar(39, 40)
     assert 'class="bar done"' not in views.progress_bar(0, 0), "no work is not done work"
+    assert '<progress class="bar" value="50" max="100"' in views.progress_bar(20, 40)
 
 
 def test_scan_label_prefers_market_and_date_over_the_raw_id():
@@ -1627,7 +1627,7 @@ def _overview(**kw):
 def test_the_jobs_badge_shows_how_many_are_running():
     job = {"job_id": "j1", "label": "Sweep Pueblo", "status": "running", "log": []}
     page = _overview(active_jobs=[job, job, job])
-    assert 'class="badge">3<' in page
+    assert 'class="badge badge-primary badge-sm ml-auto">3<' in page
 
 
 def test_no_badge_when_nothing_is_running():
@@ -1931,7 +1931,7 @@ def test_tabs_carry_counts_and_the_active_one_is_marked():
     assert 'href="?tab=all">All <b>3</b>' in page
     assert 'href="?tab=leaky-bucket">Leaky Bucket <b>1</b>' in page
     assert 'href="?tab=incomplete">Incomplete <b>1</b>' in page
-    assert 'class="on" href="?tab=dialed"' in page
+    assert 'class="tab tab-active on" href="?tab=dialed"' in page
 
 
 def test_a_segment_tab_shows_only_its_rows():
@@ -2243,15 +2243,18 @@ def test_every_segment_chip_passes_aa_on_its_tint():
 
 
 def test_brand_orange_is_a_fill_and_never_a_text_colour():
-    """3.3:1 on white. It fills buttons and marks the active nav edge; the
-    sheet must not set it as the color property anywhere, hover included.
-    border-*-color is a fill, so the check is on the bare property."""
+    """3.3:1 on white. It fills buttons and marks the active nav edge; nothing
+    may set it as a text colour. In daisyUI terms: primary is a fill, so no
+    template or rule uses text-primary, and the sheet never writes it as a
+    color property. Ember (secondary) is the text-safe step of the hue."""
     import re as _re
 
     assert _contrast(views.PALETTE["orange"], views.PALETTE["panel"]) < 4.5
     css = views.theme_css()
-    assert not _re.search(r"(?<![-\w])color:\s*var\(--orange\)", css)
-    assert not _re.search(r"(?<![-\w])color:\s*#F25C1F", css, _re.I)
+    assert not _re.search(r"(?<![-\w])color:\s*(var\(--color-primary\)|#F25C1F)", css, _re.I)
+    assert not _re.search(r"(?<![-\w])text-primary(?!-content)", css)
+    for f in views.TEMPLATES.glob("*.html"):
+        assert not _re.search(r"(?<![-\w])text-primary(?!-content)", f.read_text()), f.name
 
 
 def test_the_chip_carries_its_tint_inline_from_the_table():
@@ -2262,15 +2265,25 @@ def test_the_chip_carries_its_tint_inline_from_the_table():
 
 
 def test_focus_visible_styles_exist():
-    css = views.theme_css()
-    assert "a:focus-visible" in css and "button:focus-visible" in css
-    page = views.render_run(csrf="t", markets=["X"], active_jobs=[], recent_batches=[])
-    assert "a:focus-visible" in page
+    """daisyUI draws a focus ring on every control it styles; the built sheet
+    must carry those rules, since a hand-written sheet used to."""
+    built = views.BUILT_CSS.read_text()
+    assert ":focus-visible" in built and "outline" in built
 
 
-def test_the_login_stylesheet_carries_no_comments():
-    assert "/*" not in views.render_login()
-    assert "/*" in views.theme_css(), "the sheet itself is commented; only the login strips them"
+def test_the_public_stylesheet_says_nothing_about_what_is_behind_it():
+    """The sheet is linked from the login page, so it is public. The words
+    the login page must not say, the stylesheet must not say either: no
+    explanatory comments survive the build, and no selector names a screen."""
+    import re as _re
+
+    built = views.BUILT_CSS.read_text().lower()
+    # The stamp and Tailwind's licence line are the only comments allowed.
+    body = _re.sub(r"/\*! tailwindcss[^*]*\*/", "", built.split("*/", 1)[1])
+    assert "/*" not in body, "a comment survived minification"
+    for leak in ("audit", "prospect", "roofer", "call list", "dashboard",
+                 "find roofers", "leaky bucket", "segment", "outreach", "findings"):
+        assert leak not in body, leak
 
 
 # ── The Excluded tab and the CSV export ───────────────────────────────────────
@@ -2320,7 +2333,7 @@ def test_the_excluded_tab_hides_the_check_filter():
 def test_the_export_link_and_bulk_bar_are_on_the_call_list():
     page = _list([_row()])
     assert 'id="export-link" href="/console/batches/b1/export.csv?tab=all"' in page
-    assert 'id="bulk-export"' in page and 'class="pick-row"' in page
+    assert 'id="bulk-export"' in page and 'class="checkbox checkbox-primary checkbox-sm pick-row"' in page
     assert 'id="pick-all"' in page
 
 
@@ -2642,7 +2655,7 @@ def test_the_templates_screen_lists_four_editors_and_the_variables():
     assert page.count('name="subject_') == 4 and page.count('name="body_') == 5
     assert 'name="body_sms"' in page and "Reply STOP to opt out" in page
     assert "{{first_name}}" in page and "{{report_url}}" in page
-    assert 'class="popover vars-menu" data-fields="subject-1,body-1"' in page
+    assert 'class="popover vars-menu dropdown dropdown-end" data-fields="subject-1,body-1"' in page
     assert page.count('data-insert="first_name"') == 5, "four emails and the text"
     assert "<h5>Their info</h5>" in page and "<h5>The report</h5>" in page and "<h5>Your info</h5>" in page
     assert 'class="var empty"' not in page, "no prospect, so nothing is empty"
@@ -2847,9 +2860,9 @@ def test_the_send_notice_reads_as_a_sentence():
 def test_the_prospect_page_carries_call_notes_and_a_copy_button():
     page = _prospect_page(findings=_approved(), audit={"report_slug": "abcdefghijklmnop"},
                           report_url="https://x/abc")
-    assert '<h2 id="callnotes-title">Call notes</h2>' in page
+    assert '<h2 id="callnotes-title" class="mt-0">Call notes</h2>' in page
     assert 'id="copy-notes" data-source="callnotes-text"' in page
-    assert 'id="callnotes-text" class="visually-hidden"' in page
+    assert 'id="callnotes-text" class="sr-only visually-hidden"' in page
     assert "CALL NOTES:" in page and "Offer to send the write-up: https://x/abc" in page
     assert "Never quote a score, a band or a segment name." in page
     assert "navigator.clipboard.writeText" in page
@@ -2875,14 +2888,16 @@ def test_the_variables_menu_dims_what_this_prospect_lacks():
 
 
 def test_text_like_inputs_are_tap_sized_including_email_and_password():
+    """Every text-like control is a daisyUI input, textarea or select at 44px
+    with 16px type. Templates carry the class; the sheet carries the size."""
     import re as _re
 
     css = views.theme_css()
-    rule = _re.search(r"input\[type=text\],[^{]*\{[^}]*\}", css).group(0)
-    for kind in ("email", "password", "search"):
-        assert f"input[type={kind}]" in rule, kind
-    assert "min-height:44px" in rule
-    assert "font-size:16px" in rule
+    assert _re.search(r"\.input, \.textarea, \.select \{ @apply min-h-11 text-base;", css)
+    root = views.TEMPLATES
+    for f in root.glob("*.html"):
+        for m in _re.finditer(r"<input[^>]*type=\"(text|number|email|password|search|url|tel)\"[^>]*>", f.read_text()):
+            assert 'class="' in m.group(0) and "input" in m.group(0), (f.name, m.group(0)[:80])
 
 
 # ── The call list reads Firestore concurrently ────────────────────────────────
@@ -3255,17 +3270,56 @@ def test_the_screenshot_button_counts_them():
 
 
 def test_tel_inputs_are_styled_like_the_others():
+    page = _prospect_page(findings=_approved(), audit={"report_slug": "abcdefghijklmnop"},
+                          prospect={"gbp_phone": "(970) 224-1200"}, report_url="https://x/abc")
+    assert 'type="tel" value="+19702241200" class="input w-full"' in page
+
+
+def test_dialogs_centre_despite_the_preflight_reset():
+    """Tailwind's preflight zeroes margins; a native dialog centres itself
+    with margin:auto, so the base layer puts it back."""
+    assert "dialog { margin: auto; }" in views.theme_css()
+
+
+# ── The built stylesheet ──────────────────────────────────────────────────────
+
+
+def _sources_stamp():
+    import hashlib
+    import pathlib as _pl
+
+    root = _pl.Path(__file__).resolve().parent.parent
+    h = hashlib.sha256()
+    for p in sorted([root / "app/styles/console.css", *(root / "assets").glob("*.mjs"),
+                     *(root / "app/console/templates").glob("*")]):
+        h.update(p.name.encode()); h.update(p.read_bytes())
+    return h.hexdigest()[:16]
+
+
+def test_the_built_stylesheet_is_fresh():
+    """app/static/console.css is committed for local runs and rebuilt in the
+    image. Its header stamps the sources it was built from; a template or
+    style edit without scripts/build_css.sh fails here rather than on screen."""
+    head = views.BUILT_CSS.read_text().split("\n", 1)[0]
+    assert head == f"/* built from {_sources_stamp()} */", "run scripts/build_css.sh"
+
+
+def test_the_built_stylesheet_carries_the_theme_and_is_served(client):
+    built = views.BUILT_CSS.read_text()
+    assert "--color-primary:" in built and "f25c1f" in built.lower()
+    assert "PT Sans" in built and "Work Sans" in built
+    r = client.get("/static/console.css")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/css")
+    href = views.css_href()
+    assert href.startswith("/static/console.css?v=") and len(href.split("v=")[1]) == 10
+    assert href in client.get("/console").text, "the login page links it too"
+
+
+def test_the_dockerfile_pins_the_same_tailwind_as_the_build_script():
+    import pathlib as _pl
     import re as _re
 
-    css = views.theme_css()
-    rule = _re.search(r"input\[type=text\],[^{]*\{", css).group(0)
-    assert "input[type=tel]" in rule
-
-
-def test_dialogs_centre_despite_the_global_margin_reset():
-    import re as _re
-
-    css = views.theme_css()
-    assert _re.search(r"^\* \{[^}]*margin:0", css, _re.M), "the reset this guards against"
-    rule = _re.search(r"^dialog\.modal \{[^}]*\}", css, _re.M).group(0)
-    assert "margin:auto" in rule
+    root = _pl.Path(__file__).resolve().parent.parent
+    docker = _re.search(r"tailwindcss/releases/download/(v[\d.]+)/", (root / "Dockerfile").read_text()).group(1)
+    script = _re.search(r'TW_VERSION:-(v[\d.]+)', (root / "scripts/build_css.sh").read_text()).group(1)
+    assert docker == script

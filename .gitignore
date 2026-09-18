@@ -19,3 +19,4 @@ client_secret.json
 firebase-debug.log
 firestore-debug.log
 .firebase/
+.cache/

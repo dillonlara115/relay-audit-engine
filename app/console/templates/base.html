@@ -15,7 +15,7 @@
 <link rel="apple-touch-icon" href="/static/relay-mark.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=PT+Sans:wght@400;700&family=Work+Sans:wght@400;600&display=swap" rel="stylesheet">
-<style>{{ theme_css }}</style>
+<link rel="stylesheet" href="{{ css_href }}">
 </head>
 <body {{ body_attrs }}>
 {% include "_icons.svg" %}
@@ -27,20 +27,22 @@
 <div class="layout">
   <aside class="side">
     <a class="brand" href="/console">Relay<br>Audit Engine</a>
-    <span class="tag">Find roofers worth calling</span>
+    <span class="tagline">Find roofers worth calling</span>
     <nav>
       {% for group, items in nav_groups %}
       <div class="navgroup">{{ group }}</div>
+      <ul class="menu w-full p-0 gap-0.5">
       {% for href, key, label, icon_name in items %}
-      <a href="{{ href }}" class="{{ 'on' if key == active else '' }}">{{ icon(icon_name) }}<span>{{ label }}</span>{% if badges.get(key) %}<b class="badge">{{ badges[key] }}</b>{% endif %}</a>
+      <li><a href="{{ href }}" class="{{ 'on' if key == active else '' }}">{{ icon(icon_name) }}<span>{{ label }}</span>{% if badges.get(key) %}<b class="badge badge-primary badge-sm ml-auto">{{ badges[key] }}</b>{% endif %}</a></li>
       {% endfor %}
+      </ul>
       {% endfor %}
     </nav>
     <div class="foot">Everything here is internal. Reports are written by a
     model, checked by you, and never sent automatically.
     {% if csrf %}
-    <form method="post" action="/console/logout" class="signout">
-      {{ csrf_field(csrf) }}<button class="ghost" type="submit">Sign out</button>
+    <form method="post" action="/console/logout" class="signout mt-3.5">
+      {{ csrf_field(csrf) }}<button class="btn btn-sm btn-block" type="submit">Sign out</button>
     </form>
     {% endif %}
     </div>

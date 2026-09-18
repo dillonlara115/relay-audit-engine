@@ -297,11 +297,6 @@ function sendConfirm(form) {
   });
   document.querySelectorAll('dialog.modal').forEach(function (d) {
     d.querySelectorAll('[data-close]').forEach(function (b) { b.addEventListener('click', function () { d.close(); }); });
-    d.addEventListener('click', function (e) {
-      var r = d.getBoundingClientRect();
-      var inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
-      if (!inside && e.target === d) d.close();
-    });
   });
   if (location.hash) open(location.hash.slice(1));
 })();

@@ -490,6 +490,23 @@ settings, Trust Center). Until it is, Send text reports "not approved for A2P
 10DLC texting yet" and sends nothing. `OUTREACH_TEXT_DAILY_CAP` (default 20)
 caps texts per UTC day.
 
+### The console stylesheet
+
+The console is styled with [daisyUI](https://daisyui.com) on Tailwind CSS,
+themed to the brand in `app/styles/console.css` (the palette, the two
+typefaces, the radii, and the few component rules daisyUI does not cover).
+Pages link the built file `app/static/console.css`, which is committed for
+local runs and rebuilt in the Docker image. After editing a template or the
+source sheet, rebuild:
+
+```bash
+scripts/build_css.sh     # downloads the Tailwind standalone CLI once into .cache/; no Node
+```
+
+A test checks the committed build is fresh, so a forgotten rebuild fails
+`pytest` rather than shipping. The Tailwind version is pinned in the script
+and the Dockerfile together; the daisyUI plugin files live in `assets/`.
+
 ## Testing
 
 ```bash

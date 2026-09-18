@@ -1,0 +1,255 @@
+/* The console stylesheet: Tailwind CSS with daisyUI components, themed to
+   the brand. Built by scripts/build_css.sh into app/static/console.css,
+   which is what pages link. This file is the source of truth the tests read.
+
+   Colour rules, held by the palette tests in tests/test_console.py:
+   - primary is the brand orange #F25C1F. It is a fill (buttons, the active
+     nav edge, progress) and never a text colour: white on it is 3.3:1,
+     which passes for bold button labels and fails for body text.
+   - secondary is ember #B0400E, the same hue darkened until it passes as
+     text on white and on the field. Every orange link and accent word is
+     ember, never primary.
+   - the four status colours (success, warning, error, info) are the dark
+     text tones from PILL_COLORS; badge-soft tints them for pills. */
+
+@import "tailwindcss";
+@source "../console/templates";
+@source not "../../assets";
+
+@plugin "../../assets/daisyui.mjs" {
+  themes: relay --default;
+  logs: false;
+}
+
+@plugin "../../assets/daisyui-theme.mjs" {
+  name: "relay";
+  default: true;
+  prefersdark: false;
+  color-scheme: light;
+  --color-base-100: #ffffff;
+  --color-base-200: #F7F5F2;
+  --color-base-300: #ECE6DC;
+  --color-base-content: #16120E;
+  --color-primary: #F25C1F;
+  --color-primary-content: #ffffff;
+  --color-secondary: #B0400E;
+  --color-secondary-content: #ffffff;
+  --color-accent: #ECE6DC;
+  --color-accent-content: #16120E;
+  --color-neutral: #16120E;
+  --color-neutral-content: #ECE6DC;
+  --color-info: #1A56C4;
+  --color-info-content: #ffffff;
+  --color-success: #1E5F3A;
+  --color-success-content: #ffffff;
+  --color-warning: #7A4A00;
+  --color-warning-content: #ffffff;
+  --color-error: #8d2f16;
+  --color-error-content: #ffffff;
+  --radius-selector: 0.25rem;
+  --radius-field: 0.5625rem;
+  --radius-box: 0.75rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+@theme {
+  --font-sans: "Work Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "PT Sans", ui-sans-serif, system-ui, sans-serif;
+  --color-ink2: #5d564d;
+  --color-line: #E6E2DC;
+  --color-ember: #B0400E;
+  --color-asphalt: #16120E;
+  --color-chalk: #ECE6DC;
+  --color-field: #F7F5F2;
+}
+
+@layer base {
+  html { font-size: 16px; }
+  body { @apply bg-base-200 text-base-content font-sans leading-relaxed; }
+  h1, h2, h3, h4 { @apply font-display font-bold; }
+  h1 { @apply text-3xl leading-tight; }
+  h2 { @apply text-xl mt-8 mb-1; }
+  h3 { @apply text-lg mb-1.5; }
+  a { @apply text-ember no-underline; }
+  a:hover { @apply underline; }
+  abbr[title] { text-decoration: underline dotted; cursor: help; }
+  /* Native dialogs centre with margin:auto; Tailwind's preflight keeps it. */
+  dialog { margin: auto; }
+}
+
+@layer components {
+  /* Type the components can share. Buttons and headings are PT Sans. */
+  .btn { @apply font-display tracking-wide; }
+  .muted { @apply text-ink2; }
+  .lede { @apply text-ink2 mb-5 max-w-[70ch]; }
+  .hint { @apply text-sm text-ink2 mt-1.5; }
+
+  /* The shell: a white rail on the warm field, one hairline between. */
+  .layout { @apply flex min-h-screen; }
+  .side { @apply w-60 shrink-0 bg-base-100 border-r border-line px-4 py-5 sticky top-0 h-screen; }
+  .side .brand { @apply block font-display font-bold text-xl uppercase tracking-wider text-ember leading-tight mb-1 no-underline; }
+  .side .brand:hover { @apply no-underline opacity-85; }
+  .side .tagline { @apply block text-xs text-ink2 mb-5; }
+  .navgroup { @apply text-[0.72rem] tracking-widest uppercase text-ink2 mt-4 mb-1.5 ml-3; }
+  /* Nav links are text, not links; the current one is marked with a tint
+     and a solid primary edge, a tenth of the area a filled block would take. */
+  .side .menu li > a { @apply text-base-content rounded-lg py-2 px-3 gap-2.5 border-l-[3px] border-transparent; }
+  .side .menu li > a:hover { @apply bg-base-200 no-underline; }
+  .side .menu li > a.on { @apply bg-[#FDEBE4] text-ember font-semibold border-l-primary; }
+  .side .foot { @apply absolute bottom-5 left-4 right-4 text-xs text-ink2 leading-snug; }
+  .main { @apply flex-1 min-w-0 px-8 pt-6 pb-16; }
+  .topnav { @apply hidden; }
+  .nav-open { @apply absolute -left-[9999px]; }
+  @media (max-width: 900px) {
+    .layout { @apply block; }
+    .topnav { @apply flex items-center justify-between px-4 py-2.5 bg-base-100 border-b border-line; }
+    .topnav .brand-sm { @apply font-display font-bold text-ember no-underline; }
+    .burger { @apply cursor-pointer inline-flex p-1.5; }
+    .side { @apply hidden; }
+    .nav-open:checked ~ .layout .side { @apply block fixed inset-x-0 bottom-0 top-[52px] z-20 overflow-auto h-auto; }
+    .main { @apply px-4 pt-5 pb-14; }
+  }
+
+  /* Icons ride on currentColor. */
+  .ic { @apply w-[18px] h-[18px] shrink-0; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* Page header, breadcrumb, KPI tiles. */
+  .pagehead { @apply flex items-start justify-between gap-4 flex-wrap mb-1; }
+  .pagehead .primary { @apply mt-1.5 flex gap-2 items-center; }
+  .crumbs { @apply text-sm text-ink2 mb-1.5; }
+  .crumbs a { @apply text-ink2; }
+  .crumbs span { @apply mx-1.5; }
+  .kpis { @apply grid gap-3 my-4 mb-6; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .kpi { @apply bg-base-100 border border-line rounded-box px-4 py-3.5 no-underline text-base-content; }
+  a.kpi:hover { @apply border-primary no-underline; }
+  .kpi .l { @apply text-xs text-ink2; }
+  .kpi .n { @apply font-display font-bold text-3xl leading-tight mt-1 mb-0.5; }
+  .kpi .c { @apply text-xs text-ink2; }
+
+  /* Cards and banners. */
+  .card { @apply bg-base-100 border border-line rounded-box px-5 py-4 mb-3.5 block; }
+  .grid2 { @apply grid gap-3.5; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); }
+  .banner { @apply alert alert-warning alert-soft mb-3.5 text-[0.95rem] border-l-4 border-l-primary block; }
+  .finding { @apply border border-line border-l-4 border-l-primary bg-base-100 rounded-box px-4 py-3.5 mb-3; }
+
+  /* Forms. Every text-like control is 44px tall with 16px type so it is
+     easy to tap; a shorter control is a tap target nobody hits first time. */
+  label:not(.pick) { @apply block text-sm text-ink2 font-semibold mt-3 mb-1; }
+  .input, .textarea, .select { @apply min-h-11 text-base; width: 100%; }
+  .textarea { @apply min-h-[86px] leading-normal; }
+  form.inline { @apply inline; }
+  label.pick { @apply flex gap-2.5 items-start cursor-pointer text-[1.02rem] leading-snug mt-0; }
+  .fieldrow { @apply flex justify-between items-end gap-3; }
+  .fieldrow label { @apply mb-1.5; }
+
+  /* Tables. The wrapper is what scrolls on a phone; the header is quiet. */
+  .table-wrap { @apply overflow-x-auto border border-line rounded-box mb-3.5 bg-base-100; -webkit-overflow-scrolling: touch; }
+  .table-wrap table { @apply table w-full min-w-[640px]; }
+  .table-wrap thead th { @apply sticky top-0 z-10 bg-base-200 text-ink2 text-xs font-semibold tracking-wide whitespace-nowrap align-bottom; }
+  .table-wrap td { @apply align-top text-[0.95rem]; }
+  .table-wrap tbody tr:hover td { @apply bg-base-200; }
+  td.num { @apply text-right tabular-nums; }
+  td.tel { @apply whitespace-nowrap; }
+  th .sub { @apply block font-normal text-[0.7rem] text-ink2 whitespace-nowrap tracking-normal mt-px; }
+  th abbr[title] { text-decoration: none; border-bottom: 1px dotted currentColor; }
+  th[data-sort] { @apply cursor-pointer select-none; }
+  th[data-sort]::after { content: "\2195"; @apply inline-block ml-1.5 opacity-35 text-xs; }
+  th[data-sort]:hover { @apply text-base-content; }
+  th[data-sort]:hover::after { @apply opacity-70; }
+  th[data-sort][aria-sort="ascending"], th[data-sort][aria-sort="descending"] { @apply text-base-content; }
+  th[data-sort][aria-sort="ascending"]::after { content: "\2191"; @apply opacity-100 text-ember; }
+  th[data-sort][aria-sort="descending"]::after { content: "\2193"; @apply opacity-100 text-ember; }
+  th.pick::after { content: none; }
+  td.pick, th.pick { @apply w-10 pr-0 pl-3 align-middle; }
+  .table-wrap thead tr { @apply bg-base-200; }
+  .table-wrap thead th.pick { @apply bg-base-200; }
+  /* A number field is a short answer; full width makes the button fall
+     under it for nothing. */
+  input[type=number].input { @apply max-w-40; }
+  .actions { @apply flex flex-wrap items-center gap-2; }
+  .rowact { @apply whitespace-nowrap text-right; }
+  tr.current td { @apply bg-base-200; }
+  .pass { @apply text-success font-semibold; }
+  .fail { @apply text-error font-semibold; }
+  .skip { @apply text-ink2; }
+
+  /* Segment chips carry their tint inline from SEGMENT_TEXT; the dot keeps
+     the swatch for the legend. */
+  .chip { @apply inline-flex items-center gap-1.5 whitespace-nowrap rounded-full text-xs font-semibold leading-normal py-0.5 pr-2.5 pl-2; }
+  .chip i { @apply w-2 h-2 rounded-sm inline-block; }
+  .tag { @apply badge badge-sm badge-neutral whitespace-nowrap; }
+  .tag.warn { @apply badge-warning; }
+  .tag.ok { @apply badge-success; }
+  .tag.bad { @apply badge-error; }
+  .tag.dim { @apply badge-ghost; }
+  .mail { @apply break-all text-sm; }
+
+  /* Progress, the job log, evidence. */
+  .bar { @apply progress progress-primary h-2 min-w-20; }
+  .bar.done { @apply progress-success; }
+  pre.log { @apply bg-neutral text-neutral-content rounded-box p-4 text-sm leading-normal max-h-[440px] overflow-auto whitespace-pre-wrap break-words; }
+  .evidence-shot { @apply max-w-[340px] w-full border border-line rounded-box block; }
+  .evidence-cap { @apply mt-1.5 text-sm; }
+
+  /* Legend, tabs, toolbar, popovers, bulk bar. */
+  details.legend { @apply collapse collapse-arrow bg-base-100 border border-line my-3.5; }
+  details.legend summary { @apply collapse-title font-display font-bold text-[1.05rem]; }
+  details.legend .inner { @apply collapse-content; }
+  details.legend h4 { @apply text-base mt-3 mb-0.5; }
+  details.legend p { @apply mb-1.5 text-[0.93rem]; }
+  .windows { @apply mb-3.5 text-sm text-ink2 flex items-center gap-1.5 flex-wrap; }
+  .windows a { @apply btn btn-xs btn-ghost border border-line bg-base-100 rounded-full; }
+  .windows a.on { @apply btn-primary; }
+  .tabs-row { @apply tabs tabs-border mt-4 mb-3; }
+  .tabs-row .tab { @apply text-ink2; }
+  .tabs-row .tab b { @apply font-semibold ml-1; }
+  .tabs-row .tab.tab-active { @apply text-base-content; }
+  .tabs-row .tab.tab-active b { @apply text-ember; }
+  .toolbar { @apply flex items-center gap-3 flex-wrap mb-3; }
+  .toolbar .search { @apply flex-1 basis-64; }
+  .bulkbar { @apply hidden items-center gap-3 bg-base-100 border border-line rounded-box px-3.5 py-2 mb-3; }
+  .bulkbar.show { @apply flex; }
+  .bulkbar .muted { @apply mr-auto; }
+  details.popover > summary { @apply btn btn-sm; list-style: none; }
+  details.popover > summary::-webkit-details-marker { display: none; }
+  details.popover > .inner { @apply dropdown-content bg-base-100 border border-line rounded-box shadow-lg p-3.5 min-w-72 z-20 mt-1.5; }
+
+  /* The variables menu: three groups, each row a name, an icon, what it
+     becomes; a row with no value on this prospect is dimmed and says so. */
+  details.vars-menu > .inner { @apply grid gap-x-5 gap-y-1; min-width: min(640px, calc(100vw - 32px)); grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+  details.vars-menu .group h5 { @apply mt-1.5 mb-1 text-[0.7rem] tracking-widest uppercase text-ink2 font-semibold; }
+  details.vars-menu button.var { @apply flex w-full items-center gap-2 px-1.5 py-1.5 rounded-lg text-left text-sm font-medium bg-transparent border-0 text-base-content cursor-pointer; }
+  details.vars-menu button.var:hover, details.vars-menu button.var:focus-visible { @apply bg-base-200; }
+  details.vars-menu button.var .ic { @apply w-[15px] h-[15px] text-ink2; }
+  details.vars-menu button.var .v { @apply flex-1; }
+  details.vars-menu button.var .add { @apply text-xs text-ember font-semibold; }
+  details.vars-menu button.var.empty { @apply text-ink2 line-through cursor-default; }
+  details.vars-menu button.var.empty .add { @apply no-underline text-ink2 font-medium; }
+  details.vars-menu button.var.empty:hover { @apply bg-transparent; }
+  .vars { @apply grid gap-x-3.5 gap-y-1 text-sm; grid-template-columns: max-content 1fr; }
+  .vars dt { @apply font-mono text-sm; }
+  .vars dd { @apply text-ink2; }
+  .tpl .textarea { @apply font-mono text-sm leading-normal; }
+
+  /* Dialogs: daisyUI's modal, opened by data-open buttons. */
+  .modal-box { @apply max-w-[760px] w-[calc(100vw-32px)] border border-line; }
+  .modal-box.wide { @apply max-w-[1100px]; }
+  .modal-box .pagehead { @apply mb-2; }
+  .step { @apply mt-4; }
+  .openers { @apply inline-flex gap-2 flex-wrap ml-auto; }
+  .warn-line { @apply alert alert-warning alert-soft text-sm py-2 my-2 block; }
+
+  /* Call notes. */
+  .notes h4 { @apply mt-3.5 mb-1; }
+  .notes h4:first-child { @apply mt-0; }
+  .notes ul, .notes ol { @apply mb-1 ml-[18px] list-disc; }
+  .notes ol { @apply list-decimal; }
+  .notes li { @apply my-0.5; }
+  .tl { @apply list-none pl-0; }
+  .tl li { @apply py-1 border-b border-line; }
+  .tl li:last-child { @apply border-b-0; }
+}
