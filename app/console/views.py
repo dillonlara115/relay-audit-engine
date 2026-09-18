@@ -309,9 +309,10 @@ def score_headers() -> str:
 def score_legend(open_by_default: bool = False) -> str:
     """What the three numbers mean, written for someone who has never read the
     spec. Sits next to every table that shows them."""
-    return f"""<details class="legend"{' open' if open_by_default else ''}>
-  <summary>What the scores mean</summary>
-  <div class="inner">
+    return f"""<div class="legend collapse collapse-arrow">
+  <input type="checkbox" aria-label="What the scores mean"{' checked' if open_by_default else ''}>
+  <div class="collapse-title">What the scores mean</div>
+  <div class="collapse-content inner">
     <p>Think of a homeowner whose roof is leaking. They go through three steps,
     and each prospect is scored out of 100 on how well it handles them.</p>
     <h4>Found, out of 30: can they be found at all?</h4>
@@ -343,7 +344,7 @@ def score_legend(open_by_default: bool = False) -> str:
     <p><span class="tag warn">Partial</span> {esc(_tag_titles()["Partial"])}</p>
     <p><span class="tag">Agency</span> {esc(_tag_titles()["Agency"])}</p>
   </div>
-</details>"""
+</div>"""
 
 
 _STATUS_BADGE = {"running": "badge-primary", "done": "badge-success", "failed": "badge-error",

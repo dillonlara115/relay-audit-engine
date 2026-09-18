@@ -26,8 +26,10 @@
     <input type="hidden" name="batch_id" value="{{ job.batch_id }}">
     <input type="hidden" name="market" value="{{ job.market }}">
     <label for="dlimit">Audits at most</label>
-    <input id="dlimit" type="number" name="limit" value="40" min="1" max="200" class="input w-full">
-    <button type="submit" class="btn btn-primary mt-3.5">Audit passed prospects</button>
+    <div class="controls">
+      <input id="dlimit" type="number" name="limit" value="40" min="1" max="200" class="input w-full">
+      <button type="submit" class="btn btn-primary">Audit passed prospects</button>
+    </div>
   </form>
 </div>
 {% elif job.followup == "batch" %}

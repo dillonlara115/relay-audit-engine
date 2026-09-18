@@ -50,7 +50,7 @@
   --radius-field: 0.5625rem;
   --radius-box: 0.75rem;
   --size-selector: 0.25rem;
-  --size-field: 0.25rem;
+  --size-field: 0.275rem; /* 44px controls: buttons and inputs the same height */
   --border: 1px;
   --depth: 0;
   --noise: 0;
@@ -139,7 +139,7 @@
   /* Forms. Every text-like control is 44px tall with 16px type so it is
      easy to tap; a shorter control is a tap target nobody hits first time. */
   label:not(.pick) { @apply block text-sm text-ink2 font-semibold mt-3 mb-1; }
-  .input, .textarea, .select { @apply min-h-11 text-base; width: 100%; }
+  .input, .textarea, .select { @apply text-base; width: 100%; }
   .textarea { @apply min-h-[86px] leading-normal; }
   form.inline { @apply inline; }
   label.pick { @apply flex gap-2.5 items-start cursor-pointer text-[1.02rem] leading-snug mt-0; }
@@ -196,11 +196,15 @@
   .evidence-cap { @apply mt-1.5 text-sm; }
 
   /* Legend, tabs, toolbar, popovers, bulk bar. */
-  details.legend { @apply collapse collapse-arrow bg-base-100 border border-line my-3.5; }
-  details.legend summary { @apply collapse-title font-display font-bold text-[1.05rem]; }
-  details.legend .inner { @apply collapse-content; }
-  details.legend h4 { @apply text-base mt-3 mb-0.5; }
-  details.legend p { @apply mb-1.5 text-[0.93rem]; }
+  /* Legends are daisyUI's checkbox collapse: a native details cannot
+     animate, since the browser toggles it with display. */
+  .legend { @apply bg-base-100 border border-line my-3.5; }
+  .legend .collapse-title { @apply font-display font-bold text-[1.05rem]; }
+  .legend h4 { @apply text-base mt-3 mb-0.5; }
+  .legend p { @apply mb-1.5 text-[0.93rem]; }
+  /* A control row: an input and its button on one line, aligned. */
+  .controls { @apply flex flex-wrap items-center gap-2 mt-1; }
+  .controls .input { @apply w-auto; }
   .windows { @apply mb-3.5 text-sm text-ink2 flex items-center gap-1.5 flex-wrap; }
   .windows a { @apply btn btn-xs btn-ghost border border-line bg-base-100 rounded-full; }
   .windows a.on { @apply btn-primary; }

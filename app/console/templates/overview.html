@@ -26,12 +26,15 @@
       else, the local-operator check says "not sure" instead of excluding, so
       expect a few extra companies to reach the call list.</p>
       <label for="limit">Prospects at most</label>
-      <input id="limit" type="number" name="limit" value="100" min="1" max="300" class="input w-full">
-      <button type="submit" class="btn btn-primary mt-3.5">Run sweep</button>
+      <div class="controls">
+        <input id="limit" type="number" name="limit" value="100" min="1" max="300" class="input w-full">
+        <button type="submit" class="btn btn-primary">Run sweep</button>
+      </div>
     </form>
-    <details class="legend">
-      <summary>How a sweep works</summary>
-      <div class="inner">
+    <div class="legend collapse collapse-arrow">
+      <input type="checkbox" aria-label="How a sweep works">
+      <div class="collapse-title">How a sweep works</div>
+      <div class="collapse-content inner">
         <p><strong>1. Find prospects.</strong> A search for roofing companies in
         the market, then a gate that rules out the ones not worth a call:
         commercial only, too few reviews, no real local address, or a storm
@@ -48,7 +51,7 @@
         A person picks the three the owner reads before anything becomes a
         report.</p>
       </div>
-    </details>
+    </div>
   </div>
 
   <div class="card">

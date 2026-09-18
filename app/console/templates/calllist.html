@@ -26,8 +26,10 @@
     {{ csrf_field(csrf) }}
     <input type="hidden" name="batch_id" value="{{ batch_id }}">
     <label for="top">Top prospects to draft for</label>
-    <input id="top" type="number" name="top" value="10" min="1" max="40" class="input w-full">
-    <button type="submit" class="btn btn-primary mt-3.5">Draft findings</button>
+    <div class="controls">
+      <input id="top" type="number" name="top" value="10" min="1" max="40" class="input w-full">
+      <button type="submit" class="btn btn-primary">Draft findings</button>
+    </div>
   </form>
 </div>
 

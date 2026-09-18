@@ -2893,7 +2893,8 @@ def test_text_like_inputs_are_tap_sized_including_email_and_password():
     import re as _re
 
     css = views.theme_css()
-    assert _re.search(r"\.input, \.textarea, \.select \{ @apply min-h-11 text-base;", css)
+    assert "--size-field: 0.275rem;" in css, "44px controls, from the theme"
+    assert _re.search(r"\.input, \.textarea, \.select \{ @apply text-base;", css)
     root = views.TEMPLATES
     for f in root.glob("*.html"):
         for m in _re.finditer(r"<input[^>]*type=\"(text|number|email|password|search|url|tel)\"[^>]*>", f.read_text()):
@@ -3323,3 +3324,25 @@ def test_the_dockerfile_pins_the_same_tailwind_as_the_build_script():
     docker = _re.search(r"tailwindcss/releases/download/(v[\d.]+)/", (root / "Dockerfile").read_text()).group(1)
     script = _re.search(r'TW_VERSION:-(v[\d.]+)', (root / "scripts/build_css.sh").read_text()).group(1)
     assert docker == script
+
+
+def test_legends_are_animated_collapses_not_details():
+    """A native details element cannot animate open; daisyUI's checkbox
+    collapse can, and the arrow turns with it."""
+    for page in (_overview(), _list([_row()])):
+        assert '<div class="legend collapse collapse-arrow">' in page
+        assert '<details class="legend"' not in page
+    legend = views.score_legend()
+    assert '<input type="checkbox" aria-label="What the scores mean">' in legend
+    assert 'class="collapse-title">What the scores mean' in legend
+    assert views.score_legend(open_by_default=True).count(" checked>") == 1
+
+
+def test_buttons_and_inputs_share_one_height():
+    css = views.theme_css()
+    assert "--size-field: 0.275rem;" in css, "44px for both, from the one theme variable"
+    assert "min-h-11" not in css
+    page = _overview()
+    assert '<div class="controls">' in page
+    row = page.split('<div class="controls">')[1].split("</div>")[0]
+    assert "mt-3.5" not in row, "no top margin on a button that sits beside its input"
