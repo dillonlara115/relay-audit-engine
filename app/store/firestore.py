@@ -683,6 +683,23 @@ def update_touch(prospect_id: str, touch_id: str, fields: Mapping[str, Any]) -> 
      .document(touch_id).set(_plain(dict(fields)), merge=True))
 
 
+QUO_EVENTS = "quo_events"
+
+
+def claim_event(event_id: str) -> bool:
+    """True the first time an event id is seen. Quo retries deliveries, and a
+    retried call.completed must not become a second touch."""
+    if not event_id:
+        return True
+    from google.api_core.exceptions import AlreadyExists
+
+    try:
+        get_client().collection(QUO_EVENTS).document(event_id).create({"seen_at": utcnow()})
+    except AlreadyExists:
+        return False
+    return True
+
+
 def get_sequence(prospect_id: str) -> dict[str, Any] | None:
     snap = get_client().collection(OUTREACH).document(prospect_id).get()
     return snap.to_dict() if snap.exists else None

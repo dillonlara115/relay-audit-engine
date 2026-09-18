@@ -1126,7 +1126,7 @@ def test_the_open_list_is_the_whole_public_surface(client):
 
     assert set(OPEN_PREFIXES) == {
         "/r/", "/console/login", "/health", "/healthz",
-        "/robots.txt", "/pubsub/", "/tick", "/static/",
+        "/robots.txt", "/pubsub/", "/tick", "/static/", "/quo/",
     }
 
 

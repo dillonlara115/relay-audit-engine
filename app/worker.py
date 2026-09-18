@@ -18,13 +18,14 @@ silent; a redelivery is not.
 from __future__ import annotations
 
 import logging
+import json
 import re
 from pathlib import Path
 from urllib.parse import quote
 import os
 
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from app.config import get_config
 from app.leases import worker_id
@@ -68,6 +69,7 @@ OPEN_PREFIXES = (
     "/pubsub/",     # token-gated
     "/tick",        # token-gated
     "/static/",     # the logo an email's HTML part points at; a fixed whitelist of files
+    "/quo/",        # signed by Quo; verified on the raw body before anything is read
 )
 
 
@@ -217,6 +219,35 @@ def dashboard_moved() -> Response:
 @app.get("/dashboard/{batch_id}", include_in_schema=False)
 def dashboard_batch_moved(batch_id: str) -> Response:
     return RedirectResponse(f"/console/batches/{quote(batch_id, safe='')}", status_code=301)
+
+
+@app.post("/quo/webhook")
+async def quo_webhook(request: Request) -> Response:
+    """Quo tells us a text arrived, a call finished, or a summary is ready.
+
+    Verified on the raw bytes with the webhook's signing key; an unsigned or
+    mis-signed delivery is refused before the body is parsed. Everything
+    else is acknowledged with 200 so Quo stops retrying, including events
+    about people not on any call list, which are ignored.
+    """
+    from app import quo_events
+    from app.tools import quo
+
+    key = get_config().quo_webhook_key
+    raw = await request.body()
+    if not quo.verify_signature(dict(request.headers), raw, key):
+        return Response(status_code=401)
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return Response(status_code=400)
+    try:
+        outcome = await quo_events.handle(payload)
+    except Exception:  # noqa: BLE001 - a bad event must not make Quo retry forever
+        log.exception("quo webhook failed")
+        return Response(status_code=200, content="error logged")
+    log.info("quo %s %s %s", outcome.action, outcome.prospect_id, outcome.detail)
+    return JSONResponse({"action": outcome.action})
 
 
 @app.post("/tick")
