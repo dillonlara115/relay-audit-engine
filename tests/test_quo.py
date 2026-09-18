@@ -167,3 +167,17 @@ def test_unknown_events_are_other_not_errors():
                                        ("Stop calling", False), ("Sure", False)])
 def test_stop_words(text, stop):
     assert quo.is_stop(text) is stop
+
+
+def test_webhooks_live_at_the_versioned_host_and_the_rest_under_v1():
+    """Quo answered 'Cannot POST /v1/webhooks' the first time."""
+    client, calls = transport(lambda r: httpx.Response(201, json={"data": {"id": "WH1", "key": "whsec_x"}}))
+    hook = quo.create_webhook("https://reports.relayforroofers.com/quo/webhook", client=client)
+    assert hook["key"] == "whsec_x"
+    assert str(calls[0].url) == "https://api.quo.com/webhooks"
+    assert calls[0].headers["quo-api-version"] == "2026-03-30"
+    body = json.loads(calls[0].content)
+    assert body["url"].endswith("/quo/webhook") and "message.received" in body["events"] and "call.completed" in body["events"]
+    client, calls = transport(lambda r: httpx.Response(200, json={"data": []}))
+    quo.phone_numbers(client=client)
+    assert str(calls[0].url) == "https://api.quo.com/v1/phone-numbers"

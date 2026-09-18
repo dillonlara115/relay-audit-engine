@@ -33,7 +33,10 @@ import httpx
 
 from app.config import get_config
 
+# Two generations of the same API. Contacts, messages and phone numbers live
+# under /v1; webhooks live at the bare host under the dated version header.
 BASE_URL = "https://api.quo.com/v1"
+VERSIONED_URL = "https://api.quo.com"
 API_VERSION = "2026-03-30"
 TIMEOUT = 20.0
 TEXT_CAP = 320          # two SMS segments; a cold text longer than this is a letter
@@ -80,14 +83,15 @@ def _headers() -> dict[str, str]:
 
 
 def _request(method: str, path: str, *, json: Any = None, params: Mapping[str, Any] | None = None,
-             client: httpx.Client | None = None) -> Any:
+             client: httpx.Client | None = None, versioned: bool = False) -> Any:
     headers = _headers()
+    url = (VERSIONED_URL if versioned else BASE_URL) + path
     try:
         if client is not None:
-            r = client.request(method, BASE_URL + path, headers=headers, json=json, params=params)
+            r = client.request(method, url, headers=headers, json=json, params=params)
         else:
             with httpx.Client(timeout=TIMEOUT) as http:
-                r = http.request(method, BASE_URL + path, headers=headers, json=json, params=params)
+                r = http.request(method, url, headers=headers, json=json, params=params)
     except httpx.HTTPError as exc:
         raise QuoUnavailable(f"Quo did not answer: {exc}") from exc
     if r.status_code >= 400:
@@ -229,7 +233,7 @@ def create_webhook(url: str, *, label: str = "relay-audit-engine",
     carries the signing key once; the caller stores it as QUO_WEBHOOK_KEY."""
     data = _request("POST", "/webhooks", json={"url": url, "events": list(WEBHOOK_EVENTS),
                                                "resourceIds": ["*"], "label": label,
-                                               "status": "enabled"}, client=client)
+                                               "status": "enabled"}, client=client, versioned=True)
     return data.get("data") or data
 
 
