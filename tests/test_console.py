@@ -1126,7 +1126,7 @@ def test_the_open_list_is_the_whole_public_surface(client):
 
     assert set(OPEN_PREFIXES) == {
         "/r/", "/console/login", "/health", "/healthz",
-        "/robots.txt", "/pubsub/", "/tick", "/static/", "/quo/",
+        "/robots.txt", "/pubsub/", "/tick", "/static/", "/quo/", "/favicon.ico",
     }
 
 
@@ -3091,3 +3091,30 @@ def test_the_text_template_must_carry_the_opt_out():
     assert any("characters" in p for p in tpl.text_problems("x " * 200 + "STOP"))
     saved = tpl.normalise({"body_sms": "Hi  there\n — Reply STOP to opt out"})
     assert saved["sms"]["body"] == "Hi there , Reply STOP to opt out" or saved["sms"]["body"] == "Hi there, Reply STOP to opt out"
+
+
+def test_every_page_carries_the_favicon_and_it_is_served_open(client):
+    """The tab icon: the mark on a white ground, as SVG with a PNG fallback.
+    Browsers fetch /favicon.ico unprompted, on the login page too, so it is
+    open like the login page is."""
+    login = client.get("/console").text
+    assert 'rel="icon" type="image/svg+xml" href="/static/favicon.svg"' in login
+    sign_in(client)
+    assert 'href="/static/favicon.svg"' in client.get("/console").text
+    svg = client.get("/static/favicon.svg")
+    assert svg.status_code == 200 and svg.headers["content-type"].startswith("image/svg+xml")
+    assert 'fill="#ffffff"' in svg.text and 'stroke="#F25C1F"' in svg.text and "class=" not in svg.text
+    ico = client.get("/favicon.ico")
+    assert ico.status_code == 200 and ico.headers["content-type"] == "image/png"
+
+
+def test_the_public_report_carries_the_favicon_too():
+    from app.report import template as report_template
+
+    src = pathlib_read("app/report/template.py")
+    assert 'href="/static/favicon.svg"' in src
+
+
+def pathlib_read(rel):
+    import pathlib as _pl
+    return (_pl.Path(__file__).resolve().parent.parent / rel).read_text()

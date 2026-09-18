@@ -70,6 +70,7 @@ OPEN_PREFIXES = (
     "/tick",        # token-gated
     "/static/",     # the logo an email's HTML part points at; a fixed whitelist of files
     "/quo/",        # signed by Quo; verified on the raw body before anything is read
+    "/favicon.ico", # browsers ask for it unprompted, on the login page too
 )
 
 
@@ -81,7 +82,7 @@ OPEN_PREFIXES = (
 # test_no_route_can_be_mistaken_for_a_report walks the app and forbids it.
 # Files an email or a public page may point at. A whitelist, not a directory
 # listing: nothing else under app/static is reachable, whatever lands there.
-STATIC_FILES = {"relay-mark.png": "image/png"}
+STATIC_FILES = {"relay-mark.png": "image/png", "favicon.svg": "image/svg+xml"}
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
@@ -314,6 +315,15 @@ def public_report_legacy(slug: str) -> Response:
     if not REPORT_SLUG.match(f"/{slug}"):
         return Response(status_code=404)
     return RedirectResponse(f"/{slug}", status_code=301)
+
+
+@app.get("/favicon.ico")
+async def favicon() -> Response:
+    """Browsers ask for this by name before reading any link tag."""
+    from fastapi.responses import FileResponse
+
+    return FileResponse(STATIC_DIR / "relay-mark.png", media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.get("/static/{name}")
