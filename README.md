@@ -457,6 +457,39 @@ Long jobs (a sweep, a coordinator run) are backed by Pub/Sub the same way audits
 are: the browser starts a job and polls it, so a slow sweep survives closing the
 tab and the worker instance that started it being recycled.
 
+### Connecting Quo (once)
+
+Quo (formerly OpenPhone) is the phone system. Its API cannot place a call, and
+hard rule 3 forbids it anyway; calls happen in the Quo app, and every phone
+number in the console is a click-to-call link. What the integration does:
+**Add to Quo** on a prospect's page creates a contact carrying the business,
+the number and the report link; **Send text** sends one text from your Quo
+number after the same checks as an email; and a webhook brings inbound texts,
+finished calls and call summaries into the prospect's timeline. STOP by text
+suppresses the prospect.
+
+```bash
+# 1. In Quo: workspace settings, API, create a key. Then:
+printf %s '<api key>' | gcloud secrets create quo-api-key --data-file=- --project relay-roof-check
+gcloud secrets add-iam-policy-binding quo-api-key --project relay-roof-check \
+  --member="serviceAccount:relay-worker@relay-roof-check.iam.gserviceaccount.com" \
+  --role=roles/secretmanager.secretAccessor
+
+# 2. Locally, with QUO_API_KEY in .env: list the numbers and register the webhook.
+python -m app.cli quo-connect --base-url https://reports.relayforroofers.com
+#    It prints the signing key once. Store it the same way as quo-webhook-key.
+
+# 3. Point the service at all three.
+gcloud run services update audit-worker --region "$REGION" \
+  --update-secrets=QUO_API_KEY=quo-api-key:latest,QUO_WEBHOOK_KEY=quo-webhook-key:latest \
+  --update-env-vars=QUO_FROM=+1XXXXXXXXXX
+```
+
+Texting businesses needs the Quo number registered for A2P 10DLC (Quo
+settings, Trust Center). Until it is, Send text reports "not approved for A2P
+10DLC texting yet" and sends nothing. `OUTREACH_TEXT_DAILY_CAP` (default 20)
+caps texts per UTC day.
+
 ## Testing
 
 ```bash
@@ -479,7 +512,8 @@ those are named for what they regression-test, not just what they assert.
   `None` rather than writing `null`); nothing defaults to zero.
 - **Suppression is checked before every outreach action**, draft generation
   included, matched on place id, domain, phone, and email.
-- **A person sends every email.** One route sends, one function behind it, and a
+- **A person sends every message.** One route sends email and one sends a text,
+  one function behind each, and a
   test greps the package so a second caller is a visible edit. The route runs
   only from the Send button on one prospect's page after the confirm names the
   recipient; jobs, the pipeline and the CLI cannot reach it. Nothing sends on a

@@ -57,6 +57,30 @@ What that looks like in the code:
   already specified.
 
 
+### Decided Sep 18, 2026: Quo for contacts, texts and what comes back
+
+Quo's API has no endpoint to place a call, and hard rule 3 would forbid it if
+it did. So the integration is three read-or-record things and one send:
+
+- **Contacts.** Add to Quo creates a contact keyed by the Google place id as
+  Quo's externalId (never duplicated), with the business, the number, the
+  owner's email and the report link, so a call shows who it is.
+- **One text.** Sent from the prospect page by a person who read it, from the
+  Quo number, after the same checks as an email plus its own daily cap
+  (`OUTREACH_TEXT_DAILY_CAP`, 20). The text template must say who it is from
+  and how to opt out. A text is its own touch and does not move the email
+  schedule. Rule 4 now says "every message".
+- **Webhooks.** An inbound text is classified like an email reply; STOP is a
+  suppression before anything else; a finished call is a touch; a call
+  summary attaches to the call. Verified on the raw body, deduplicated by
+  event id, and events about numbers not on any call list are ignored.
+
+Compliance note for texting businesses cold: the Quo number must be
+registered for A2P 10DLC or the send is refused by Quo; many "business"
+numbers are the owner's cell; the text is short, signed, and carries the
+opt-out; and the daily cap is low on purpose. Texting is for after some
+engagement (a reply, a missed call back) more often than as a first touch.
+
 ### The entry condition is not a date
 
 Criteria §7: *"No automated sending until at least thirty have been hand-sent and

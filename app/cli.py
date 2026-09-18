@@ -1048,6 +1048,53 @@ def gmail_connect(
                   f"--data-file={path}[/] (or [dim]versions add[/] if it exists).")
 
 
+@app.command("quo-connect")
+def quo_connect(
+    base_url: str = typer.Option("", "--base-url", help="Where the worker answers, e.g. https://reports.relayforroofers.com"),
+) -> None:
+    """Show the Quo numbers and register the webhook. Sends nothing.
+
+    Needs QUO_API_KEY. Prints the numbers so QUO_FROM can be chosen, then
+    creates the webhook for texts and calls and prints its signing key once:
+    store that as QUO_WEBHOOK_KEY in Secret Manager.
+    """
+    from app.tools import quo
+
+    cfg = get_config()
+    if not cfg.quo_api_key:
+        console.print("[red]QUO_API_KEY is not set.[/] Quo workspace settings, API tab, create a key.")
+        raise typer.Exit(code=1)
+    try:
+        numbers = quo.phone_numbers()
+    except quo.QuoUnavailable as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(code=1)
+    console.print("[bold]Quo numbers[/]")
+    for n in numbers:
+        users = ", ".join(u.get("firstName", "") or u.get("email", "") for u in n.get("users") or [])
+        console.print(f"  {n.get('number')}  {n.get('name') or ''}  ({n.get('id')})  {users}")
+    if cfg.quo_from:
+        console.print(f"QUO_FROM is {cfg.quo_from}.")
+    else:
+        console.print("[yellow]Set QUO_FROM[/] to the one texts should go out from, in +1 form.")
+    base = (base_url or cfg.smoke_base_url or "").rstrip("/")
+    if not base:
+        console.print("Pass --base-url to register the webhook (or set SMOKE_BASE_URL).")
+        return
+    if cfg.quo_webhook_key:
+        console.print("QUO_WEBHOOK_KEY is already set; not creating a second webhook.")
+        return
+    try:
+        hook = quo.create_webhook(f"{base}/quo/webhook")
+    except quo.QuoUnavailable as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(code=1)
+    console.print(f"[green]Webhook {hook.get('id')} created[/] for {base}/quo/webhook.")
+    console.print("Signing key, shown once. Store it and set QUO_WEBHOOK_KEY:")
+    console.print(f"  [bold]{hook.get('key')}[/]")
+    console.print("  printf %s '<key>' | gcloud secrets create quo-webhook-key --data-file=-")
+
+
 @app.command()
 def replies(
     limit: int = typer.Option(50, "--limit", "-n", help="Sequences to scan."),

@@ -210,6 +210,29 @@ def send_text(*, to: str, content: str, client: httpx.Client | None = None) -> S
                     status=str(row.get("status") or "queued"))
 
 
+# ── Setup ─────────────────────────────────────────────────────────────────────
+
+
+def phone_numbers(*, client: httpx.Client | None = None) -> list[dict[str, Any]]:
+    """The workspace's numbers: id (PN...), number (+1...), name, users."""
+    data = _request("GET", "/phone-numbers", client=client)
+    return list(data.get("data") or [])
+
+
+WEBHOOK_EVENTS = ("message.received", "message.delivered", "message.failed", "message.undelivered",
+                  "call.completed", "call.summary.completed")
+
+
+def create_webhook(url: str, *, label: str = "relay-audit-engine",
+                   client: httpx.Client | None = None) -> dict[str, Any]:
+    """Register our endpoint for the events the ledger reads. The response
+    carries the signing key once; the caller stores it as QUO_WEBHOOK_KEY."""
+    data = _request("POST", "/webhooks", json={"url": url, "events": list(WEBHOOK_EVENTS),
+                                               "resourceIds": ["*"], "label": label,
+                                               "status": "enabled"}, client=client)
+    return data.get("data") or data
+
+
 # ── Webhooks ──────────────────────────────────────────────────────────────────
 
 
