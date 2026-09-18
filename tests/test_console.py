@@ -3346,3 +3346,8 @@ def test_buttons_and_inputs_share_one_height():
     assert '<div class="controls">' in page
     row = page.split('<div class="controls">')[1].split("</div>")[0]
     assert "mt-3.5" not in row, "no top margin on a button that sits beside its input"
+
+
+def test_badges_never_wrap_inside_their_ground():
+    """'Not drafted' broke onto two lines in the call list's Findings column."""
+    assert ".badge { @apply whitespace-nowrap; }" in views.theme_css()

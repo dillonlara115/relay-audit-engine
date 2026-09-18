@@ -84,6 +84,8 @@
 @layer components {
   /* Type the components can share. Buttons and headings are PT Sans. */
   .btn { @apply font-display tracking-wide; }
+  /* A badge is one line; in a narrow column it must not wrap inside its ground. */
+  .badge { @apply whitespace-nowrap; }
   .muted { @apply text-ink2; }
   .lede { @apply text-ink2 mb-5 max-w-[70ch]; }
   .hint { @apply text-sm text-ink2 mt-1.5; }
