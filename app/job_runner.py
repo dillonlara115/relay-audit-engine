@@ -230,53 +230,11 @@ async def run_draft_job(job_id: str, params: Mapping[str, Any]) -> dict[str, Any
     return {"batch_id": batch_id, "drafted": drafted, "skipped": skipped}
 
 
-# ── the coordinator ───────────────────────────────────────────────────────────
-
-
-async def run_agent_job(job_id: str, params: Mapping[str, Any]) -> dict[str, Any]:
-    from google.adk.runners import InMemoryRunner
-    from google.genai import types as genai_types
-
-    from app.agents.coordinator import build_coordinator
-
-    prompt = str(params.get("prompt") or "")
-    await asyncio.to_thread(jobs.log, job_id, f"Operator: {prompt}")
-
-    runner = InMemoryRunner(build_coordinator(), app_name="relay-sweep")
-    session = await runner.session_service.create_session(
-        app_name="relay-sweep", user_id="operator"
-    )
-    final_text: list[str] = []
-    calls = 0
-
-    async for event in runner.run_async(
-        user_id="operator", session_id=session.id,
-        new_message=genai_types.Content(role="user",
-                                        parts=[genai_types.Part(text=prompt)]),
-    ):
-        for part in (event.content.parts if event.content else []) or []:
-            if part.function_call:
-                calls += 1
-                args = dict(part.function_call.args or {})
-                await asyncio.to_thread(
-                    jobs.log, job_id, f"calling {part.function_call.name}({args})")
-            elif part.function_response:
-                await asyncio.to_thread(
-                    jobs.log, job_id,
-                    f"{part.function_response.name} returned "
-                    f"{str(part.function_response.response)[:200]}")
-            elif part.text and not event.partial:
-                final_text.append(part.text.strip())
-
-    return {"tool_calls": calls, "answer": "\n".join(final_text)[:4000]}
-
-
 RUNNERS = {
     jobs.KIND_SWEEP: run_sweep_job,
     jobs.KIND_DISPATCH: run_dispatch_job,
     jobs.KIND_AUDIT: run_audit_job,
     jobs.KIND_DRAFT: run_draft_job,
-    jobs.KIND_AGENT: run_agent_job,
 }
 
 

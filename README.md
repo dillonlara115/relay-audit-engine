@@ -453,9 +453,10 @@ records nothing; **Mark as sent** and the mail-client link still work.
 `OUTREACH_DAILY_CAP` (default 40) stops the console after that many sends in a
 UTC day. Email wording is edited under **Email templates** with `{{variables}}`.
 
-Long jobs (a sweep, a coordinator run) are backed by Pub/Sub the same way audits
-are: the browser starts a job and polls it, so a slow sweep survives closing the
-tab and the worker instance that started it being recycled.
+Long jobs (a sweep, a dispatch that waits on a whole batch) are backed by
+Pub/Sub the same way audits are: the browser starts a job and polls it, so a
+slow sweep survives closing the tab and the worker instance that started it
+being recycled.
 
 ### Connecting Quo (once)
 

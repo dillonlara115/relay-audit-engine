@@ -1,8 +1,9 @@
 """Long running operator jobs, as records rather than requests.
 
-A sweep takes minutes and a coordinator run takes longer. Neither fits in an
-HTTP request, and Cloud Run throttles CPU once a response is sent, so a
-background task started in a request handler is not guaranteed to finish.
+A sweep takes minutes and a dispatch that waits on a whole batch takes longer.
+Neither fits in an HTTP request, and Cloud Run throttles CPU once a response
+is sent, so a background task started in a request handler is not guaranteed
+to finish.
 
 So a job is a Firestore document plus a Pub/Sub message: the request that
 starts one returns immediately with a job id, a worker picks the message up,
@@ -35,12 +36,11 @@ FAILED = "failed"
 
 KIND_SWEEP = "sweep"
 KIND_DISPATCH = "dispatch"
-KIND_AGENT = "agent"
 KIND_AUDIT = "audit"
 KIND_DRAFT = "draft"
 
-# A sweep of 120 prospects runs about five minutes. A coordinator run that
-# waits on a batch can run much longer, so the lease is generous and renewed.
+# A sweep of 120 prospects runs about five minutes. A dispatch that waits on a
+# full batch of audits can run much longer, so the lease is generous and renewed.
 JOB_LEASE_SECONDS = 1800
 
 # Keep the log bounded: a document has a 1 MiB ceiling and a chatty job would

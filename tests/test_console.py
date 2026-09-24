@@ -107,7 +107,6 @@ def test_a_valid_post_starts_a_job_and_redirects_to_it(client):
 @pytest.mark.parametrize(
     "path, payload",
     [
-        ("/console/agent", {"prompt": "sweep"}),
         ("/console/dispatch", {"batch_id": "b1", "market": "Colorado Springs", "limit": 5}),
         ("/console/draft", {"batch_id": "b1", "top": 3}),
         ("/console/suppress", {"value": "p1", "match_type": "place_id", "reason": "asked"}),
@@ -125,7 +124,7 @@ def test_mutating_routes_are_closed_to_a_stranger(client):
     validates a form before calling the endpoint, so a stranger learned the
     field names. The gate is middleware for that reason.
     """
-    for path in ("/console/sweep", "/console/agent", "/console/draft"):
+    for path in ("/console/sweep", "/console/draft"):
         assert client.post(path, data={}, follow_redirects=False).status_code == 401
 
 
@@ -478,20 +477,6 @@ def test_an_arbitrary_city_resolves_without_being_a_known_metro():
     assert spec.state == "CO"
     assert spec.boundaries_known is False
     assert spec.in_metro("Anywhere", "CO") is None, "advisory, never a blocking fail"
-
-
-# ── The coordinator card explains itself ─────────────────────────────────────
-
-
-def test_the_coordinator_card_says_when_to_use_it_and_when_not_to():
-    import re
-
-    page = views.render_run(csrf="t", markets=["X"], active_jobs=[], recent_batches=[])
-    # The copy wraps across source lines, so compare on normalized whitespace.
-    flat = re.sub(r"\s+", " ", page)
-    assert "Worth using when" in flat
-    assert "Use the buttons on the left instead" in flat
-    assert "cannot contact anybody" in flat, "rule 4 stated where an operator reads it"
 
 
 # ── Evidence is shown, not just named ────────────────────────────────────────
@@ -1636,10 +1621,10 @@ def test_no_badge_when_nothing_is_running():
 
 def test_the_overview_speaks_the_new_vocabulary():
     page = _overview()
-    for present in ("Run sweep", "Recent sweeps", "Run coordinator", "Overview"):
+    for present in ("Run sweep", "Recent sweeps", "Overview"):
         assert present in page, present
     for gone in ("Start a scan", "Recent scans", "Find companies", "Happening right now",
-                 "Results", "Activity</a>"):
+                 "Results", "Activity</a>", "Describe a job", "Run coordinator", "/console/agent"):
         assert gone not in page, gone
 
 

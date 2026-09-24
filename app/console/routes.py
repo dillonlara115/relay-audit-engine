@@ -188,13 +188,6 @@ async def start_sweep(request: Request, market: str = Form(...),
                         f"Sweep {market}")
 
 
-@router.post("/agent")
-async def start_agent(request: Request, prompt: str = Form(...),
-                      csrf: str = Form(None)) -> Response:
-    return await _start(request, csrf, jobs.KIND_AGENT, {"prompt": prompt[:2000]},
-                        "Coordinator run")
-
-
 @router.post("/dispatch")
 async def start_dispatch(request: Request, batch_id: str = Form(...),
                          market: str = Form(...), limit: int = Form(0),

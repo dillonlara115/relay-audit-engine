@@ -9,8 +9,7 @@
   {% for label, value, context in kpis %}{{ kpi(label, value, context) }}{% endfor %}
 </div>
 
-<div class="grid2">
-  <div class="card" id="run">
+<div class="card" id="run">
     <h3>Run sweep</h3>
     <p class="muted">Finds and gates prospects only. Audits start from the job
     page once the sweep finishes, so this step is quick and cheap.</p>
@@ -53,28 +52,6 @@
       </div>
     </div>
   </div>
-
-  <div class="card">
-    <h3>Describe a job</h3>
-    <p class="muted">Same work, described in a sentence instead of clicked
-    through step by step. The coordinator finds the prospects, audits their
-    sites, waits for that to finish, retries anything that got stuck, and hands
-    back the call list.</p>
-    <p class="muted"><strong>Worth using when</strong> the job takes several
-    steps and you would rather not sit and watch it, especially a large market
-    that runs for an hour. <strong>Use the buttons on the left instead</strong>
-    when you know the one thing you want.</p>
-    <p class="muted">It can only use the same steps you can. Every number it
-    reports came from an actual check, it cannot make one up, and it cannot
-    contact anybody.</p>
-    <form method="post" action="/console/agent">
-      {{ csrf_field(csrf) }}
-      <label for="prompt">Describe the job in a sentence</label>
-      <textarea id="prompt" name="prompt" class="textarea w-full">Find roofing companies in Colorado Springs, audit the sites of the 20 best ones, and show me who to call first.</textarea>
-      <button type="submit" class="btn btn-primary mt-3.5">Run coordinator</button>
-    </form>
-  </div>
-</div>
 
 {% if jobs %}
 <h2>Jobs running</h2>
