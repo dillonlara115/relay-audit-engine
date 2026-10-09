@@ -134,6 +134,8 @@ NOTICES = {
     "text_sent": "Text sent.",
     "text_not_sent": "Text not sent.",
     "stage_set": "Stage updated.",
+    "hunter_done": "Hunter search finished.",
+    "hunter_failed": "Hunter search did not run.",
     "stage_rejected": "Stage not changed.",
     "quo_added": "Added to Quo.",
     "quo_failed": "Not added to Quo.",
@@ -411,13 +413,14 @@ def contact_cell(contacts: Sequence[Mapping[str, Any]]) -> str:
     """
     usable = [c for c in contacts if c.get("status") in ("valid", "risky", "unknown")]
     if not usable:
-        return '<span class="muted">none on the site</span>'
+        return '<span class="muted">none found</span>'
     first = usable[0]
     status = str(first.get("status") or "unknown")
     extra = f'<br><span class="muted">+{len(usable) - 1} more</span>' if len(usable) > 1 else ""
+    via = ' <span class="muted text-sm">via Hunter</span>' if first.get("source") == "hunter" else ""
     return (f'<span class="mail">{esc(first.get("email"))}</span> '
             f'<span class="tag {_CONTACT_TAG.get(status, "dim")}">'
-            f'{esc(_CONTACT_LABEL.get(status, status))}</span>{extra}')
+            f'{esc(_CONTACT_LABEL.get(status, status))}</span>{via}{extra}')
 
 
 def outreach_cell(sequence: Mapping[str, Any] | None, *, prospect_id: str,
@@ -899,6 +902,9 @@ def outreach_context(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
             "emails": emails, "sent": sent, "max": max_touches, "next_ordinal": next_ordinal,
             "is_open": is_open, "published": published,
             "can_publish": (not published) and (findings or {}).get("status") == "approved",
+            "hunter_checked": bool(prospect.get("hunter_checked_at")),
+            "hunter_found": len([c for c in prospect.get("hunter_contacts") or []
+                                 if c.get("status") in ("valid", "risky")]),
             "status": seq.status if seq else None, "due": bool(seq and seq.due()),
             "due_label": due_label, "owner_email": owner_email or "",
             "waiting": outreach.park_reason(seq) if seq and seq.status == outreach.WAITING else "",

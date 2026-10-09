@@ -81,6 +81,13 @@
     <input type="hidden" name="audit_ids" id="draft-ids" value="">
     <button class="btn btn-sm btn-primary" type="submit">{{ icon("pen") }} Draft findings</button>
   </form>
+  <form class="inline" method="post" action="/console/contacts/hunter" id="hunter-form"
+        onsubmit="return confirm('Look up email addresses with Hunter for the selected prospects? Only those with no usable address are searched, one search credit each. Nothing is sent.')">
+    {{ csrf_field(csrf) }}
+    <input type="hidden" name="batch_id" value="{{ batch_id }}">
+    <input type="hidden" name="audit_ids" id="hunter-ids" value="">
+    <button class="btn btn-sm" type="submit">{{ icon("search") }} Find emails</button>
+  </form>
   {% endif %}
   {% if tab == "excluded" %}
   <form class="inline" method="post" action="/console/batches/{{ batch_id }}/include" id="include-form"

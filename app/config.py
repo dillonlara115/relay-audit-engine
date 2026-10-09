@@ -152,6 +152,11 @@ class Config:
     quo_from: str = field(default_factory=lambda: _str("QUO_FROM"))
     quo_webhook_key: str = field(default_factory=lambda: _str("QUO_WEBHOOK_KEY"))
     outreach_text_daily_cap: int = field(default_factory=lambda: _int("OUTREACH_TEXT_DAILY_CAP", 20))
+    # Hunter (hunter.io): finds addresses published elsewhere on the web for a
+    # prospect's domain. Searches run only when a person asks, and stop at the
+    # monthly cap; 25 is the free plan. See app/tools/hunter.py.
+    hunter_api_key: str = field(default_factory=lambda: _str("HUNTER_API_KEY"))
+    hunter_monthly_cap: int = field(default_factory=lambda: _int("HUNTER_MONTHLY_CAP", 25))
 
     # Pub/Sub
     pubsub_audit_topic: str = field(
@@ -217,6 +222,8 @@ _ENV_NAME = {
     "quo_from": "QUO_FROM",
     "quo_webhook_key": "QUO_WEBHOOK_KEY",
     "outreach_text_daily_cap": "OUTREACH_TEXT_DAILY_CAP",
+    "hunter_api_key": "HUNTER_API_KEY",
+    "hunter_monthly_cap": "HUNTER_MONTHLY_CAP",
 }
 
 

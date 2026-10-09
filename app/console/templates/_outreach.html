@@ -33,6 +33,18 @@
         {% endif %}
       </div>
     {% else %}
+      {% if o.step1.mode == "no_address" %}
+      <div class="empty-note">
+        <p>{% if o.hunter_checked %}Hunter has been searched for this business and found no address worth writing to.
+           Find one by hand and type it in below.{% else %}<strong>Hunter can look for one.</strong> It searches
+           addresses published anywhere on the web for this business's domain. One search credit.{% endif %}</p>
+        <form method="post" action="/console/contacts/hunter">
+          {{ csrf_field(csrf) }}
+          <input type="hidden" name="prospect_id" value="{{ prospect_id }}">
+          <button class="btn btn-sm" type="submit">{{ icon("search") }} {{ "Search Hunter again" if o.hunter_checked else "Find an email with Hunter" }}</button>
+        </form>
+      </div>
+      {% endif %}
       <form method="post" action="/console/outreach/{{ prospect_id }}/send" id="send-form"
             data-confirm="{{ o.step1.confirm }}" onsubmit="return sendConfirm(this)">
         {{ csrf_field(csrf) }}

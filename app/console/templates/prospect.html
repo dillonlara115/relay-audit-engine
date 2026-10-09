@@ -13,6 +13,10 @@
       <form method="post" action="/console/audits/{{ p.audit_id }}/reaudit" onsubmit="{{ p.reaudit_confirm }}">
         {{ csrf_field(csrf) }}<button class="menu-item" type="submit">{{ icon("refresh") }} Re-audit</button>
       </form>
+      <form method="post" action="/console/contacts/hunter">
+        {{ csrf_field(csrf) }}<input type="hidden" name="prospect_id" value="{{ p.prospect_id }}">
+        <button class="menu-item" type="submit">{{ icon("search") }} Find emails with Hunter</button>
+      </form>
       <form method="post" action="/console/suppress" onsubmit="{{ p.suppress_confirm }}">
         {{ csrf_field(csrf) }}
         <input type="hidden" name="value" value="{{ p.prospect_id }}">

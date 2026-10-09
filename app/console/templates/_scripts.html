@@ -190,6 +190,8 @@
     if (includeIds) includeIds.value = ids.join(',');
     var draftIds = document.getElementById('draft-ids');
     if (draftIds) draftIds.value = ids.join(',');
+    var hunterIds = document.getElementById('hunter-ids');
+    if (hunterIds) hunterIds.value = ids.join(',');
   }
   table.addEventListener('change', function (e) {
     if (e.target && e.target.classList.contains('pick-row')) syncExport();

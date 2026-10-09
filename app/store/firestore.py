@@ -571,19 +571,56 @@ def set_contacts(place_id: str, contacts: Iterable[Mapping[str, Any]]) -> int:
     """
     doc = get_client().collection(PROSPECTS).document(place_id)
     snapshot = doc.get()
-    manual = (snapshot.to_dict() or {}).get("manual_contacts") or [] if snapshot.exists else []
+    current = (snapshot.to_dict() or {}) if snapshot.exists else {}
 
     rows = [dict(_plain(c)) for c in contacts]
     payload: dict[str, Any] = {"contacts": rows, "contacts_checked_at": utcnow(),
                                "updated_at": utcnow()}
-    # owner_email is what the suppression check and the publish gate read, so
-    # it only ever holds an address a human could actually write to. A manual
-    # address outranks every discovered one.
-    primary = (manual[0] if manual
-               else next((r for r in rows if r.get("status") in ("valid", "risky")), None))
-    payload["owner_email"] = primary.get("email") if primary else firestore.DELETE_FIELD
+    payload["owner_email"] = owner_from(current.get("manual_contacts") or [], rows,
+                                        current.get("hunter_contacts") or []) or firestore.DELETE_FIELD
     doc.set(payload, merge=True)
     return len(rows)
+
+
+def owner_from(manual: list[Mapping[str, Any]], site: list[Mapping[str, Any]],
+               hunter: list[Mapping[str, Any]]) -> str | None:
+    """The address outreach writes to. owner_email is what the suppression
+    check and the publish gate read, so it only ever holds an address a human
+    could actually write to: a manual one first, then one verified on the
+    site, then one verified from Hunter."""
+    if manual:
+        return manual[0].get("email")
+    for rows in (site, hunter):
+        hit = next((r for r in rows if r.get("status") in ("valid", "risky")), None)
+        if hit:
+            return hit.get("email")
+    return None
+
+
+def set_hunter_contacts(place_id: str, rows: Iterable[Mapping[str, Any]]) -> str | None:
+    """Write what a Hunter search found. Kept apart from `contacts`, which a
+    re-audit replaces, because a search costs a credit and should not have to
+    be bought twice. Returns the owner address that results."""
+    doc = get_client().collection(PROSPECTS).document(place_id)
+    current = doc.get().to_dict() or {}
+    found = [dict(_plain(r)) for r in rows]
+    owner = owner_from(current.get("manual_contacts") or [], current.get("contacts") or [], found)
+    doc.set({"hunter_contacts": found, "hunter_checked_at": utcnow(), "updated_at": utcnow(),
+             "owner_email": owner or firestore.DELETE_FIELD}, merge=True)
+    return owner
+
+
+HUNTER_USAGE_DOC = "hunter_usage"
+
+
+def hunter_searches(month: str) -> int:
+    snap = get_client().collection(SETTINGS).document(HUNTER_USAGE_DOC).get()
+    return int(((snap.to_dict() or {}) if snap.exists else {}).get(month) or 0)
+
+
+def bump_hunter_searches(month: str, n: int = 1) -> None:
+    get_client().collection(SETTINGS).document(HUNTER_USAGE_DOC).set(
+        {month: firestore.Increment(n), "updated_at": utcnow()}, merge=True)
 
 
 def add_manual_contact(place_id: str, email: str, *, note: str = "") -> str:

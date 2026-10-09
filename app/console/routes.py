@@ -259,6 +259,103 @@ async def job_screen(job_id: str, request: Request) -> Response:
     return _page(views.render_job(record, csrf=csrf_token(request), notice=_notice(request)))
 
 
+# ── Hunter ────────────────────────────────────────────────────────────────────
+
+HUNTER_PARALLEL = 5
+
+
+@router.post("/contacts/hunter")
+async def hunter_search(request: Request, batch_id: str = Form(""), audit_ids: str = Form(""),
+                        prospect_id: str = Form(""), csrf: str = Form(None)) -> Response:
+    """Look up addresses with Hunter for the prospects a person picked.
+
+    From the call list (ticked rows), only prospects with no usable address
+    are searched: a credit spent on a prospect we can already write to is a
+    credit wasted. From one prospect's page it always searches. Suppressed
+    prospects and prospects with no domain are never searched. Sends nothing.
+    """
+    if not check_csrf(request, csrf):
+        return Response(status_code=403, content="stale form, reload the page")
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.tools import hunter
+
+    explicit = bool(prospect_id.strip())
+
+    def run() -> tuple[bool, str]:
+        cfg = get_config()
+        if not cfg.hunter_api_key:
+            return False, "HUNTER_API_KEY is not set, so nothing was searched."
+        if explicit:
+            targets = [prospect_id.strip()]
+        else:
+            wanted = {a for a in (x.strip() for x in audit_ids.split(",")) if _AUDIT_ID.match(a)}
+            targets = [str(a.get("prospect_id")) for a in store.audits_for_batch(batch_id)
+                       if (a.get("audit_id") or a.get("id")) in wanted and a.get("prospect_id")]
+            if not targets:
+                return False, "Tick at least one prospect."
+        prospects = store.prospects_by_id(targets)
+        rules = store.load_suppressions()
+        queue, notes = [], {"has an address": 0, "no website": 0, "suppressed": 0}
+        for pid in targets:
+            pr = prospects.get(pid) or {}
+            if store.suppression_hit(rules, place_id=pid, domain=pr.get("domain"),
+                                     phone=pr.get("gbp_phone"), email=pr.get("owner_email")):
+                notes["suppressed"] += 1
+            elif not pr.get("domain"):
+                notes["no website"] += 1
+            elif pr.get("owner_email") and not explicit:
+                notes["has an address"] += 1
+            else:
+                queue.append((pid, str(pr["domain"])))
+
+        month = store.utcnow().strftime("%Y-%m")
+        room = max(0, cfg.hunter_monthly_cap - store.hunter_searches(month))
+        skipped = "; ".join(f"{n} {why}" for why, n in notes.items() if n)
+        if not queue:
+            return False, f"Nobody to search ({skipped or 'nothing picked'})."
+        if room <= 0:
+            return False, (f"This month's cap of {cfg.hunter_monthly_cap} Hunter searches is used up "
+                           "(HUNTER_MONTHLY_CAP).")
+        capped = len(queue) > room
+        queue = queue[:room]
+
+        def one(item: tuple[str, str]) -> bool:
+            pid, domain = item
+            rows = [hunter.to_contact(f, domain=domain) for f in hunter.domain_search(domain)]
+            store.bump_hunter_searches(month)
+            return bool(store.set_hunter_contacts(pid, rows))
+
+        found = searched = 0
+        problem = ""
+        with ThreadPoolExecutor(max_workers=HUNTER_PARALLEL) as pool:
+            futures = [pool.submit(one, item) for item in queue]
+            for fut in futures:
+                try:
+                    found += fut.result()
+                    searched += 1
+                except hunter.HunterUnavailable as exc:
+                    problem = str(exc)
+        if not searched:
+            return False, problem or "Hunter searched nothing."
+        left = hunter.searches_left()
+        parts = [f"Found a usable address for {found} of {searched} searched."]
+        if skipped:
+            parts.append(f"Skipped {skipped}.")
+        if capped:
+            parts.append("Stopped at the monthly cap.")
+        if problem:
+            parts.append(problem)
+        if left is not None:
+            parts.append(f"{left} Hunter searches left this month.")
+        return True, " ".join(parts)
+
+    ok, detail = await asyncio.to_thread(run)
+    back = _back(request, f"/console/batches/{batch_id}" if batch_id else "/console/batches")
+    target = _with_notice(back, "hunter_done" if ok else "hunter_failed", detail)
+    return _redirect(target + "#email" if explicit and back.startswith("/console/audits/") else target)
+
+
 # ── Leads ─────────────────────────────────────────────────────────────────────
 
 
@@ -376,7 +473,8 @@ def _assemble_batch(
             "findings_status": (findings or {}).get("status"),
             "checks": checks_by_audit.get(r.audit_id) or {},
             "prospect_id": r.prospect_id,
-            "contacts": (prospects.get(r.prospect_id) or {}).get("contacts") or [],
+            "contacts": ((prospects.get(r.prospect_id) or {}).get("contacts") or [])
+                        + ((prospects.get(r.prospect_id) or {}).get("hunter_contacts") or []),
             "sequence": sequences.get(r.prospect_id),
             "no_website": not (prospects.get(r.prospect_id) or {}).get("website_url"),
             "gate_override": (prospects.get(r.prospect_id) or {}).get("gate_override") == "pass",

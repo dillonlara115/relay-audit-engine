@@ -486,6 +486,26 @@ gcloud run services update audit-worker --region "$REGION" \
   --update-env-vars=QUO_FROM=+1XXXXXXXXXX
 ```
 
+### Hunter (finding addresses the site does not publish)
+
+Most roofers put no email on their own site. Hunter finds addresses
+published elsewhere on the web for the domain. Searches run only when a person
+asks (Find emails on the call list, or Find an email with Hunter on a
+prospect), one credit each, and stop at `HUNTER_MONTHLY_CAP` (default 25, the
+free plan). Every address Hunter returns is checked by `verify_email` like a
+site address; Hunter's verdict can only lower that.
+
+```bash
+# In hunter.io: API, copy the key. Typed at the prompt, so it stays out of history.
+read -rs HUNTER_KEY && printf %s "$HUNTER_KEY" | gcloud secrets create hunter-api-key --data-file=- --project relay-roof-check; unset HUNTER_KEY
+gcloud secrets add-iam-policy-binding hunter-api-key --project relay-roof-check \
+  --member="serviceAccount:relay-worker@relay-roof-check.iam.gserviceaccount.com" \
+  --role=roles/secretmanager.secretAccessor
+gcloud run services update audit-worker --region "$REGION" \
+  --update-secrets=HUNTER_API_KEY=hunter-api-key:latest
+# On a paid plan, raise the cap: --update-env-vars=HUNTER_MONTHLY_CAP=500
+```
+
 Texting businesses needs the Quo number registered for A2P 10DLC (Quo
 settings, Trust Center). Until it is, Send text reports "not approved for A2P
 10DLC texting yet" and sends nothing. `OUTREACH_TEXT_DAILY_CAP` (default 20)

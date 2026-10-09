@@ -839,7 +839,7 @@ def test_the_stale_warning_reaches_the_screen():
 def test_a_prospect_with_no_address_is_not_styled_as_a_failure():
     """No address on the site is a thing to go and find, not a red mark."""
     cell = views.contact_cell([])
-    assert "none on the site" in cell
+    assert "none found" in cell
     assert "tag bad" not in cell
 
 
