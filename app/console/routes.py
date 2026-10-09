@@ -835,6 +835,24 @@ async def check_technical(audit_id: str, request: Request, csrf: str = Form(None
     return _redirect(_with_notice(f"/console/audits/{audit_id}", code, detail) + "#technical")
 
 
+# ── Local reach ───────────────────────────────────────────────────────────────
+
+
+@router.post("/audits/{audit_id}/reach")
+async def run_reach(audit_id: str, request: Request, csrf: str = Form(None),
+                    keyword: str = Form(""), size: str = Form(""), radius: str = Form("")) -> Response:
+    """A grid of Maps searches around the business. Paid per point, so it runs
+    only from this button, and comes back to the Local reach section."""
+    audit = await asyncio.to_thread(store.get_audit, audit_id)
+    if audit is None:
+        return Response(status_code=404)
+    name = await _business_name(audit)
+    return await _start(request, csrf, jobs.KIND_REACH,
+                        {"audit_id": audit_id, "keyword": keyword, "size": size, "radius": radius,
+                         "return_to": f"/console/audits/{audit_id}#reach"},
+                        f"Local reach for {name}")
+
+
 # ── Screenshots ───────────────────────────────────────────────────────────────
 
 SCREENSHOT_MAX_BYTES = 10 * 1024 * 1024

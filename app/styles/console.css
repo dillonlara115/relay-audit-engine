@@ -356,6 +356,24 @@
   .site-checks .ic { @apply w-4 h-4; }
   .tech-shot img { @apply w-full max-w-[260px] border border-line rounded-box block mx-auto; }
 
+  /* Local reach: one square per Maps search, north at the top, the business
+     in the middle. Top three green, 4 to 10 amber, 11 to 20 red, 20+ grey. */
+  .reach-form { @apply flex flex-row flex-wrap items-end gap-2; }
+  .reach-form label { @apply flex flex-col gap-0.5 text-xs text-ink2 font-semibold; }
+  .rgrid { @apply grid gap-1.5 my-3 mx-auto w-full max-w-[420px]; grid-template-columns: repeat(var(--n), 1fr); }
+  .rcell { @apply aspect-square rounded-full grid place-items-center font-display font-bold text-sm no-underline;
+           background: var(--rc); color: var(--color-base-100); }
+  .rcell:hover { @apply no-underline; outline: 2px solid var(--color-base-content); outline-offset: 1px; }
+  .rcell.good { --rc: var(--color-success); }
+  .rcell.ok { --rc: var(--color-warning); }
+  .rcell.poor { --rc: var(--color-error); }
+  .rcell.miss { --rc: var(--color-base-300); color: var(--color-ink2); }
+  .rcell.none { --rc: var(--color-base-200); color: var(--color-ink2); }
+  .rcell.center { box-shadow: 0 0 0 3px var(--color-base-100), 0 0 0 5px var(--color-base-content); }
+  .tech-card .table-wrap table { @apply min-w-0; }
+  .reach-key { @apply flex flex-row flex-wrap justify-center gap-x-3 gap-y-1 text-xs text-ink2; }
+  .reach-key i { @apply inline-block w-2.5 h-2.5 rounded-full align-middle mr-1; background: var(--rc); }
+
   /* A send or reply per row: what happened, then what became of it. */
   .tl { @apply list-none pl-0; }
   .tl li { @apply flex flex-row gap-3 items-start py-2.5 border-b border-line; }

@@ -159,6 +159,9 @@ class Config:
     hunter_monthly_cap: int = field(default_factory=lambda: _int("HUNTER_MONTHLY_CAP", 25))
     # Pages a technical crawl may fetch per site. DataForSEO bills per page.
     onpage_max_pages: int = field(default_factory=lambda: _int("DATAFORSEO_ONPAGE_MAX_PAGES", 100))
+    # Map searches one Local reach run may make. Each grid point is one paid
+    # DataForSEO Maps search; a 7 by 7 grid is 49.
+    reach_max_points: int = field(default_factory=lambda: _int("DATAFORSEO_REACH_MAX_POINTS", 49))
 
     # Pub/Sub
     pubsub_audit_topic: str = field(

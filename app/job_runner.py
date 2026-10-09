@@ -378,7 +378,61 @@ async def run_technical_job(job_id: str, params: Mapping[str, Any]) -> dict[str,
     return {"audit_id": audit_id}
 
 
+# ── local reach: a grid of Maps searches around the business ──────────────────
+
+
+async def run_reach_job(job_id: str, params: Mapping[str, Any]) -> dict[str, Any]:
+    """Every search in a run is paid for, so a failure is recorded on the
+    audit, not raised: a raised job is redelivered and would search, and pay,
+    a second time. A redelivery of a run that already finished does nothing."""
+    from app.config import get_config
+    from app.tools import reach
+
+    audit_id = str(params.get("audit_id") or "")
+    audit = await asyncio.to_thread(store.get_audit, audit_id)
+    if audit is None:
+        raise RuntimeError(f"no audit {audit_id}")
+    if (audit.get("local_reach") or {}).get("job_id") == job_id:
+        return {"audit_id": audit_id}
+    prospect_id = str(audit.get("prospect_id") or "")
+    prospect = await asyncio.to_thread(store.get_prospect, prospect_id) or {}
+    lat, lng = prospect.get("lat"), prospect.get("lng")
+    if not isinstance(lat, (int, float)) or not isinstance(lng, (int, float)):
+        raise RuntimeError("this prospect has no map location on record")
+
+    keyword = params.get("keyword") if params.get("keyword") in reach.KEYWORDS else reach.KEYWORDS[0]
+    size = next((s for s in reach.GRID_SIZES if str(s) == str(params.get("size"))), reach.GRID_SIZES[0])
+    radius = next((r for r in reach.RADII_MILES if str(r) == str(params.get("radius"))), reach.RADII_MILES[1])
+    cap = get_config().reach_max_points
+    while size * size > cap and size > 1:
+        size -= 2
+
+    async def say(line: str) -> None:
+        await asyncio.to_thread(jobs.log, job_id, line)
+
+    await say(f"Searching Google Maps for \"{keyword}\" from {size * size} spots, "
+              f"{radius:g} miles out from the business.")
+    try:
+        result = await reach.run(place_id=prospect_id, domain=str(prospect.get("domain") or ""),
+                                 name=str(prospect.get("business_name") or ""), lat=float(lat),
+                                 lng=float(lng), keyword=keyword, size=size, radius_miles=radius)
+    except reach.ReachUnavailable as exc:
+        await asyncio.to_thread(store.update_audit, audit_id, {"local_reach": {
+            "status": "failed", "error": str(exc), "job_id": job_id, "updated_at": store.utcnow()}})
+        await say(f"Local reach did not run: {exc}")
+        return {"audit_id": audit_id}
+    # Every key is written each run and lists replace whole under a merge, so
+    # a 5 by 5 run leaves nothing of an earlier 7 by 7 behind.
+    await asyncio.to_thread(store.update_audit, audit_id, {"local_reach": {
+        **result, "status": "done", "error": "", "job_id": job_id, "center": {"lat": lat, "lng": lng},
+        "finished_at": store.utcnow()}})
+    await say(f"In the top three at {result['top3']} of {result['answered']} spots, "
+              f"listed at all at {result['found']}. Cost ${result['cost']:.2f}.")
+    return {"audit_id": audit_id}
+
+
 RUNNERS = {
+    jobs.KIND_REACH: run_reach_job,
     jobs.KIND_TECHNICAL: run_technical_job,
     jobs.KIND_SCREENSHOT: run_screenshot_job,
     jobs.KIND_SWEEP: run_sweep_job,

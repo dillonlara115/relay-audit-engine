@@ -190,6 +190,61 @@
   {% endif %}
 </div>
 
+{#- Maps positions on a grid around the business. Console only, like the
+    Technical section: positions are a ranking, and the public report never
+    shows one. -#}
+<div class="pagehead mt-8" id="reach">
+  <div><h2 class="mt-0">Local reach</h2>
+  <p class="muted text-sm">Where they show up in Google Maps across the area around the business, and who shows up instead{% if reach.finished %}. Last run {{ reach.finished }}{% endif %}. For your calls only.</p></div>
+  {% if reach.can_run %}
+  <form class="reach-form" method="post" action="/console/audits/{{ p.audit_id }}/reach"
+        onsubmit="return confirm('Run ' + (this.size.value * this.size.value) + ' Google Maps searches? Each one uses DataForSEO credits.')">
+    {{ csrf_field(csrf) }}
+    <label>Search<select class="select select-sm" name="keyword">{% for k in reach.keywords %}<option value="{{ k }}"{% if k == reach.keyword %} selected{% endif %}>{{ k }}</option>{% endfor %}</select></label>
+    <label>Grid<select class="select select-sm" name="size">{% for s in reach.sizes %}<option value="{{ s }}"{% if s == reach.size %} selected{% endif %}>{{ s }} by {{ s }}</option>{% endfor %}</select></label>
+    <label>Out to<select class="select select-sm" name="radius">{% for r in reach.radii %}<option value="{{ r }}"{% if r == reach.radius_miles %} selected{% endif %}>{{ r }} miles</option>{% endfor %}</select></label>
+    <button class="btn btn-sm" type="submit">{{ icon("refresh") }} Run local reach</button>
+  </form>
+  {% endif %}
+</div>
+
+{% if reach.status == "failed" %}<div class="warn-line" role="status">The last run did not finish: {{ reach.error }}</div>{% endif %}
+{% if reach.has_grid %}
+<div class="tech-grid">
+  <section class="card tech-card" aria-label="Maps positions">
+    <h3>&ldquo;{{ reach.keyword }}&rdquo;, {{ reach.radius_miles }} miles out</h3>
+    <dl class="vitals">
+      <div><dt>In the top three</dt><dd>{{ reach.top3 }} of {{ reach.answered }} spots <span class="muted text-sm">{{ reach.top3_pct }}%</span></dd></div>
+      <div><dt>Listed at all</dt><dd>{{ reach.found }} of {{ reach.answered }} <span class="muted text-sm">{{ reach.found_pct }}%</span></dd></div>
+      <div><dt>Average position</dt><dd>{{ reach.average_rank if reach.average_rank is not none else "not listed" }}</dd></div>
+    </dl>
+    <div class="rgrid" style="--n: {{ reach.size }}" role="img" aria-label="Maps positions on a {{ reach.size }} by {{ reach.size }} grid, north at the top">
+      {% for row in reach.rows %}{% for c in row %}<a class="rcell {{ c.band }}{% if c.center %} center{% endif %}" href="{{ c.href }}" target="_blank" rel="noopener noreferrer" title="{{ c.title }}">{{ c.label }}</a>{% endfor %}{% endfor %}
+    </div>
+    <div class="reach-key"><span><i style="--rc: var(--color-success)"></i>Top 3</span><span><i style="--rc: var(--color-warning)"></i>4 to 10</span><span><i style="--rc: var(--color-error)"></i>11 to 20</span><span><i style="--rc: var(--color-base-300)"></i>Not in the first 20</span><span>Ringed: the business</span></div>
+    <p class="muted text-sm">North is up. Each spot is a real search from that point; click one to open the same search in Google Maps. Cost ${{ "%.2f"|format(reach.cost) }}.</p>
+  </section>
+
+  <section class="card tech-card" aria-label="Who holds the top three">
+    <h3>Who holds the top three</h3>
+    {% if reach.competitors %}
+    {% call table_wrap() %}
+    <thead><tr><th>Business</th><th class="num">Spots</th><th class="num">Rating</th></tr></thead>
+    <tbody>
+    {% for c in reach.competitors %}<tr><td>{{ c.title }}</td><td class="num">{{ c.spots }}</td><td class="num">{% if c.rating is not none %}{{ c.rating }}{% if c.reviews is not none %} <span class="muted text-sm">({{ c.reviews }})</span>{% endif %}{% endif %}</td></tr>{% endfor %}
+    </tbody>{% endcall %}
+    <p class="muted text-sm">Spots: how many of the {{ reach.answered }} searches put them in the top three.</p>
+    {% else %}
+    <p class="muted">No other business came up in the top three.</p>
+    {% endif %}
+  </section>
+</div>
+{% elif reach.can_run %}
+<p class="muted">Not run yet. Pick a search and run local reach to see where they show up in Maps around the business.</p>
+{% else %}
+<p class="muted">No map location on record for this business, so there is nothing to center a grid on.</p>
+{% endif %}
+
 <h2>Score history</h2>
 {% if history_note %}<p class="muted">{{ history_note }}</p>{% endif %}
 {% if history %}

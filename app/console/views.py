@@ -1020,6 +1020,53 @@ def technical_view(audit: Mapping[str, Any], prospect: Mapping[str, Any],
     }
 
 
+def reach_view(audit: Mapping[str, Any], prospect: Mapping[str, Any]) -> dict[str, Any]:
+    """The console's Local reach section: a grid of Maps positions around the
+    business, and who holds the top three instead. Console only."""
+    from urllib.parse import quote
+
+    from app.tools import reach
+
+    r = {"status": "", "error": "", "keyword": reach.KEYWORDS[0], "size": reach.GRID_SIZES[0],
+         "radius_miles": reach.RADII_MILES[1], "points": [], "answered": 0, "top3": 0, "found": 0,
+         "average_rank": None, "competitors": [], "cost": 0.0, **(audit.get("local_reach") or {})}
+    size = int(r["size"] or 0)
+    middle = (size - 1) // 2
+    rows: list[list[dict[str, Any]]] = [[] for _ in range(size)]
+    for pt in sorted(r["points"], key=lambda p: (p.get("row", 0), p.get("col", 0))):
+        rank = pt.get("rank")
+        if pt.get("error"):
+            label, band, note = "?", "none", "This search did not come back."
+        elif rank is None:
+            label, band, note = "20+", "miss", "Not in the first 20."
+        else:
+            label = str(rank)
+            band = "good" if rank <= 3 else "ok" if rank <= 10 else "poor"
+            note = f"Listed {rank}."
+        top = ", ".join(pt.get("top") or [])
+        row = pt.get("row", 0)
+        if 0 <= row < size:
+            rows[row].append({
+                "label": label, "band": band,
+                "center": row == middle and pt.get("col") == middle,
+                "title": note + (f" Top three: {top}." if top else ""),
+                "href": (f"https://www.google.com/maps/search/{quote(str(r['keyword']))}/"
+                         f"@{pt.get('lat')},{pt.get('lng')},13z"),
+            })
+    answered = r["answered"] or 0
+    finished = r.get("finished_at")
+    return {
+        **r,
+        "rows": rows,
+        "has_grid": bool(r["points"]),
+        "top3_pct": round(100 * r["top3"] / answered) if answered else 0,
+        "found_pct": round(100 * r["found"] / answered) if answered else 0,
+        "finished": finished.strftime("%b %d, %Y") if hasattr(finished, "strftime") else "",
+        "can_run": isinstance(prospect.get("lat"), (int, float)) and isinstance(prospect.get("lng"), (int, float)),
+        "keywords": reach.KEYWORDS, "sizes": reach.GRID_SIZES, "radii": reach.RADII_MILES,
+    }
+
+
 REPORT_FLOW_STEPS = ("Draft findings", "Choose three", "Publish report", "First email", "Follow-ups")
 
 
@@ -1290,6 +1337,7 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
 
     tech = technical_view(audit, prospect, evidence or ())
     return _render("prospect.html", title=name, active="batches", csrf=csrf, tech=tech,
+                   reach=reach_view(audit, prospect),
                    evidence_count=len(list(evidence or ())),
                    p=p_vm, f=f_vm, o=o_vm, wf=wf, notes=notes, sections=sections, evidence_html=evidence_html,
                    history=h_vm if len(h_vm) > 1 else [], history_note=history_note,
