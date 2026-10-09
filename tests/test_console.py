@@ -3463,3 +3463,55 @@ def test_buttons_and_inputs_share_one_height():
 def test_badges_never_wrap_inside_their_ground():
     """'Not drafted' broke onto two lines in the call list's Findings column."""
     assert ".badge { @apply whitespace-nowrap; }" in views.theme_css()
+
+
+# ── Drafting findings from the call list ──────────────────────────────────────
+
+
+@pytest.fixture()
+def queued(client, monkeypatch):
+    import app.console.routes as routes
+
+    made = []
+    monkeypatch.setattr(routes.jobs, "create",
+                        lambda kind, params, **kw: made.append((kind, params, kw.get("label"))) or "job-1")
+    return made
+
+
+def _draft(client, csrf, **data):
+    return client.post("/console/draft", data={"csrf": csrf, "batch_id": "b1", **data},
+                       follow_redirects=False)
+
+
+def test_drafting_defaults_to_every_prospect_without_findings(client, queued):
+    csrf = sign_in(client)
+    assert _draft(client, csrf).status_code == 303
+    kind, params, label = queued[0]
+    assert params == {"batch_id": "b1", "top": 0} and "every prospect without them" in label
+
+
+def test_drafting_the_ticked_prospects_sends_exactly_those(client, queued):
+    csrf = sign_in(client)
+    _draft(client, csrf, audit_ids="a3, a7,../etc,a9")
+    assert queued[0][1] == {"batch_id": "b1", "audit_ids": ["a3", "a7", "a9"]}, "ids are validated"
+    assert "3 selected" in queued[0][2]
+
+
+def test_drafting_with_a_selection_that_holds_no_ids_queues_nothing(client, queued):
+    csrf = sign_in(client)
+    r = _draft(client, csrf, audit_ids=" , ../x")
+    assert "notice=not_queued" in r.headers["location"] and queued == []
+
+
+def test_the_call_list_offers_drafting_for_the_ticked_rows():
+    page = _list([_row(1), _row(2, findings_status="approved", report_slug="s")])
+    assert 'id="draft-form"' in page and 'name="audit_ids" id="draft-ids"' in page
+    assert "draftIds.value = ids.join(',')" in page
+    assert "Every prospect without findings (1)" in page, "the approved one is not counted"
+
+
+def test_row_flags_sit_under_the_name_not_in_an_unlabeled_column():
+    page = _list([_row(1, partial=True, partial_sections=["booked"])])
+    assert "<th></th>" not in page
+    name_cell = page.split('href="/console/audits/a1">Roofer 1</a>', 1)[1].split("</td>", 1)[0]
+    assert 'class="row-tags"' in name_cell and ">Partial</span>" in name_cell

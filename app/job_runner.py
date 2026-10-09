@@ -157,8 +157,10 @@ async def run_draft_job(job_id: str, params: Mapping[str, Any]) -> dict[str, Any
     from app.ranker import rank
 
     batch_id = str(params.get("batch_id") or "")
-    top = int(params.get("top") or 10)
+    # top 0 means every prospect on the list that has no findings yet.
+    top = int(params.get("top") if params.get("top") is not None else 10)
     only_audit_id = params.get("only_audit_id")
+    picked = [str(a) for a in params.get("audit_ids") or []]
 
     audits = await asyncio.to_thread(lambda: list(store.audits_for_batch(batch_id)))
     prospects = {}
@@ -167,67 +169,100 @@ async def run_draft_job(job_id: str, params: Mapping[str, Any]) -> dict[str, Any
         if pid and pid not in prospects:
             prospects[pid] = await asyncio.to_thread(store.get_prospect, pid) or {}
     rows = rank(audits, prospects)
-    # "Write talking points" on a single audit page passes only_audit_id, and
-    # must draft for that one company alone. Without this the button silently
-    # drafted the whole batch's top 40, which is a lot more than it promised.
-    rows = [r for r in rows if r.audit_id == only_audit_id] if only_audit_id else rows[:top]
+
+    # "Draft findings" on a single audit page passes only_audit_id, and must
+    # draft for that one company alone. It is the one explicit re-draft.
+    if only_audit_id:
+        rows = [r for r in rows if r.audit_id == only_audit_id]
+    else:
+        # Bulk never overwrites. Findings a person already chose, or a report
+        # already published from them, are the prospect's record: the follow-up
+        # emails read their held-back findings from it. A rerun, or a Pub/Sub
+        # redelivery of this job, skips everything already drafted, so it picks
+        # up where it left off instead of starting again.
+        if picked:
+            wanted = set(picked)
+            rows = [r for r in rows if r.audit_id in wanted]
+        existing = await asyncio.gather(*(asyncio.to_thread(store.get_draft_findings, r.audit_id)
+                                          for r in rows))
+        fresh = []
+        for row, doc in zip(rows, existing):
+            if doc:
+                await asyncio.to_thread(
+                    jobs.log, job_id,
+                    f"{row.business_name}: already has findings ({doc.get('status') or 'draft'}), "
+                    "skipped. Open it to draft again.")
+            else:
+                fresh.append(row)
+        rows = fresh if picked or top <= 0 else fresh[:top]
 
     suppressions = await asyncio.to_thread(store.load_suppressions)
     definitions = {d["code"]: d for d in await asyncio.to_thread(store.all_check_defs)}
 
-    drafted = 0
-    skipped = 0
-    for row in rows:
-        prospect = prospects.get(row.prospect_id) or {}
-        # Rule 3: suppression before every outreach action, drafts included.
-        hit = store.suppression_hit(
-            suppressions, place_id=row.prospect_id, domain=prospect.get("domain"),
-            phone=prospect.get("gbp_phone"), email=prospect.get("owner_email"),
-        )
-        if hit:
-            await asyncio.to_thread(jobs.log, job_id,
-                                    f"{row.business_name}: suppressed ({hit}), no draft")
-            skipped += 1
-            continue
+    counts = {"drafted": 0, "skipped": 0}
+    # A few at once: each draft is one model call, and the whole job has to
+    # finish inside the push subscription's ten minute ack deadline.
+    gate = asyncio.Semaphore(DRAFT_CONCURRENCY)
 
-        checks = await asyncio.to_thread(store.audit_checks, row.audit_id)
-        failures = [
-            {**c, "title": definitions.get(c.get("code"), {}).get("title"),
-             "points": definitions.get(c.get("code"), {}).get("points", 0)}
-            for c in checks if c.get("status") == "fail"
-        ]
-        failures.sort(key=lambda f: -f["points"])
-        # What passed is ground truth the draft may not contradict.
-        passing = [
-            {**c, "title": definitions.get(c.get("code"), {}).get("title")}
-            for c in checks if c.get("status") == "pass"
-        ]
+    async def draft_one(row: Any) -> None:
+        async with gate:
+            counts[await _draft_row(job_id, row, prospects.get(row.prospect_id) or {},
+                                    suppressions, definitions, draft_findings)] += 1
 
-        diagnosis = await draft_findings(
-            business_name=row.business_name, city=row.city or "",
-            failures=failures, passing=passing,
-        )
-        if not diagnosis.ok:
-            await asyncio.to_thread(jobs.log, job_id,
-                                    f"{row.business_name}: no draft ({diagnosis.error})")
-            skipped += 1
-            continue
-
-        await asyncio.to_thread(
-            store.save_draft_findings, row.audit_id,
-            [f.to_dict() for f in diagnosis.findings],
-            needs_review=diagnosis.needs_review, model=diagnosis.model,
-        )
-        flag = " (flagged for review)" if diagnosis.needs_review else ""
-        await asyncio.to_thread(jobs.log, job_id,
-                                f"{row.business_name}: drafted 3 findings{flag}")
-        drafted += 1
+    await asyncio.gather(*(draft_one(r) for r in rows))
+    drafted, skipped = counts["drafted"], counts["skipped"]
 
     await asyncio.to_thread(
         jobs.log, job_id,
         f"Drafted {drafted}, skipped {skipped}. Every one needs a human to approve it.",
     )
     return {"batch_id": batch_id, "drafted": drafted, "skipped": skipped}
+
+
+DRAFT_CONCURRENCY = 4
+
+
+async def _draft_row(job_id: str, row: Any, prospect: Mapping[str, Any],
+                     suppressions: Any, definitions: Mapping[str, Any], draft_findings: Any) -> str:
+    """Draft one prospect's findings. Returns which counter it lands in."""
+    # Rule 3: suppression before every outreach action, drafts included.
+    hit = store.suppression_hit(
+        suppressions, place_id=row.prospect_id, domain=prospect.get("domain"),
+        phone=prospect.get("gbp_phone"), email=prospect.get("owner_email"),
+    )
+    if hit:
+        await asyncio.to_thread(jobs.log, job_id, f"{row.business_name}: suppressed ({hit}), no draft")
+        return "skipped"
+
+    checks = await asyncio.to_thread(store.audit_checks, row.audit_id)
+    failures = [
+        {**c, "title": definitions.get(c.get("code"), {}).get("title"),
+         "points": definitions.get(c.get("code"), {}).get("points", 0)}
+        for c in checks if c.get("status") == "fail"
+    ]
+    failures.sort(key=lambda f: -f["points"])
+    # What passed is ground truth the draft may not contradict.
+    passing = [
+        {**c, "title": definitions.get(c.get("code"), {}).get("title")}
+        for c in checks if c.get("status") == "pass"
+    ]
+
+    diagnosis = await draft_findings(
+        business_name=row.business_name, city=row.city or "",
+        failures=failures, passing=passing,
+    )
+    if not diagnosis.ok:
+        await asyncio.to_thread(jobs.log, job_id, f"{row.business_name}: no draft ({diagnosis.error})")
+        return "skipped"
+
+    await asyncio.to_thread(
+        store.save_draft_findings, row.audit_id,
+        [f.to_dict() for f in diagnosis.findings],
+        needs_review=diagnosis.needs_review, model=diagnosis.model,
+    )
+    flag = " (flagged for review)" if diagnosis.needs_review else ""
+    await asyncio.to_thread(jobs.log, job_id, f"{row.business_name}: drafted 3 findings{flag}")
+    return "drafted"
 
 
 RUNNERS = {

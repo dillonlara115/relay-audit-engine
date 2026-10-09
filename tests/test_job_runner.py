@@ -34,11 +34,15 @@ def _finding(code: str, ordinal: int) -> Finding:
 
 
 class FakeStore:
-    def __init__(self, audits, prospects, checks):
+    def __init__(self, audits, prospects, checks, existing=None):
         self._audits = audits
         self._prospects = prospects
         self._checks = checks
+        self._existing = existing or {}  # audit_id -> findings doc already on record
         self.drafted_for: list[str] = []
+
+    def get_draft_findings(self, audit_id):
+        return self._existing.get(audit_id)
 
     def audits_for_batch(self, batch_id):
         return iter(self._audits)
@@ -117,3 +121,56 @@ def test_without_only_audit_id_drafts_the_top_n(monkeypatch):
 
     assert set(fake.drafted_for) == {"a1", "a2"}
     assert result == {"batch_id": "b1", "drafted": 2, "skipped": 0}
+
+
+# ── Bulk drafting never overwrites ────────────────────────────────────────────
+
+
+def _bulk_env(monkeypatch, n=4, existing=None):
+    names = ["Peak", "Summit", "Ridge", "Crest", "Gable", "Eave"][:n]
+    audits = [_audit(f"a{i}", f"p{i}", f"{name} Roofing") for i, name in enumerate(names, start=1)]
+    failing = [{"code": c, "status": "fail", "note": "n"} for c in ("F1", "F2", "F3")]
+    fake = FakeStore(audits, {f"p{i}": {} for i in range(1, n + 1)},
+                     {f"a{i}": failing for i in range(1, n + 1)}, existing=existing)
+    monkeypatch.setattr(job_runner, "store", fake)
+
+    async def fake_draft_findings(*, business_name, city, failures, passing=()):
+        return Diagnosis(ok=True, findings=(_finding("F1", 1), _finding("F2", 2), _finding("F3", 3)),
+                         model="test")
+    monkeypatch.setattr("app.agents.diagnostician.draft_findings", fake_draft_findings)
+    return fake
+
+
+def test_bulk_skips_prospects_that_already_have_findings(monkeypatch):
+    """Regression: drafting the top 10 again overwrote approved findings on a
+    published prospect, scrambling which finding each follow-up email carries."""
+    fake = _bulk_env(monkeypatch, existing={"a1": {"status": "approved"}, "a2": {"status": "draft"}})
+    result = asyncio.run(job_runner.run_draft_job("job1", {"batch_id": "b1", "top": 0}))
+    assert set(fake.drafted_for) == {"a3", "a4"}
+    assert result["drafted"] == 2
+
+
+def test_top_n_counts_only_prospects_without_findings(monkeypatch):
+    fake = _bulk_env(monkeypatch, existing={"a1": {"status": "approved"}})
+    asyncio.run(job_runner.run_draft_job("job1", {"batch_id": "b1", "top": 2}))
+    assert len(fake.drafted_for) == 2 and "a1" not in fake.drafted_for
+
+
+def test_selected_prospects_are_drafted_and_nothing_else(monkeypatch):
+    fake = _bulk_env(monkeypatch, existing={"a3": {"status": "approved"}})
+    asyncio.run(job_runner.run_draft_job("job1", {"batch_id": "b1", "audit_ids": ["a2", "a3", "a4"]}))
+    assert set(fake.drafted_for) == {"a2", "a4"}, "a3 is selected but already has findings"
+
+
+def test_a_redelivered_job_picks_up_where_it_left_off(monkeypatch):
+    """Pub/Sub redelivers a job that outlives its ack deadline. Skipping what
+    is already drafted makes the second run finish the job, not repeat it."""
+    fake = _bulk_env(monkeypatch, existing={"a1": {"status": "draft"}, "a2": {"status": "draft"}})
+    asyncio.run(job_runner.run_draft_job("job1", {"batch_id": "b1", "top": 0}))
+    assert set(fake.drafted_for) == {"a3", "a4"}
+
+
+def test_drafting_from_one_prospect_page_may_redraft_it(monkeypatch):
+    fake = _bulk_env(monkeypatch, existing={"a2": {"status": "draft"}})
+    asyncio.run(job_runner.run_draft_job("job1", {"batch_id": "b1", "only_audit_id": "a2"}))
+    assert fake.drafted_for == ["a2"]

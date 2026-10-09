@@ -194,6 +194,9 @@
   .tag.bad { @apply badge-error; }
   .tag.dim { @apply badge-ghost; }
   .mail { @apply break-all text-sm; }
+  /* A row's flags sit under its name, each explained on hover. */
+  .row-tags { @apply flex flex-row flex-wrap gap-1 mt-1; }
+  td.namecell { @apply min-w-44; }
 
   /* Progress, the job log, evidence. */
   .bar { @apply progress progress-primary h-2 min-w-20; }

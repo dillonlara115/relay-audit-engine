@@ -188,6 +188,8 @@
     if (bulkExport && exportLink) bulkExport.href = withFilters(exportLink.href) + '&ids=' + ids.join(',');
     var includeIds = document.getElementById('include-ids');
     if (includeIds) includeIds.value = ids.join(',');
+    var draftIds = document.getElementById('draft-ids');
+    if (draftIds) draftIds.value = ids.join(',');
   }
   table.addEventListener('change', function (e) {
     if (e.target && e.target.classList.contains('pick-row')) syncExport();

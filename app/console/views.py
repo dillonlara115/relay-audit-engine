@@ -631,6 +631,7 @@ def render_batch(batch_id: str, rows: Sequence[Mapping[str, Any]],
                    check_options=Markup(_check_filter_options(check_defs)),
                    sweep_label=sweep_label or batch_id, notice=notice,
                    excluded=excluded_vm, excluded_known=excluded_known,
+                   undrafted=sum(1 for r in rows if not r.get("findings_status") and not r.get("report_slug")),
                    export_href=f"/console/batches/{esc(batch_id)}/export.csv?tab={tab}")
 
 

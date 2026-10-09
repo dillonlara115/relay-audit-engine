@@ -198,12 +198,34 @@ async def start_dispatch(request: Request, batch_id: str = Form(...),
                         f"Dispatch {batch_id}")
 
 
+_AUDIT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+DRAFT_MAX = 100  # a sweep's call list; the job drafts a few at a time
+
+
 @router.post("/draft")
-async def start_draft(request: Request, batch_id: str = Form(...),
-                      top: int = Form(10), csrf: str = Form(None)) -> Response:
-    return await _start(request, csrf, jobs.KIND_DRAFT,
-                        {"batch_id": batch_id, "top": max(1, min(int(top), 40))},
-                        f"Draft findings for {batch_id}")
+async def start_draft(request: Request, batch_id: str = Form(...), top: str = Form("all"),
+                      audit_ids: str = Form(""), csrf: str = Form(None)) -> Response:
+    """Draft findings for the prospects ticked on the call list, or for the
+    top N (or all) that have none yet. Prospects with findings are skipped by
+    the job, so this never overwrites anything a person chose."""
+    picked = [a for a in (x.strip() for x in audit_ids.split(",")) if _AUDIT_ID.match(a)][:DRAFT_MAX]
+    if audit_ids.strip():
+        if not picked:
+            return _redirect(_with_notice(_back(request, f"/console/batches/{batch_id}"),
+                                          "not_queued", "Tick at least one prospect."))
+        params = {"batch_id": batch_id, "audit_ids": picked}
+        label = f"Draft findings for {len(picked)} selected"
+    elif top.strip().lower() == "all":
+        params = {"batch_id": batch_id, "top": 0}
+        label = "Draft findings for every prospect without them"
+    else:
+        try:
+            n = max(1, min(int(top), DRAFT_MAX))
+        except ValueError:
+            n = 10
+        params = {"batch_id": batch_id, "top": n}
+        label = f"Draft findings for the top {n} without them"
+    return await _start(request, csrf, jobs.KIND_DRAFT, params, label)
 
 
 # ── Jobs ──────────────────────────────────────────────────────────────────────

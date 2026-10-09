@@ -20,15 +20,19 @@
 <div class="card" id="draft">
   <h3>Draft findings</h3>
   <p class="muted">The model ranks up to six problems per prospect and writes the
-  consequence in plain language. You choose the three the owner reads. Nothing is
-  published by this step.</p>
+  consequence in plain language. You choose the three the owner reads. Prospects that
+  already have findings are skipped, so nothing you approved is overwritten. Nothing is
+  published by this step. To pick prospects yourself, tick them in the list below.</p>
   <form method="post" action="/console/draft">
     {{ csrf_field(csrf) }}
     <input type="hidden" name="batch_id" value="{{ batch_id }}">
-    <label for="top">Top prospects to draft for</label>
+    <label for="top">Draft for</label>
     <div class="controls">
-      <input id="top" type="number" name="top" value="10" min="1" max="40" class="input w-full">
-      <button type="submit" class="btn btn-primary">Draft findings</button>
+      <select id="top" name="top" class="select w-auto">
+        <option value="all" selected>Every prospect without findings ({{ undrafted }})</option>
+        {% for n in (5, 10, 20) %}{% if n < undrafted %}<option value="{{ n }}">The top {{ n }} without findings</option>{% endif %}{% endfor %}
+      </select>
+      <button type="submit" class="btn btn-primary"{% if not undrafted %} disabled{% endif %}>Draft findings</button>
     </div>
   </form>
 </div>
@@ -69,6 +73,15 @@
 <div class="bulkbar" id="bulkbar">
   <span class="muted" id="bulk-count">0 selected</span>
   <a class="btn btn-sm" id="bulk-export" href="{{ export_href }}">{{ icon("download") }} Export selected</a>
+  {% if tab != "excluded" %}
+  <form class="inline" method="post" action="/console/draft" id="draft-form"
+        onsubmit="return confirm('Draft findings for the selected prospects? Any that already have findings are skipped. Nothing is sent or published.')">
+    {{ csrf_field(csrf) }}
+    <input type="hidden" name="batch_id" value="{{ batch_id }}">
+    <input type="hidden" name="audit_ids" id="draft-ids" value="">
+    <button class="btn btn-sm btn-primary" type="submit">{{ icon("pen") }} Draft findings</button>
+  </form>
+  {% endif %}
   {% if tab == "excluded" %}
   <form class="inline" method="post" action="/console/batches/{{ batch_id }}/include" id="include-form"
         onsubmit="return confirm('Audit the selected prospects anyway? The gate\'s reasons stay on record. Nothing is contacted.')">
@@ -109,13 +122,14 @@
 <th data-sort="total">Total<span class="sub">out of 100</span></th><th>Phone</th>
 <th>Contact<span class="sub">who to write to</span></th>
 <th data-sort="outreach">Outreach<span class="sub">four emails, then stop</span></th>
-<th data-sort="findings">Findings</th><th></th><th></th></tr></thead>
+<th data-sort="findings">Findings</th><th><span class="sr-only">Actions</span></th></tr></thead>
 <tbody>
 {% for r in rows %}
 <tr {{ r.attrs }}>
 <td class="pick"><input type="checkbox" class="checkbox checkbox-primary checkbox-sm pick-row" name="pick" value="{{ r.audit_id }}"></td>
 <td class="num">{{ r.rank }}</td>
-<td><a href="/console/audits/{{ r.audit_id }}">{{ r.business_name }}</a><br><span class="muted">{{ r.city }}</span></td>
+<td class="namecell"><a href="/console/audits/{{ r.audit_id }}">{{ r.business_name }}</a><br><span class="muted">{{ r.city }}</span>
+{% if r.tags %}<div class="row-tags">{% for t in r.tags %}<span class="tag{{ ' warn' if t == 'Partial' else '' }}"{% if t in tag_titles %} title="{{ tag_titles[t] }}"{% endif %}>{{ t }}</span>{% endfor %}</div>{% endif %}</td>
 <td>{{ r.chip }}</td>
 <td class="num">{{ r.found }}</td><td class="num">{{ r.chosen }}</td><td class="num">{{ r.booked }}</td>
 <td class="num">{{ r.total }}</td>
@@ -123,7 +137,6 @@
 <td>{{ r.contact }}</td>
 <td>{{ r.outreach }}</td>
 <td>{{ pill(r.findings[0], r.findings[1]) }}</td>
-<td>{% for t in r.tags %}<span class="tag{{ ' warn' if t == 'Partial' else '' }}"{% if t in tag_titles %} title="{{ tag_titles[t] }}"{% endif %}>{{ t }}</span> {% endfor %}</td>
 <td class="rowact">
   <a class="btn btn-ghost btn-sm btn-square" href="/console/audits/{{ r.audit_id }}" title="Open prospect" aria-label="Open prospect">{{ icon("file") }}</a>
   {% if r.report_slug %}<a class="btn btn-ghost btn-sm btn-square" href="/{{ r.report_slug }}" target="_blank" rel="noopener noreferrer" title="Open report" aria-label="Open report">{{ icon("external") }}</a>{% endif %}
@@ -132,7 +145,7 @@
 </td>
 </tr>
 {% else %}
-{{ empty_row(15, 'No audits finished yet. This finishes on its own; check back in a few minutes or watch <a href="/console/jobs">Jobs</a>.'|safe) }}
+{{ empty_row(13, 'No audits finished yet. This finishes on its own; check back in a few minutes or watch <a href="/console/jobs">Jobs</a>.'|safe) }}
 {% endfor %}
 </tbody></table></div>
 {% endif %}
