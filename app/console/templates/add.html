@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% from "_components.html" import page_header %}
+{% block body %}
+{{ page_header("Add a roofer",
+               "One roofer outside a sweep: a referral, someone you met. Find their Google listing, and they get the same audit a sweep prospect gets.",
+               primary_html='<a class="btn btn-ghost" href="/console/batches/manual">Everyone added by hand</a>'|safe) }}
+
+<div class="card">
+  <form method="get" action="/console/add">
+    <label for="q">Business name and town</label>
+    <div class="controls">
+      <input id="q" name="q" type="search" class="input w-full" value="{{ q }}" autocomplete="off"
+             placeholder="Great Dane Roofing, Colorado Springs" required{% if not q %} autofocus{% endif %}>
+      <button type="submit" class="btn btn-primary">{{ icon("search") }} Find on Google Maps</button>
+    </div>
+    <p class="hint">Their name and town works best. The audit starts from their Google listing, so a roofer with no listing can't be added here.</p>
+  </form>
+</div>
+
+{% if error %}
+<div class="warn-line" role="status">{{ error }}</div>
+{% elif q and not rows %}
+<p class="muted">No Google listing matched &ldquo;{{ q }}&rdquo;. Try the name as it appears on Google, or add the town.</p>
+{% endif %}
+
+{% if rows %}
+<h2>Pick the right listing</h2>
+<ul class="pick-list">
+  {% for r in rows %}
+  <li class="pick">
+    <div class="pick-main">
+      <div class="font-semibold">{{ r.name }}{% if r.closed %} <span class="tag warn">Not operating</span>{% endif %}</div>
+      <div class="muted text-sm">{{ r.address }}</div>
+      <div class="pick-facts text-sm">
+        {% if r.rating is not none %}<span>{{ r.rating }} stars{% if r.reviews is not none %}, {{ r.reviews }} reviews{% endif %}</span>{% endif %}
+        {% if r.phone %}<span>{{ r.phone }}</span>{% endif %}
+        {% if r.website %}<a href="{{ r.website }}" target="_blank" rel="noopener noreferrer">{{ r.domain or r.website }}</a>{% else %}<span class="muted">No website on the listing</span>{% endif %}
+        {% if r.maps_uri %}<a href="{{ r.maps_uri }}" target="_blank" rel="noopener noreferrer">{{ icon("external") }} Google Maps</a>{% endif %}
+      </div>
+    </div>
+    <div class="pick-act">
+      {% if r.suppressed %}
+      <span class="tag">Do not contact</span>
+      {% elif r.audit_id %}
+      <a class="btn btn-sm" href="/console/audits/{{ r.audit_id }}">Already a prospect, open</a>
+      {% else %}
+      <form method="post" action="/console/add">
+        {{ csrf_field(csrf) }}<input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="place_id" value="{{ r.place_id }}">
+        <button type="submit" class="btn btn-sm btn-primary">{{ icon("play") }} Add and audit</button>
+      </form>
+      {% endif %}
+    </div>
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

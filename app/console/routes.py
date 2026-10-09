@@ -198,6 +198,87 @@ async def start_dispatch(request: Request, batch_id: str = Form(...),
                         f"Dispatch {batch_id}")
 
 
+# ── One roofer, by hand ───────────────────────────────────────────────────────
+
+MANUAL_BATCH = "manual"
+
+
+async def _matches(q: str) -> list[dict[str, Any]]:
+    """Places matches for what was typed, each with what we already hold."""
+    from app.tools.places import find_business
+
+    records = await find_business(q)
+
+    def known() -> list[dict[str, Any]]:
+        rules = store.load_suppressions()
+        out = []
+        for r in records:
+            have = store.get_prospect(r.place_id) or {}
+            out.append({"record": r, "audit_id": have.get("latest_audit_id") or "",
+                        "suppressed": bool(have.get("suppressed")) or bool(store.suppression_hit(
+                            rules, place_id=r.place_id, domain=r.domain, phone=r.gbp_phone))})
+        return out
+
+    return await asyncio.to_thread(known)
+
+
+@router.get("/add")
+async def add_screen(request: Request, q: str = "") -> Response:
+    """Look up one roofer on Google Maps by name and town, to audit them
+    outside a sweep: a referral, someone met at a supply house."""
+    q = " ".join(q.split())[:200]
+    matches, error = [], ""
+    if q:
+        try:
+            matches = await _matches(q)
+        except Exception as exc:  # noqa: BLE001 - a failed lookup is a line on the page
+            log.warning("places lookup failed: %s", exc)
+            error = "Google Maps did not answer. Try again in a minute."
+    return _page(views.render_add(q=q, matches=matches, error=error, csrf=csrf_token(request),
+                                  notice=_notice(request)))
+
+
+@router.post("/add")
+async def add_prospect(request: Request, q: str = Form(""), place_id: str = Form(""),
+                       csrf: str = Form(None)) -> Response:
+    """Save the business picked from the lookup and audit it, the same audit a
+    sweep runs. The gate is skipped: a person chose this one. Suppression is
+    not. The job comes back to the new prospect page."""
+    if not check_csrf(request, csrf):
+        return Response(status_code=403, content="stale form, reload the page")
+    from app.markets import resolve_market
+    from app.tools.places import prospect_fields
+
+    back = f"/console/add?{urlencode({'q': q})}"
+    # The lookup again, not hidden form fields: it is cached, so it is free,
+    # and nothing about the business comes from the browser.
+    try:
+        found = await _matches(q)
+    except Exception as exc:  # noqa: BLE001
+        return _redirect(_with_notice(back, "not_queued", f"Google Maps did not answer: {exc}"))
+    match = next((m for m in found if m["record"].place_id == place_id), None)
+    if match is None:
+        return _redirect(_with_notice(back, "not_queued", "That business is no longer in the results. Search again."))
+    if match["suppressed"]:
+        return _redirect(_with_notice(back, "not_queued", "That business is on the do-not-contact list."))
+    record = match["record"]
+
+    def save() -> None:
+        have = store.get_prospect(record.place_id) or {}
+        market = resolve_market(f"{record.city or ''}, {record.state or ''}" if record.city else "manual")
+        fields = prospect_fields(record, market_id=have.get("market_id") or store.market_id_for(market.name),
+                                 batch_id=MANUAL_BATCH)
+        fields.update({"source": have.get("source") or "manual", "added_by_hand_at": store.utcnow()})
+        store.upsert_prospect(record.place_id, fields)
+
+    await asyncio.to_thread(save)
+    audit_id = store.audit_doc_id(record.place_id, MANUAL_BATCH)
+    return await _start(request, csrf, jobs.KIND_AUDIT,
+                        {"place_id": record.place_id, "batch_id": MANUAL_BATCH,
+                         "return_to": f"/console/audits/{audit_id}"},
+                        f"Audit {record.business_name}")
+
+
 _AUDIT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 DRAFT_MAX = 100  # a sweep's call list; the job drafts a few at a time
 
@@ -542,7 +623,8 @@ async def batch_screen(batch_id: str, request: Request, tab: str = "all") -> Res
                                     csrf=csrf_token(request), progress=progress,
                                     notice=_notice(request), tab=tab, counts=counts,
                                     excluded=excluded or (), excluded_known=excluded is not None,
-                                    sweep_label=views.scan_title(progress) if progress else None))
+                                    sweep_label=("Added by hand" if batch_id == MANUAL_BATCH else
+                                                 views.scan_title(progress) if progress else None)))
 
 
 @router.post("/batches/{batch_id}/include")
@@ -688,6 +770,8 @@ def _history_for(prospect_id: str) -> list[dict[str, Any]] | None:
             labels[batch_id] = views.scan_title({"batch_id": batch_id, "market": batch.get("label"),
                                                  "started_at": batch.get("created_at")}) \
                 if batch else batch_id
+            if batch_id == MANUAL_BATCH:
+                labels[batch_id] = "Added by hand"
         row["sweep_label"] = labels.get(batch_id, batch_id)
     return rows
 
@@ -734,6 +818,7 @@ async def audit_screen(audit_id: str, request: Request) -> Response:
         mailbox=get_config().outreach_mailbox,
         quo_from=get_config().quo_from,
         deal=deal,
+        sweep_label="Added by hand" if audit.get("batch_id") == MANUAL_BATCH else None,
     ))
 
 

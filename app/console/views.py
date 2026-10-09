@@ -102,6 +102,7 @@ def css_href() -> str:
 # symbol ids without the i- prefix.
 NAV_GROUPS = [
     ("Prospecting", [("/console", "overview", "Overview", "home"),
+                     ("/console/add", "add", "Add a roofer", "pin"),
                      ("/console/leads", "leads", "Leads", "user"),
                      ("/console/batches", "batches", "Sweeps", "list"),
                      ("/console/templates", "templates", "Email templates", "mail")]),
@@ -497,6 +498,24 @@ def render_run(*, csrf: str, markets: Sequence[str], active_jobs: Sequence[Mappi
                    badges={"jobs": len(active_jobs)} if active_jobs else {},
                    markets=list(markets), kpis=kpis, jobs=jobs_vm, sweeps=sweeps_vm,
                    notice=notice)
+
+
+def render_add(*, q: str, matches: Sequence[Mapping[str, Any]], error: str, csrf: str,
+               notice: tuple[str, str] | None = None) -> str:
+    """Look up one roofer by name and town, then pick the right listing."""
+    rows = []
+    for m in matches:
+        r = m["record"]
+        rows.append({
+            "place_id": r.place_id, "name": r.business_name, "address": r.address or "",
+            "website": r.website_url or "", "domain": r.domain or "",
+            "rating": r.rating, "reviews": r.review_count, "maps_uri": r.maps_uri or "",
+            "phone": r.gbp_phone or "",
+            "closed": r.business_status not in (None, "OPERATIONAL"),
+            "audit_id": m.get("audit_id") or "", "suppressed": bool(m.get("suppressed")),
+        })
+    return _render("add.html", title="Add a roofer", active="add", csrf=csrf, notice=notice,
+                   q=q, rows=rows, error=error)
 
 
 def render_job(job: Mapping[str, Any], *, csrf: str,

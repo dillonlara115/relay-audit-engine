@@ -53,6 +53,19 @@
     </div>
   </div>
 
+<div class="card" id="add">
+  <h3>Add one roofer</h3>
+  <p class="muted">A referral or someone you met who isn't in a sweep. Find their Google listing and they get the same audit.</p>
+  <form method="get" action="/console/add">
+    <label for="add-q">Business name and town</label>
+    <div class="controls">
+      <input id="add-q" name="q" type="search" class="input w-full" autocomplete="off"
+             placeholder="Great Dane Roofing, Colorado Springs" required>
+      <button type="submit" class="btn">{{ icon("search") }} Find</button>
+    </div>
+  </form>
+</div>
+
 {% if jobs %}
 <h2>Jobs running</h2>
 {% call table_wrap() %}

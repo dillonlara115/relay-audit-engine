@@ -267,30 +267,7 @@ async def ingest_market(
             domain=record.domain,
             phone=record.gbp_phone,
         )
-        fields: dict[str, Any] = {
-            "business_name": record.business_name,
-            "website_url": record.website_url,
-            "gbp_phone": record.gbp_phone,
-            "address": record.address,
-            "city": record.city,
-            "state": record.state,
-            "postal_code": record.postal_code,
-            "lat": record.lat,
-            "lng": record.lng,
-            "rating": record.rating,
-            "review_count": record.review_count,
-            "primary_type": record.primary_type,
-            "types": record.types,
-            "business_status": record.business_status,
-            "maps_uri": record.maps_uri,
-            "hours_published": record.hours_published,
-            "first_review_at": record.first_review_at,
-            "latest_review_at": record.latest_review_at,
-            "review_sample_size": record.review_sample_size,
-            "domain": record.domain,
-            "market_id": market_id,
-            "latest_batch_id": batch_id,
-        }
+        fields = prospect_fields(record, market_id=market_id, batch_id=batch_id)
         if hit:
             fields["suppressed"] = True
             fields["suppressed_reason"] = hit
@@ -312,3 +289,51 @@ async def ingest_market(
         suppressed=suppressed_count,
         records=survivors,
     )
+
+
+def prospect_fields(record: PlaceRecord, *, market_id: str, batch_id: str) -> dict[str, Any]:
+    """What a prospect document holds from Places, for a sweep or a single add."""
+    return {
+        "business_name": record.business_name,
+        "website_url": record.website_url,
+        "gbp_phone": record.gbp_phone,
+        "address": record.address,
+        "city": record.city,
+        "state": record.state,
+        "postal_code": record.postal_code,
+        "lat": record.lat,
+        "lng": record.lng,
+        "rating": record.rating,
+        "review_count": record.review_count,
+        "primary_type": record.primary_type,
+        "types": record.types,
+        "business_status": record.business_status,
+        "maps_uri": record.maps_uri,
+        "hours_published": record.hours_published,
+        "first_review_at": record.first_review_at,
+        "latest_review_at": record.latest_review_at,
+        "review_sample_size": record.review_sample_size,
+        "domain": record.domain,
+        "market_id": market_id,
+        "latest_batch_id": batch_id,
+    }
+
+
+# ── one business, by hand ─────────────────────────────────────────────────────
+
+FIND_LIMIT = 5
+
+
+async def find_business(query: str, *, limit: int = FIND_LIMIT) -> list[PlaceRecord]:
+    """One Text Search for a business a person names, say "Great Dane Roofing
+    Colorado Springs". The first page only, through the same 30 day cache, so
+    looking it up again to add it costs nothing."""
+    cfg = get_config()
+    cfg.require("places_api_key")
+    query = " ".join(query.split())[:200]
+    if not query:
+        return []
+    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+        payload = await _search_page(client, cfg.places_api_key, query, None)
+    records = [r for r in (flatten_place(raw) for raw in payload.get("places") or []) if r]
+    return records[:limit]
