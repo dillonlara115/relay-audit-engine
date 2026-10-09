@@ -147,6 +147,12 @@ def reach_env(monkeypatch):
         spots = [reach.Spot(0, 0, 1, 1, rank=2)]
         return reach.summarize(spots, keyword=kw["keyword"], size=kw["size"], radius_miles=kw["radius_miles"], cost=0.1)
 
+    from app.store import evidence as evidence_store
+    from app.tools import staticmap
+
+    env["maps"], env["uploads"] = [], []
+    monkeypatch.setattr(staticmap, "fetch", lambda center, zoom: env["maps"].append((center, zoom)) or b"\x89PNG")
+    monkeypatch.setattr(evidence_store, "upload", lambda *a, **kw: env["uploads"].append((a, kw)))
     monkeypatch.setattr(reach, "run", fake_run)
     return env
 
@@ -242,3 +248,103 @@ def test_without_a_map_location_there_is_no_run_button():
 def test_a_failed_run_says_why():
     page = _page({"local_reach": {"status": "failed", "error": "DataForSEO: Payment Required."}})
     assert "The last run did not finish: DataForSEO: Payment Required." in page
+
+
+# ── The map under the grid ────────────────────────────────────────────────────
+
+
+def test_the_centre_is_the_middle_of_the_frame_and_north_is_up():
+    from app.tools import staticmap
+
+    c = (38.25, -104.6)
+    assert staticmap.offset(c, *c, 12) == (50.0, 50.0)
+    x, y = staticmap.offset(c, 38.30, -104.65, 12)
+    assert x < 50 and y < 50, "north-west of the centre is up and to the left"
+
+
+def test_the_zoom_is_the_closest_that_keeps_every_pin_on_the_map():
+    from app.tools import staticmap
+
+    c = (38.25, -104.6)
+    for radius in reach.RADII_MILES:
+        pts = [(p.lat, p.lng) for p in reach.grid(*c, size=7, radius_miles=radius)]
+        zoom = staticmap.fit_zoom(c, pts)
+        inside = lambda z: all(abs(v - 50) <= staticmap.FILL * 50 for p in pts for v in staticmap.offset(c, *p, z))
+        assert inside(zoom) and not inside(zoom + 1)
+    assert staticmap.fit_zoom(c, pts) < staticmap.fit_zoom(c, [(p.lat, p.lng) for p in reach.grid(*c, size=7, radius_miles=3)])
+
+
+def test_a_google_error_is_raised_not_saved_as_the_map(monkeypatch):
+    from app.tools import staticmap
+
+    monkeypatch.setattr(staticmap, "get_config", lambda: Config(places_api_key="k"))
+    sent = []
+
+    def handler(request):
+        sent.append(request.url)
+        return httpx.Response(403, text="This API is not activated on your API project.")
+
+    with pytest.raises(staticmap.MapUnavailable, match="403"):
+        staticmap.fetch((38.25, -104.6), 12, client=httpx.Client(transport=httpx.MockTransport(handler)))
+    assert sent[0].params["zoom"] == "12" and sent[0].params["scale"] == "2"
+    ok = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text="<html>")))
+    with pytest.raises(staticmap.MapUnavailable, match="not an image"):
+        staticmap.fetch((38.25, -104.6), 12, client=ok)
+
+
+def test_without_a_key_no_map_is_asked_for(monkeypatch):
+    from app.tools import staticmap
+
+    monkeypatch.setattr(staticmap, "get_config", lambda: Config(places_api_key=""))
+    with pytest.raises(staticmap.MapUnavailable, match="key"):
+        staticmap.fetch((38.25, -104.6), 12, client=httpx.Client(transport=httpx.MockTransport(
+            lambda r: pytest.fail("no request without a key"))))
+
+
+def test_the_job_saves_the_map_with_the_evidence(reach_env):
+    asyncio.run(job_runner.run_reach_job("j1", {"audit_id": "a1", "size": "5", "radius": "5"}))
+    (center, zoom), = reach_env["maps"]
+    assert center == (38.8, -104.8)
+    (args, kw), = reach_env["uploads"]
+    assert args[:3] == ("p1", "a1", "reach-map.png") and kw["kind"] == "reach_map"
+    assert reach_env["updates"][-1]["local_reach"]["map"] == {"zoom": zoom, "error": ""}
+
+
+def test_a_map_that_fails_still_saves_the_run(reach_env, monkeypatch):
+    from app.tools import staticmap
+
+    def fail(center, zoom):
+        raise staticmap.MapUnavailable("Static Maps returned 403")
+    monkeypatch.setattr(staticmap, "fetch", fail)
+    asyncio.run(job_runner.run_reach_job("j1", {"audit_id": "a1"}))
+    saved = reach_env["updates"][-1]["local_reach"]
+    assert saved["status"] == "done" and "403" in saved["map"]["error"] and not reach_env["uploads"]
+
+
+def views_page(rec, url="https://storage.example/reach-map.png"):
+    from app.console import views
+
+    return views.render_audit(
+        audit={"audit_id": "a1", "batch_id": "b1", "prospect_id": "p1", "report_slug": "x", "local_reach": rec,
+               "scores": {"found": 20, "chosen": 20, "booked": 10, "total": 50}},
+        prospect={"business_name": "Apex", "place_id": "p1", "lat": 38.8, "lng": -104.8},
+        checks=[], definitions={}, findings=None, csrf="t",
+        evidence=[{"kind": "reach_map", "url": url, "gcs_path": "p"}] if url else [])
+
+
+def test_with_a_map_the_pins_sit_on_it_and_open_the_spot():
+    rec = {**_record(), "center": {"lat": 38.8, "lng": -104.8}, "map": {"zoom": 13, "error": ""}}
+    page = views_page(rec)
+    assert 'src="https://storage.example/reach-map.png"' in page
+    assert page.count('class="rpin') == 9 and 'style="left: 50.0%; top: 50.0%"' in page
+    assert 'popovertarget="spot-0-0"' in page and 'id="spot-0-0" popover' in page and "Rival" in page
+    assert 'class="rcell' not in page, "the plain grid is only the fallback"
+
+
+@pytest.mark.parametrize("rec_over, url", [({"map": {"zoom": 13, "error": "403"}}, "u"),
+                                           ({"map": {"zoom": 13, "error": ""}}, None),
+                                           ({}, "u")])
+def test_without_a_good_map_the_plain_grid_shows(rec_over, url):
+    rec = {**_record(), "center": {"lat": 38.8, "lng": -104.8}, **rec_over}
+    page = views_page(rec, url=url)
+    assert 'class="rcell' in page and 'class="rpin' not in page

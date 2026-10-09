@@ -1039,18 +1039,25 @@ def technical_view(audit: Mapping[str, Any], prospect: Mapping[str, Any],
     }
 
 
-def reach_view(audit: Mapping[str, Any], prospect: Mapping[str, Any]) -> dict[str, Any]:
-    """The console's Local reach section: a grid of Maps positions around the
-    business, and who holds the top three instead. Console only."""
+def reach_view(audit: Mapping[str, Any], prospect: Mapping[str, Any],
+               evidence: Sequence[Mapping[str, Any]] = ()) -> dict[str, Any]:
+    """The console's Local reach section: Maps positions around the business,
+    laid over a Google map of the area when the run saved one, and who holds
+    the top three instead. Console only."""
     from urllib.parse import quote
 
-    from app.tools import reach
+    from app.tools import reach, staticmap
 
     r = {"status": "", "error": "", "keyword": reach.KEYWORDS[0], "size": reach.GRID_SIZES[0],
          "radius_miles": reach.RADII_MILES[1], "points": [], "answered": 0, "top3": 0, "found": 0,
          "average_rank": None, "competitors": [], "cost": 0.0, **(audit.get("local_reach") or {})}
     size = int(r["size"] or 0)
     middle = (size - 1) // 2
+    center = r.get("center") or {}
+    zoom = (r.get("map") or {}).get("zoom")
+    map_url = None
+    if zoom and not (r.get("map") or {}).get("error") and center.get("lat") is not None:
+        map_url = next((e.get("url") for e in evidence if e.get("kind") == "reach_map" and e.get("url")), None)
     rows: list[list[dict[str, Any]]] = [[] for _ in range(size)]
     for pt in sorted(r["points"], key=lambda p: (p.get("row", 0), p.get("col", 0))):
         rank = pt.get("rank")
@@ -1064,9 +1071,13 @@ def reach_view(audit: Mapping[str, Any], prospect: Mapping[str, Any]) -> dict[st
             note = f"Listed {rank}."
         top = ", ".join(pt.get("top") or [])
         row = pt.get("row", 0)
+        x = y = None
+        if map_url:
+            x, y = staticmap.offset((center["lat"], center["lng"]), pt.get("lat"), pt.get("lng"), zoom)
         if 0 <= row < size:
             rows[row].append({
-                "label": label, "band": band,
+                "label": label, "band": band, "x": x, "y": y, "note": note,
+                "id": f"spot-{row}-{pt.get('col', 0)}", "top": list(pt.get("top") or []),
                 "center": row == middle and pt.get("col") == middle,
                 "title": note + (f" Top three: {top}." if top else ""),
                 "href": (f"https://www.google.com/maps/search/{quote(str(r['keyword']))}/"
@@ -1077,6 +1088,7 @@ def reach_view(audit: Mapping[str, Any], prospect: Mapping[str, Any]) -> dict[st
     return {
         **r,
         "rows": rows,
+        "map_url": map_url,
         "has_grid": bool(r["points"]),
         "top3_pct": round(100 * r["top3"] / answered) if answered else 0,
         "found_pct": round(100 * r["found"] / answered) if answered else 0,
@@ -1356,7 +1368,7 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
 
     tech = technical_view(audit, prospect, evidence or ())
     return _render("prospect.html", title=name, active="batches", csrf=csrf, tech=tech,
-                   reach=reach_view(audit, prospect),
+                   reach=reach_view(audit, prospect, evidence or ()),
                    evidence_count=len(list(evidence or ())),
                    p=p_vm, f=f_vm, o=o_vm, wf=wf, notes=notes, sections=sections, evidence_html=evidence_html,
                    history=h_vm if len(h_vm) > 1 else [], history_note=history_note,

@@ -381,6 +381,34 @@
   .rcell.none { --rc: var(--color-base-200); color: var(--color-ink2); }
   .rcell.center { box-shadow: 0 0 0 3px var(--color-base-100), 0 0 0 5px var(--color-base-content); }
   .tech-card .table-wrap table { @apply min-w-0; }
+  .reach-wrap { @apply flex flex-row flex-wrap gap-6 items-start mt-3 bg-base-100 border border-line rounded-box px-5 py-4; }
+  .reach-board { @apply min-w-0; flex: 1 1 480px; max-width: 680px; }
+  .reach-side { @apply min-w-0; flex: 1 1 300px; }
+  .reach-side h3 { @apply mt-0; }
+  .reach-stats { @apply grid grid-cols-3 gap-3 my-3; }
+  .reach-stats dt { @apply text-xs text-ink2; }
+  .reach-stats dd { @apply font-semibold; }
+  .reach-stats dd .muted { @apply block font-normal; }
+  .reach-side .table-wrap table { @apply min-w-0; }
+  /* The map, square, with a pin on each spot searched. left and top come
+     from the projection, so the pin's own centre goes on the point. */
+  .rmap { @apply relative w-full aspect-square overflow-hidden rounded-box border border-line mb-3; }
+  .rmap img { @apply absolute inset-0 w-full h-full; }
+  .rpin { @apply absolute grid place-items-center rounded-full font-display font-bold text-sm cursor-pointer border-2;
+          width: clamp(26px, 6.2%, 40px); aspect-ratio: 1; transform: translate(-50%, -50%);
+          background: var(--rc); color: var(--color-base-100); border-color: var(--color-base-100);
+          box-shadow: 0 1px 4px rgb(0 0 0 / 0.35); }
+  .rpin:hover, .rpin:focus-visible { @apply z-10; outline: 2px solid var(--color-base-content); outline-offset: 1px; }
+  .rpin.good { --rc: var(--color-success); }
+  .rpin.ok { --rc: var(--color-warning); }
+  .rpin.poor { --rc: var(--color-error); }
+  .rpin.miss { --rc: var(--color-base-300); color: var(--color-ink2); }
+  .rpin.none { --rc: var(--color-base-200); color: var(--color-ink2); }
+  .rpin.center { box-shadow: 0 0 0 3px var(--color-base-content), 0 1px 4px rgb(0 0 0 / 0.35); }
+  .rpop { @apply bg-base-100 border border-line rounded-box p-4 shadow-lg max-w-sm w-[90vw]; margin: auto; }
+  .rpop::backdrop { background: rgb(0 0 0 / 0.15); }
+  .rpop ol { @apply list-decimal ml-5 text-sm; }
+  .rpop a { @apply inline-flex flex-row items-center gap-1; }
   .reach-key { @apply flex flex-row flex-wrap justify-center gap-x-3 gap-y-1 text-xs text-ink2; }
   .reach-key i { @apply inline-block w-2.5 h-2.5 rounded-full align-middle mr-1; background: var(--rc); }
 

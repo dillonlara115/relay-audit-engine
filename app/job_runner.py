@@ -421,14 +421,34 @@ async def run_reach_job(job_id: str, params: Mapping[str, Any]) -> dict[str, Any
             "status": "failed", "error": str(exc), "job_id": job_id, "updated_at": store.utcnow()}})
         await say(f"Local reach did not run: {exc}")
         return {"audit_id": audit_id}
+    map_record = await _reach_map(prospect_id, audit_id, (float(lat), float(lng)), result["points"], say)
     # Every key is written each run and lists replace whole under a merge, so
     # a 5 by 5 run leaves nothing of an earlier 7 by 7 behind.
     await asyncio.to_thread(store.update_audit, audit_id, {"local_reach": {
         **result, "status": "done", "error": "", "job_id": job_id, "center": {"lat": lat, "lng": lng},
-        "finished_at": store.utcnow()}})
+        "map": map_record, "finished_at": store.utcnow()}})
     await say(f"In the top three at {result['top3']} of {result['answered']} spots, "
               f"listed at all at {result['found']}. Cost ${result['cost']:.2f}.")
     return {"audit_id": audit_id}
+
+
+async def _reach_map(prospect_id: str, audit_id: str, center: tuple[float, float],
+                     points: list[dict[str, Any]], say: Any) -> dict[str, Any]:
+    """The Google map the grid is laid over, saved with the audit's evidence.
+    A map that fails costs the picture, not the run: the page falls back to
+    the plain grid."""
+    from app.store import evidence as evidence_store
+    from app.tools import staticmap
+
+    zoom = staticmap.fit_zoom(center, [(p["lat"], p["lng"]) for p in points])
+    try:
+        image = await asyncio.to_thread(staticmap.fetch, center, zoom)
+        await asyncio.to_thread(evidence_store.upload, prospect_id, audit_id, "reach-map.png", image,
+                                content_type="image/png", code="F8", kind="reach_map")
+    except Exception as exc:  # noqa: BLE001 - the picture is additive
+        await say(f"No map under the grid this time: {str(exc)[:160]}")
+        return {"zoom": zoom, "error": str(exc)[:200]}
+    return {"zoom": zoom, "error": ""}
 
 
 RUNNERS = {

@@ -210,23 +210,39 @@
 
 {% if reach.status == "failed" %}<div class="warn-line" role="status">The last run did not finish: {{ reach.error }}</div>{% endif %}
 {% if reach.has_grid %}
-<div class="tech-grid">
-  <section class="card tech-card" aria-label="Maps positions">
+<section class="reach-wrap" aria-label="Maps positions">
+  <div class="reach-board">
+    {% if reach.map_url %}
+    {#- The map is Google's, the pins are ours, placed on the spot each search
+        ran from. A pin opens what Maps listed there. -#}
+    <div class="rmap">
+      <img src="{{ reach.map_url }}" alt="Google map of the area searched, {{ reach.radius_miles }} miles around the business" width="640" height="640">
+      {% for row in reach.rows %}{% for c in row %}<button type="button" class="rpin {{ c.band }}{% if c.center %} center{% endif %}" style="left: {{ c.x }}%; top: {{ c.y }}%" popovertarget="{{ c.id }}" aria-label="{{ c.title }}">{{ c.label }}</button>{% endfor %}{% endfor %}
+    </div>
+    {% for row in reach.rows %}{% for c in row %}
+    <div class="rpop" id="{{ c.id }}" popover>
+      <div class="font-semibold">{{ c.note }}{% if c.center %} <span class="muted text-sm">At the business.</span>{% endif %}</div>
+      {% if c.top %}<p class="muted text-sm mt-2 mb-1">The top three here:</p><ol>{% for t in c.top %}<li>{{ t }}</li>{% endfor %}</ol>{% endif %}
+      <p class="mt-3 mb-0"><a href="{{ c.href }}" target="_blank" rel="noopener noreferrer">{{ icon("external") }} This search in Google Maps</a></p>
+    </div>
+    {% endfor %}{% endfor %}
+    {% else %}
+    <div class="rgrid" style="--n: {{ reach.size }}" role="img" aria-label="Maps positions on a {{ reach.size }} by {{ reach.size }} grid, north at the top">
+      {% for row in reach.rows %}{% for c in row %}<a class="rcell {{ c.band }}{% if c.center %} center{% endif %}" href="{{ c.href }}" target="_blank" rel="noopener noreferrer" title="{{ c.title }}">{{ c.label }}</a>{% endfor %}{% endfor %}
+    </div>
+    {% endif %}
+    <div class="reach-key"><span><i style="--rc: var(--color-success)"></i>Top 3</span><span><i style="--rc: var(--color-warning)"></i>4 to 10</span><span><i style="--rc: var(--color-error)"></i>11 to 20</span><span><i style="--rc: var(--color-base-300)"></i>Not in the first 20</span><span>Ringed: the business</span></div>
+  </div>
+
+  <div class="reach-side">
     <h3>&ldquo;{{ reach.keyword }}&rdquo;, {{ reach.radius_miles }} miles out</h3>
-    <dl class="vitals">
+    <dl class="reach-stats">
       <div><dt>In the top three</dt><dd>{{ reach.top3 }} of {{ reach.answered }} spots <span class="muted text-sm">{{ reach.top3_pct }}%</span></dd></div>
       <div><dt>Listed at all</dt><dd>{{ reach.found }} of {{ reach.answered }} <span class="muted text-sm">{{ reach.found_pct }}%</span></dd></div>
       <div><dt>Average position</dt><dd>{{ reach.average_rank if reach.average_rank is not none else "not listed" }}</dd></div>
     </dl>
-    <div class="rgrid" style="--n: {{ reach.size }}" role="img" aria-label="Maps positions on a {{ reach.size }} by {{ reach.size }} grid, north at the top">
-      {% for row in reach.rows %}{% for c in row %}<a class="rcell {{ c.band }}{% if c.center %} center{% endif %}" href="{{ c.href }}" target="_blank" rel="noopener noreferrer" title="{{ c.title }}">{{ c.label }}</a>{% endfor %}{% endfor %}
-    </div>
-    <div class="reach-key"><span><i style="--rc: var(--color-success)"></i>Top 3</span><span><i style="--rc: var(--color-warning)"></i>4 to 10</span><span><i style="--rc: var(--color-error)"></i>11 to 20</span><span><i style="--rc: var(--color-base-300)"></i>Not in the first 20</span><span>Ringed: the business</span></div>
-    <p class="muted text-sm">North is up. Each spot is a real search from that point; click one to open the same search in Google Maps. Cost ${{ "%.2f"|format(reach.cost) }}.</p>
-  </section>
 
-  <section class="card tech-card" aria-label="Who holds the top three">
-    <h3>Who holds the top three</h3>
+    <h4 class="sub">Who holds the top three</h4>
     {% if reach.competitors %}
     {% call table_wrap() %}
     <thead><tr><th>Business</th><th class="num">Spots</th><th class="num">Rating</th></tr></thead>
@@ -237,8 +253,9 @@
     {% else %}
     <p class="muted">No other business came up in the top three.</p>
     {% endif %}
-  </section>
-</div>
+    <p class="muted text-sm">North is up. Each pin is a real Maps search run from that spot{% if reach.map_url %}; click one to see who ranked there{% else %}; click one to open the same search in Google Maps{% endif %}. Cost ${{ "%.2f"|format(reach.cost) }}.</p>
+  </div>
+</section>
 {% elif reach.can_run %}
 <p class="muted">Not run yet. Pick a search and run local reach to see where they show up in Maps around the business.</p>
 {% else %}
