@@ -220,6 +220,7 @@ async def run_draft_job(job_id: str, params: Mapping[str, Any]) -> dict[str, Any
 
 
 DRAFT_CONCURRENCY = 4
+_SOURCE_WORDS = {"local_reach": "Local reach", "crawl": "the site crawl", "lighthouse": "the latest Lighthouse test"}
 
 
 async def _draft_row(job_id: str, row: Any, prospect: Mapping[str, Any],
@@ -247,6 +248,13 @@ async def _draft_row(job_id: str, row: Any, prospect: Mapping[str, Any],
         for c in checks if c.get("status") == "pass"
     ]
 
+    # Local reach and the Technical section, when they have been run, add
+    # evidence of their own. See app/agents/extra_evidence.py.
+    from app.agents import extra_evidence
+
+    audit = await asyncio.to_thread(store.get_audit, row.audit_id) or {}
+    failures, passing, sources = extra_evidence.merge(audit, failures, passing)
+
     diagnosis = await draft_findings(
         business_name=row.business_name, city=row.city or "",
         failures=failures, passing=passing,
@@ -258,10 +266,12 @@ async def _draft_row(job_id: str, row: Any, prospect: Mapping[str, Any],
     await asyncio.to_thread(
         store.save_draft_findings, row.audit_id,
         [f.to_dict() for f in diagnosis.findings],
-        needs_review=diagnosis.needs_review, model=diagnosis.model,
+        needs_review=diagnosis.needs_review, model=diagnosis.model, sources=sources,
     )
     flag = " (flagged for review)" if diagnosis.needs_review else ""
-    await asyncio.to_thread(jobs.log, job_id, f"{row.business_name}: drafted 3 findings{flag}")
+    used = f", using {' and '.join(_SOURCE_WORDS[s] for s in sources)}" if sources else ""
+    await asyncio.to_thread(jobs.log, job_id,
+                            f"{row.business_name}: drafted {len(diagnosis.findings)} findings{used}{flag}")
     return "drafted"
 
 

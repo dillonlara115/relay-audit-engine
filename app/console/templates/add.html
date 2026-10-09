@@ -25,20 +25,20 @@
 
 {% if rows %}
 <h2>Pick the right listing</h2>
-<ul class="pick-list">
+<ul class="match-list">
   {% for r in rows %}
-  <li class="pick">
-    <div class="pick-main">
+  <li class="match">
+    <div class="match-main">
       <div class="font-semibold">{{ r.name }}{% if r.closed %} <span class="tag warn">Not operating</span>{% endif %}</div>
       <div class="muted text-sm">{{ r.address }}</div>
-      <div class="pick-facts text-sm">
+      <div class="match-facts text-sm">
         {% if r.rating is not none %}<span>{{ r.rating }} stars{% if r.reviews is not none %}, {{ r.reviews }} reviews{% endif %}</span>{% endif %}
         {% if r.phone %}<span>{{ r.phone }}</span>{% endif %}
         {% if r.website %}<a href="{{ r.website }}" target="_blank" rel="noopener noreferrer">{{ r.domain or r.website }}</a>{% else %}<span class="muted">No website on the listing</span>{% endif %}
         {% if r.maps_uri %}<a href="{{ r.maps_uri }}" target="_blank" rel="noopener noreferrer">{{ icon("external") }} Google Maps</a>{% endif %}
       </div>
     </div>
-    <div class="pick-act">
+    <div class="match-act">
       {% if r.suppressed %}
       <span class="tag">Do not contact</span>
       {% elif r.audit_id %}

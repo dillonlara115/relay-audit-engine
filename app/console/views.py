@@ -734,6 +734,25 @@ def findings_predate_audit(findings: Mapping[str, Any] | None,
         return False
 
 
+def newer_evidence(findings: Mapping[str, Any] | None, audit: Mapping[str, Any]) -> list[str]:
+    """Console-run reports that finished after the findings were drafted, so
+    the draft could not have used them: 'Local reach', 'Technical'."""
+    drafted_at = (findings or {}).get("drafted_at")
+    if drafted_at is None:
+        return []
+    runs = (("Local reach", (audit.get("local_reach") or {}).get("finished_at")),
+            ("Technical", (audit.get("technical") or {}).get("finished_at")),
+            ("Technical", (audit.get("lighthouse") or {}).get("measured_at")))
+    out: list[str] = []
+    for label, when in runs:
+        try:
+            if when is not None and when > drafted_at and label not in out:
+                out.append(label)
+        except TypeError:
+            continue
+    return out
+
+
 def _confirm_attr(text: str) -> Markup:
     """An onsubmit attribute whose string survives any name. json.dumps makes
     the JS literal; esc makes the attribute. The browser undoes the second
@@ -1260,6 +1279,8 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
     # ── findings ──────────────────────────────────────────────────────────
     f_vm = None
     if findings:
+        from app.agents import extra_evidence
+
         pool = list(findings.get("findings") or [])
         selected = [int(o) for o in (findings.get("selected") or [])]
         draft = state == "draft"
@@ -1278,6 +1299,7 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                           "saw": item.get("what_we_saw") or "",
                           "means": item.get("what_it_means") or "",
                           "fix": item.get("what_fixing_takes") or "",
+                          "source": extra_evidence.SOURCE_LABEL.get(str(item.get("code") or ""), ""),
                           "flags": ", ".join(item.get("mechanism_flags") or [])})
         held = max(0, len(pool) - 3)
         thin = ""
@@ -1286,6 +1308,10 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                     f"email{'s' if held else ''} rather than four. There was not enough "
                     "wrong with the site to say something new a fourth time.")
         f_vm = {"draft": draft, "cards": cards, "stale": findings_predate_audit(findings, audit),
+                "newer": newer_evidence(findings, audit),
+                # Once a report is out, its findings feed the follow-ups; a
+                # redraft would pull the ground out from under them.
+                "can_redraft": not audit.get("report_slug"),
                 "needs_review": bool(findings.get("needs_review")),
                 "can_publish": state == "approved" and not audit.get("report_slug"),
                 "thin_note": thin}

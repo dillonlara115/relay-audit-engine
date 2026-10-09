@@ -64,8 +64,12 @@ class FakeStore:
     def audit_checks(self, audit_id):
         return self._checks.get(audit_id, [])
 
-    def save_draft_findings(self, audit_id, findings, *, needs_review, model):
+    def get_audit(self, audit_id):
+        return next((a for a in self._audits if a["audit_id"] == audit_id), None)
+
+    def save_draft_findings(self, audit_id, findings, *, needs_review, model, sources=()):
         self.drafted_for.append(audit_id)
+        self.sources = list(sources)
 
 
 @pytest.fixture(autouse=True)

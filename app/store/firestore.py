@@ -12,7 +12,7 @@ import json
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache
-from typing import Any, Iterable, Iterator, Mapping
+from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 from google.cloud import firestore
 
@@ -452,7 +452,8 @@ def get_audit(audit_id: str) -> dict[str, Any] | None:
 
 
 def save_draft_findings(audit_id: str, findings: list[Mapping[str, Any]],
-                        *, needs_review: bool, model: str | None) -> None:
+                        *, needs_review: bool, model: str | None,
+                        sources: Sequence[str] = ()) -> None:
     """Store the diagnostician's draft. Status is draft until a human approves.
 
     Rule 7: findings are human-selected. Nothing that reads this collection may
@@ -464,6 +465,8 @@ def save_draft_findings(audit_id: str, findings: list[Mapping[str, Any]],
             "status": "draft",
             "needs_review": needs_review,
             "model": model,
+            # Which console-run reports fed the draft: local_reach, crawl, lighthouse.
+            "sources": list(sources),
             "drafted_at": utcnow(),
         })
     )

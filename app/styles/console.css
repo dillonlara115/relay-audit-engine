@@ -139,6 +139,7 @@
   .card { @apply bg-base-100 border border-line rounded-box px-5 py-4 mb-3.5 block; }
   .grid2 { @apply grid gap-3.5; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); }
   .banner { @apply alert alert-warning alert-soft mb-3.5 text-[0.95rem] border-l-4 border-l-primary block; }
+  .banner form { @apply block mt-2; }
   .finding { @apply border border-line border-l-4 border-l-primary bg-base-100 rounded-box px-4 py-3.5 mb-3; }
 
   /* Forms. Every text-like control is 44px tall with 16px type so it is
@@ -358,13 +359,13 @@
 
   /* Add a roofer: the Places matches, one card each, the action on the right. */
   .controls input[type="search"] { @apply flex-1 min-w-60; }
-  .pick-list { @apply list-none p-0 grid gap-2.5; }
-  .pick { @apply flex flex-row flex-wrap items-center gap-3 bg-base-100 border border-line rounded-box px-5 py-4; }
-  .pick-main { @apply flex-1 min-w-60; }
-  .pick-facts { @apply flex flex-row flex-wrap gap-x-4 gap-y-1 mt-1.5; }
-  .pick-facts a { @apply inline-flex flex-row items-center gap-1; }
-  .pick-facts .ic { @apply w-4 h-4; }
-  .pick-act { @apply shrink-0; }
+  .match-list { @apply list-none p-0 grid gap-2.5; }
+  .match { @apply flex flex-row flex-wrap items-center gap-3 bg-base-100 border border-line rounded-box px-5 py-4; }
+  .match-main { @apply flex-1 min-w-60; }
+  .match-facts { @apply flex flex-row flex-wrap gap-x-4 gap-y-1 mt-1.5; }
+  .match-facts a { @apply inline-flex flex-row items-center gap-1; }
+  .match-facts .ic { @apply w-4 h-4; }
+  .match-act { @apply shrink-0; }
 
   /* Local reach: one square per Maps search, north at the top, the business
      in the middle. Top three green, 4 to 10 amber, 11 to 20 red, 20+ grey. */
