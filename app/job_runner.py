@@ -265,7 +265,122 @@ async def _draft_row(job_id: str, row: Any, prospect: Mapping[str, Any],
     return "drafted"
 
 
+# ── retake a screenshot ───────────────────────────────────────────────────────
+
+
+async def run_screenshot_job(job_id: str, params: Mapping[str, Any]) -> dict[str, Any]:
+    """A fresh mobile screenshot of the prospect's homepage, in place of the
+    audit's. Full page by default; "viewport" takes just the first screen,
+    which is the fix when a full-page capture comes out broken (lazy images,
+    a sticky header repeated down the page)."""
+    from app.store import evidence as evidence_store
+    from app.tools.render import render
+
+    audit_id = str(params.get("audit_id") or "")
+    mode = "viewport" if params.get("mode") == "viewport" else "full"
+    audit = await asyncio.to_thread(store.get_audit, audit_id)
+    if audit is None:
+        raise RuntimeError(f"no audit {audit_id}")
+    prospect_id = str(audit.get("prospect_id") or "")
+    prospect = await asyncio.to_thread(store.get_prospect, prospect_id) or {}
+    url = prospect.get("website_url")
+    if not url:
+        raise RuntimeError("this prospect has no website to screenshot")
+
+    await asyncio.to_thread(jobs.log, job_id, f"Rendering {url} on a phone-sized screen "
+                                              f"({'first screen only' if mode == 'viewport' else 'full page'}).")
+    result = await render(url, screenshot=mode, image_format="jpeg")
+    image = result.screenshot() if result.ok else None
+    if not image:
+        raise RuntimeError(f"the renderer could not capture the page: {result.error or 'no image'}")
+    slug = audit.get("report_slug")
+    await asyncio.to_thread(evidence_store.replace_screenshot, prospect_id, audit_id, image,
+                            content_type=result.screenshot_mime, source="retaken", report_slug=slug)
+    await asyncio.to_thread(jobs.log, job_id, f"Saved a new screenshot ({len(image) // 1024} KB)"
+                                              + (", and put it on the published report." if slug else "."))
+    return {"audit_id": audit_id}
+
+
+# ── technical audit: Lighthouse now, and a DataForSEO crawl ───────────────────
+
+# The whole job lives inside one Pub/Sub delivery with a ten minute ack
+# deadline, and Lighthouse alone can take two. A crawl still running after this
+# is left running: the prospect page offers Check again, which reads the
+# finished summary without starting, and paying for, another crawl.
+TECHNICAL_POLL_SECONDS = 300
+TECHNICAL_POLL_EVERY = 15
+
+
+async def run_technical_job(job_id: str, params: Mapping[str, Any]) -> dict[str, Any]:
+    import time
+
+    from app.config import get_config
+    from app.pipeline import save_lighthouse
+    from app.tools import onpage
+    from app.tools.pagespeed import analyze
+
+    audit_id = str(params.get("audit_id") or "")
+    audit = await asyncio.to_thread(store.get_audit, audit_id)
+    if audit is None:
+        raise RuntimeError(f"no audit {audit_id}")
+    prospect_id = str(audit.get("prospect_id") or "")
+    prospect = await asyncio.to_thread(store.get_prospect, prospect_id) or {}
+    url, domain = prospect.get("website_url"), prospect.get("domain")
+    if not url:
+        raise RuntimeError("this prospect has no website to test")
+
+    async def say(line: str) -> None:
+        await asyncio.to_thread(jobs.log, job_id, line)
+
+    await say(f"Running Google Lighthouse on {url} as a phone.")
+    psi = await analyze(url, fresh=True)
+    if psi.ok:
+        await save_lighthouse(prospect_id, audit_id, psi)
+        await say(f"Lighthouse: performance {psi.performance_score}, accessibility {psi.accessibility_score}, "
+                  f"best practices {psi.best_practices_score}, SEO {psi.seo_score}.")
+    else:
+        await say(f"Lighthouse did not finish: {psi.error}")
+
+    if not domain:
+        await say("No domain on record, so no crawl.")
+        return {"audit_id": audit_id}
+    max_pages = get_config().onpage_max_pages
+    try:
+        task_id = await asyncio.to_thread(onpage.start, str(domain), max_pages=max_pages)
+    except onpage.OnPageUnavailable as exc:
+        # Recorded, not raised: a redelivered job would post, and pay for,
+        # another crawl.
+        await asyncio.to_thread(store.update_audit, audit_id, {"technical": {
+            "status": "failed", "error": str(exc), "updated_at": store.utcnow()}})
+        await say(f"Crawl not started: {exc}")
+        return {"audit_id": audit_id}
+    await asyncio.to_thread(store.update_audit, audit_id, {"technical": {
+        "status": "crawling", "task_id": task_id, "max_pages": max_pages, "error": None,
+        "started_at": store.utcnow()}})
+    await say(f"Crawling {domain}, up to {max_pages} pages.")
+
+    deadline = time.monotonic() + TECHNICAL_POLL_SECONDS
+    while time.monotonic() < deadline:
+        await asyncio.sleep(TECHNICAL_POLL_EVERY)
+        try:
+            result = await asyncio.to_thread(onpage.summary, task_id)
+        except onpage.OnPageUnavailable as exc:
+            await say(f"Could not read the crawl yet: {exc}")
+            continue
+        if result is not None:
+            await asyncio.to_thread(store.update_audit, audit_id, {"technical": {
+                **onpage.distil(result), "status": "done", "task_id": task_id,
+                "finished_at": store.utcnow()}})
+            await say("Crawl finished.")
+            return {"audit_id": audit_id}
+    await say("Still crawling. The prospect page has Check again, which picks up the results "
+              "without starting another crawl.")
+    return {"audit_id": audit_id}
+
+
 RUNNERS = {
+    jobs.KIND_TECHNICAL: run_technical_job,
+    jobs.KIND_SCREENSHOT: run_screenshot_job,
     jobs.KIND_SWEEP: run_sweep_job,
     jobs.KIND_DISPATCH: run_dispatch_job,
     jobs.KIND_AUDIT: run_audit_job,

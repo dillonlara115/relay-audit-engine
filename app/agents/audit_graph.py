@@ -231,6 +231,7 @@ class ScoreAgent(BaseAgent):
                 site_facts=state["site_facts"],
                 crawl_error=state.get("crawl_error"),
                 render=state.get("render"),
+                psi=state.get("psi"),
             )
         yield _note(
             self.name,
@@ -318,6 +319,7 @@ async def audit_via_graph(
             definitions=definitions, crawl_error=crawl_error,
             pages_crawled=len(holder["site_facts"].pages),
             render=holder.get("render"),
+            psi=holder.get("psi"),
             landing_url=(holder["site_facts"].homepage.url
                          if holder["site_facts"].homepage else None),
         )

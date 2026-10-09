@@ -29,7 +29,7 @@ import re
 from typing import Any, Mapping
 from urllib.parse import parse_qsl, urlencode, urlparse
 
-from fastapi import APIRouter, Form, Request, Response
+from fastapi import APIRouter, File, Form, Request, Response, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from app import jobs
@@ -777,10 +777,128 @@ async def draft_one(audit_id: str, request: Request, csrf: str = Form(None)) -> 
     audit = await asyncio.to_thread(store.get_audit, audit_id)
     if audit is None:
         return Response(status_code=404)
+    name = await _business_name(audit)
     return await _start(request, csrf, jobs.KIND_DRAFT,
                         {"batch_id": audit.get("batch_id"), "top": 40,
-                         "only_audit_id": audit_id},
-                        "Draft findings")
+                         "only_audit_id": audit_id,
+                         # The job page sends the operator back here when it
+                         # finishes, not to the call list.
+                         "return_to": f"/console/audits/{audit_id}#findings"},
+                        f"Draft findings for {name}")
+
+
+async def _business_name(audit: Mapping[str, Any]) -> str:
+    prospect = await asyncio.to_thread(store.get_prospect, str(audit.get("prospect_id") or "")) or {}
+    return str(prospect.get("business_name") or "this prospect")
+
+
+# ── Technical audit ───────────────────────────────────────────────────────────
+
+
+@router.post("/audits/{audit_id}/technical")
+async def run_technical(audit_id: str, request: Request, csrf: str = Form(None)) -> Response:
+    """Lighthouse afresh, then a DataForSEO crawl. A crawl takes minutes, so
+    this is a job, and it comes back to the Technical section."""
+    audit = await asyncio.to_thread(store.get_audit, audit_id)
+    if audit is None:
+        return Response(status_code=404)
+    name = await _business_name(audit)
+    return await _start(request, csrf, jobs.KIND_TECHNICAL,
+                        {"audit_id": audit_id, "return_to": f"/console/audits/{audit_id}#technical"},
+                        f"Technical audit for {name}")
+
+
+@router.post("/audits/{audit_id}/technical/check")
+async def check_technical(audit_id: str, request: Request, csrf: str = Form(None)) -> Response:
+    """Read a crawl that was still running when its job ended. Starts nothing
+    and spends nothing; it reads the summary of the crawl already paid for."""
+    if not check_csrf(request, csrf):
+        return Response(status_code=403, content="stale form, reload the page")
+    from app.tools import onpage
+
+    def check() -> tuple[str, str]:
+        audit = store.get_audit(audit_id) or {}
+        task_id = (audit.get("technical") or {}).get("task_id")
+        if not task_id:
+            return "technical_pending", "No crawl on record. Run the technical audit first."
+        try:
+            result = onpage.summary(str(task_id))
+        except onpage.OnPageUnavailable as exc:
+            return "technical_pending", str(exc)
+        if result is None:
+            return "technical_pending", "Still crawling. Try again in a minute or two."
+        store.update_audit(audit_id, {"technical": {**onpage.distil(result), "status": "done",
+                                                    "finished_at": store.utcnow()}})
+        return "technical_done", "Crawl results are in."
+
+    code, detail = await asyncio.to_thread(check)
+    return _redirect(_with_notice(f"/console/audits/{audit_id}", code, detail) + "#technical")
+
+
+# ── Screenshots ───────────────────────────────────────────────────────────────
+
+SCREENSHOT_MAX_BYTES = 10 * 1024 * 1024
+# Checked against the file's own first bytes, not the name or the browser's
+# claim: an upload is stored and then shown on a public report.
+_IMAGE_MAGIC = ((b"\x89PNG\r\n\x1a\n", "image/png"), (b"\xff\xd8\xff", "image/jpeg"))
+
+
+def _image_type(data: bytes) -> str | None:
+    for magic, mime in _IMAGE_MAGIC:
+        if data.startswith(magic):
+            return mime
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+@router.post("/audits/{audit_id}/screenshot/retake")
+async def retake_screenshot(audit_id: str, request: Request, mode: str = Form("full"),
+                            csrf: str = Form(None)) -> Response:
+    """Queue a fresh mobile screenshot of the homepage. A render takes longer
+    than a page request may, so it runs as a job and comes back here."""
+    audit = await asyncio.to_thread(store.get_audit, audit_id)
+    if audit is None:
+        return Response(status_code=404)
+    name = await _business_name(audit)
+    return await _start(request, csrf, jobs.KIND_SCREENSHOT,
+                        {"audit_id": audit_id, "mode": "viewport" if mode == "viewport" else "full",
+                         "return_to": f"/console/audits/{audit_id}#evidence"},
+                        f"Retake screenshot for {name}")
+
+
+@router.post("/audits/{audit_id}/screenshot/upload")
+async def upload_screenshot(audit_id: str, request: Request, file: UploadFile = File(...),
+                            csrf: str = Form(None)) -> Response:
+    """Replace the audit's screenshot with one a person took. PNG, JPEG or
+    WebP, at most 10 MB. On a published report it replaces that one too."""
+    if not check_csrf(request, csrf):
+        return Response(status_code=403, content="stale form, reload the page")
+    back = f"/console/audits/{audit_id}"
+    data = await file.read(SCREENSHOT_MAX_BYTES + 1)
+    if len(data) > SCREENSHOT_MAX_BYTES:
+        return _redirect(_with_notice(back, "screenshot_rejected", "The file is over 10 MB.") + "#evidence")
+    mime = _image_type(data)
+    if not mime:
+        return _redirect(_with_notice(back, "screenshot_rejected",
+                                      "That file is not a PNG, JPEG or WebP image.") + "#evidence")
+
+    def save() -> str:
+        from app.store import evidence as evidence_store
+
+        audit = store.get_audit(audit_id)
+        if audit is None:
+            return "missing"
+        evidence_store.replace_screenshot(str(audit.get("prospect_id") or ""), audit_id, data,
+                                          content_type=mime, source="uploaded",
+                                          report_slug=audit.get("report_slug"))
+        return "on the published report too" if audit.get("report_slug") else "saved"
+
+    outcome = await asyncio.to_thread(save)
+    if outcome == "missing":
+        return Response(status_code=404)
+    detail = f"{len(data) // 1024} KB, {outcome}."
+    return _redirect(_with_notice(back, "screenshot_replaced", detail) + "#evidence")
 
 
 @router.post("/audits/{audit_id}/reaudit")

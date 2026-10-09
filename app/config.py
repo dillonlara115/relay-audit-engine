@@ -157,6 +157,8 @@ class Config:
     # monthly cap; 25 is the free plan. See app/tools/hunter.py.
     hunter_api_key: str = field(default_factory=lambda: _str("HUNTER_API_KEY"))
     hunter_monthly_cap: int = field(default_factory=lambda: _int("HUNTER_MONTHLY_CAP", 25))
+    # Pages a technical crawl may fetch per site. DataForSEO bills per page.
+    onpage_max_pages: int = field(default_factory=lambda: _int("DATAFORSEO_ONPAGE_MAX_PAGES", 100))
 
     # Pub/Sub
     pubsub_audit_topic: str = field(
@@ -224,6 +226,7 @@ _ENV_NAME = {
     "outreach_text_daily_cap": "OUTREACH_TEXT_DAILY_CAP",
     "hunter_api_key": "HUNTER_API_KEY",
     "hunter_monthly_cap": "HUNTER_MONTHLY_CAP",
+    "onpage_max_pages": "DATAFORSEO_ONPAGE_MAX_PAGES",
 }
 
 

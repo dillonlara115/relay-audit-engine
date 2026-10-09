@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import timedelta
 from functools import lru_cache
-from typing import Any
+from typing import Any, Mapping
 
 import google.auth
 from google.auth.transport import requests as ga_requests
@@ -72,6 +72,7 @@ def upload(
     content_type: str,
     code: str,
     kind: str,
+    extra: Mapping[str, Any] | None = None,
 ) -> EvidenceRef:
     """Store one artifact and record it under the audit. Returns the reference."""
     cfg = get_config()
@@ -90,9 +91,42 @@ def upload(
             "content_type": content_type,
             "size_bytes": len(payload),
             "captured_at": store.utcnow(),
+            **dict(extra or {}),
         }
     )
     return EvidenceRef(gcs_path=path, kind=kind, code=code)
+
+
+_SCREENSHOT_EXT = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
+
+
+def replace_screenshot(prospect_id: str, audit_id: str, payload: bytes, *, content_type: str,
+                       source: str, report_slug: str | None = None) -> str:
+    """Put a new homepage screenshot in place of the audit's current one.
+
+    A person chose this one, by retaking it or uploading it, because the
+    captured one was wrong. So unlike a re-audit, which must never swap a
+    published report's screenshot behind its back, this one goes onto the
+    report too: the frozen copy is replaced along with the live one.
+    Returns the new storage path.
+    """
+    ext = _SCREENSHOT_EXT.get(content_type)
+    if not ext:
+        raise ValueError(f"not a screenshot type: {content_type}")
+    parent = store.get_client().collection(store.AUDITS).document(audit_id).collection(store.EVIDENCE)
+    name = f"homepage.{ext}"
+    # One screenshot per audit. A png replacing a jpg would otherwise leave
+    # both, and the report takes whichever it meets first.
+    for snap in parent.stream():
+        row = snap.to_dict() or {}
+        if row.get("kind") == "screenshot" and snap.id != name:
+            snap.reference.delete()
+    ref = upload(prospect_id, audit_id, name, payload, content_type=content_type,
+                 code="C17", kind="screenshot", extra={"source": source})
+    if report_slug:
+        frozen = freeze_for_report(ref.gcs_path, report_slug)
+        store.update_audit(audit_id, {"report_screenshot_path": frozen})
+    return ref.gcs_path
 
 
 def freeze_for_report(gcs_path: str, slug: str) -> str:

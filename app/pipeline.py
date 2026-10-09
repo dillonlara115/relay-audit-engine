@@ -524,6 +524,7 @@ async def persist_audit(
     pages_crawled: int,
     render: RenderResult | None = None,
     landing_url: str | None = None,
+    psi: PsiResult | None = None,
 ) -> str:
     """One write path for an audit, whoever ran it. The ADK graph and the plain
     pipeline must be indistinguishable in Firestore, or resumption and ranking
@@ -560,6 +561,8 @@ async def persist_audit(
                     store.update_audit, audit_id,
                     {"evidence_error": f"{type(exc).__name__}: {exc}"[:200]},
                 )
+    if psi is not None and psi.ok:
+        await save_lighthouse(place_id, audit_id, psi)
     await asyncio.to_thread(
         store.update_audit,
         audit_id,
@@ -658,6 +661,7 @@ async def audit_one(
             definitions=definitions, crawl_error=crawl_error,
             pages_crawled=len(ctx.site.pages), render=render_result,
             landing_url=_canonical_homepage(crawl) if crawl is not None else None,
+            psi=psi_result,
         )
 
     return AuditOutcome(
@@ -668,3 +672,40 @@ async def audit_one(
         definitions=definitions,
         crawl_error=crawl_error,
     )
+
+
+async def save_lighthouse(place_id: str, audit_id: str, psi: PsiResult) -> None:
+    """The console's Technical section: every Lighthouse category, the
+    failing items worth naming, the live PageSpeed link, and Google's own
+    screenshot as evidence. Never shown on the public report."""
+    import base64
+
+    await asyncio.to_thread(store.update_audit, audit_id, {"lighthouse": lighthouse_record(psi)})
+    if not psi.screenshot_b64:
+        return
+    from app.store import evidence as evidence_store
+
+    try:
+        await asyncio.to_thread(
+            evidence_store.upload, place_id, audit_id, "lighthouse.jpg",
+            base64.b64decode(psi.screenshot_b64), content_type="image/jpeg",
+            code="C4", kind="lighthouse",
+        )
+    except Exception as exc:  # noqa: BLE001 - evidence is additive, not fatal
+        await asyncio.to_thread(store.update_audit, audit_id,
+                                {"evidence_error": f"{type(exc).__name__}: {exc}"[:200]})
+
+
+def lighthouse_record(psi: PsiResult) -> dict[str, Any]:
+    """What the audit document keeps from a PageSpeed run: no screenshot,
+    which lives in Cloud Storage, and nothing that would bloat the doc."""
+    return {
+        "strategy": psi.strategy, "url": psi.final_url or psi.url, "psi_url": psi.report_url,
+        "scores": {"performance": psi.performance_score, "accessibility": psi.accessibility_score,
+                   "best_practices": psi.best_practices_score, "seo": psi.seo_score},
+        "metrics": {"lcp_ms": psi.lcp_ms, "lcp_source": psi.lcp_source, "fcp_ms": psi.fcp_ms,
+                    "cls": psi.cls, "tbt_ms": psi.tbt_ms, "speed_index_ms": psi.speed_index_ms},
+        "issues": [dict(i) for i in psi.issues],
+        "measured_at": store.utcnow(),
+    }
+

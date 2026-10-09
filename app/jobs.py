@@ -38,6 +38,8 @@ KIND_SWEEP = "sweep"
 KIND_DISPATCH = "dispatch"
 KIND_AUDIT = "audit"
 KIND_DRAFT = "draft"
+KIND_SCREENSHOT = "screenshot"
+KIND_TECHNICAL = "technical"
 
 # A sweep of 120 prospects runs about five minutes. A dispatch that waits on a
 # full batch of audits can run much longer, so the lease is generous and renewed.

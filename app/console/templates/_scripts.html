@@ -41,6 +41,10 @@
         log.scrollTop = log.scrollHeight;
         if (j.status === 'done' || j.status === 'failed') {
           if (done) { done.style.display = 'block'; }
+          // A job started from a prospect's page returns there when it
+          // succeeds; a failure stays here so its log can be read.
+          var back = document.body.dataset.return;
+          if (j.status === 'done' && back) { window.location.href = back; return; }
           window.location.reload();
           return;
         }

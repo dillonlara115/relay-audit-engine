@@ -32,6 +32,9 @@
     </div>
   </form>
 </div>
+{% elif job.followup == "return" %}
+<div class="card"><h3>Done</h3>
+<p><a class="btn btn-primary" href="{{ job.return_to }}">Back to the prospect</a></p></div>
 {% elif job.followup == "batch" %}
 <div class="card"><h3>Call list</h3>
 <p><a href="/console/batches/{{ job.batch_id }}">Open call list</a></p></div>

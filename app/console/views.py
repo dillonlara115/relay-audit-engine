@@ -135,6 +135,10 @@ NOTICES = {
     "text_not_sent": "Text not sent.",
     "stage_set": "Stage updated.",
     "hunter_done": "Hunter search finished.",
+    "screenshot_replaced": "Screenshot replaced.",
+    "technical_done": "Technical audit updated.",
+    "technical_pending": "Technical audit not ready.",
+    "screenshot_rejected": "Screenshot not replaced.",
     "hunter_failed": "Hunter search did not run.",
     "stage_rejected": "Stage not changed.",
     "quo_added": "Added to Quo.",
@@ -501,8 +505,16 @@ def render_job(job: Mapping[str, Any], *, csrf: str,
     status = job.get("status", "queued")
     result = job.get("result") or {}
     job_id = str(job.get("job_id") or "")
+    params = job.get("params") or {}
+    # A job started from one prospect's page goes back to that page. Only an
+    # internal console path is honored: this lands in a redirect.
+    return_to = str(params.get("return_to") or "")
+    if not (return_to.startswith("/console/") and "//" not in return_to):
+        return_to = ""
     followup = None
-    if status == "done" and result.get("batch_id"):
+    if status == "done" and return_to:
+        followup = "return"
+    elif status == "done" and result.get("batch_id"):
         followup = "sweep" if job.get("kind") == "sweep" else "batch"
     vm = {
         "job_id": job_id,
@@ -515,11 +527,13 @@ def render_job(job: Mapping[str, Any], *, csrf: str,
         "eligible": result.get("eligible", 0),
         "batch_id": result.get("batch_id") or "",
         "market": (job.get("params") or {}).get("market") or "",
+        "return_to": return_to,
     }
     live = status in ("queued", "running")
     script = _env.get_template("_scripts.html").module.poll() if live else Markup("")
+    attrs = f'data-job="{esc(job_id)}"' + (f' data-return="{esc(return_to)}"' if return_to else "")
     return _render("job.html", title=f"Job {job_id}", active="jobs", csrf=csrf, job=vm,
-                   body_attrs=Markup(f'data-job="{esc(job_id)}"'), script=script,
+                   body_attrs=Markup(attrs), script=script,
                    notice=notice)
 
 
@@ -948,6 +962,64 @@ def variable_menu(values: Mapping[str, str] | None = None) -> list[dict[str, Any
     return out
 
 
+_LH_CATEGORIES = (("performance", "Performance"), ("accessibility", "Accessibility"),
+                  ("best_practices", "Best practices"), ("seo", "SEO"))
+_LH_ISSUE_GROUP = {"performance": "Performance", "accessibility": "Accessibility",
+                   "best-practices": "Best practices", "seo": "SEO"}
+
+
+def _secs(ms: Any) -> str:
+    return f"{ms / 1000:.1f} s" if isinstance(ms, (int, float)) else "n/a"
+
+
+def technical_view(audit: Mapping[str, Any], prospect: Mapping[str, Any],
+                   evidence: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """The console's Technical section: Lighthouse as Google measured it on a
+    phone, and the DataForSEO crawl when one has been run. Console only."""
+    from app.tools.pagespeed import psi_page_url
+
+    lh = audit.get("lighthouse") or {}
+    scores = lh.get("scores") or {}
+
+    def band(v: Any) -> str:
+        if not isinstance(v, (int, float)):
+            return "none"
+        return "good" if v >= 90 else "ok" if v >= 50 else "poor"
+
+    metrics = lh.get("metrics") or {}
+    cls = metrics.get("cls")
+    issues: dict[str, list[dict[str, str]]] = {}
+    for item in lh.get("issues") or []:
+        issues.setdefault(_LH_ISSUE_GROUP.get(item.get("category"), "Other"), []).append(item)
+    measured = lh.get("measured_at")
+    site = prospect.get("website_url") or ""
+
+    crawl = {"status": "", "health": None, "pages_crawled": 0, "cms": "", "site": [], "issues": [],
+             "error": "", "max_pages": 0, **(audit.get("technical") or {})}
+    for key in ("started_at", "finished_at"):
+        when = crawl.get(key)
+        crawl[key] = when.strftime("%b %d") if hasattr(when, "strftime") else ""
+    return {
+        "has_lighthouse": bool(lh),
+        "gauges": [{"label": label, "value": scores.get(key), "band": band(scores.get(key))}
+                   for key, label in _LH_CATEGORIES],
+        "metrics": [
+            ("Largest paint", _secs(metrics.get("lcp_ms")),
+             "real visitors" if metrics.get("lcp_source") == "field" else "simulated phone"),
+            ("First paint", _secs(metrics.get("fcp_ms")), ""),
+            ("Speed index", _secs(metrics.get("speed_index_ms")), ""),
+            ("Blocking time", f"{round(metrics['tbt_ms'])} ms" if isinstance(metrics.get("tbt_ms"), (int, float)) else "n/a", ""),
+            ("Layout shift", f"{cls:.3f}" if isinstance(cls, (int, float)) else "n/a", ""),
+        ],
+        "issues": list(issues.items()),
+        "psi_url": lh.get("psi_url") or (psi_page_url(site) if site else ""),
+        "measured": measured.strftime("%b %d, %Y") if hasattr(measured, "strftime") else "",
+        "shot": next((e.get("url") for e in evidence if e.get("kind") == "lighthouse" and e.get("url")), None),
+        "crawl": crawl,
+        "can_run": bool(site),
+    }
+
+
 REPORT_FLOW_STEPS = ("Draft findings", "Choose three", "Publish report", "First email", "Follow-ups")
 
 
@@ -1166,8 +1238,12 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
     def evidence_item(e: Mapping[str, Any]) -> str:
         url = e.get("url")
         kb = round((e.get("size_bytes") or 0) / 1024)
+        when = e.get("captured_at")
+        stamp = when.strftime("%b %d") if hasattr(when, "strftime") else ""
+        origin = {"retaken": f"retaken {stamp}", "uploaded": f"uploaded {stamp}"}.get(
+            str(e.get("source") or ""), "captured during the audit")
         caption = (f'<p class="muted evidence-cap">{esc(e.get("kind"))} '
-                   f'&middot; {kb} KB captured during the audit</p>')
+                   f'&middot; {kb} KB {esc(origin)}</p>')
         if url and e.get("kind") == "screenshot":
             return (f'<a href="{esc(url)}" target="_blank" rel="noopener noreferrer">'
                     f'<img class="evidence-shot" src="{esc(url)}" '
@@ -1212,7 +1288,8 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                             findings_doc=findings, touches=touches, replies=replies,
                             report_url=report_url, intent_labels=_outreach.INTENT_LABELS)
 
-    return _render("prospect.html", title=name, active="batches", csrf=csrf,
+    tech = technical_view(audit, prospect, evidence or ())
+    return _render("prospect.html", title=name, active="batches", csrf=csrf, tech=tech,
                    evidence_count=len(list(evidence or ())),
                    p=p_vm, f=f_vm, o=o_vm, wf=wf, notes=notes, sections=sections, evidence_html=evidence_html,
                    history=h_vm if len(h_vm) > 1 else [], history_note=history_note,

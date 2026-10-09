@@ -113,6 +113,83 @@
 <p class="muted">Nothing drafted yet. Start from Report and outreach above.</p>
 {% endif %}
 
+{#- Lighthouse and the crawl. For the operator only: the public report never
+    shows a score, so none of this reaches the roofer. -#}
+<div class="pagehead mt-8" id="technical">
+  <div><h2 class="mt-0">Technical</h2>
+  <p class="muted text-sm">Google Lighthouse on a phone{% if tech.measured %}, measured {{ tech.measured }}{% endif %}, and a crawl of the site. For your calls only; none of it appears on their report.</p></div>
+  <div class="primary">
+    {% if tech.psi_url %}<a class="btn btn-sm btn-ghost" href="{{ tech.psi_url }}" target="_blank" rel="noopener noreferrer">{{ icon("external") }} Open in PageSpeed Insights</a>{% endif %}
+    {% if tech.can_run %}
+    <form class="inline" method="post" action="/console/audits/{{ p.audit_id }}/technical"
+          onsubmit="return confirm('Run Lighthouse again and crawl the site? The crawl uses DataForSEO credits and takes a few minutes.')">
+      {{ csrf_field(csrf) }}<button class="btn btn-sm" type="submit">{{ icon("refresh") }} Run technical audit</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="tech-grid">
+  <section class="card tech-card" aria-label="Lighthouse">
+    <h3>Lighthouse</h3>
+    {% if tech.has_lighthouse %}
+    <div class="gauges">
+      {% for g in tech.gauges %}
+      <div class="gauge-wrap">
+        <div class="gauge {{ g.band }}" style="--v: {{ g.value if g.value is not none else 0 }}" role="img"
+             aria-label="{{ g.label }}: {{ g.value if g.value is not none else 'not measured' }} out of 100"><span>{{ g.value if g.value is not none else "?" }}</span></div>
+        <div class="gauge-label">{{ g.label }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    <dl class="vitals">
+      {% for label, value, note in tech.metrics %}<div><dt>{{ label }}</dt><dd>{{ value }}{% if note %} <span class="muted text-sm">{{ note }}</span>{% endif %}</dd></div>{% endfor %}
+    </dl>
+    {% for group, items in tech.issues %}
+    <h4 class="sub">{{ group }}</h4>
+    <ul class="tech-issues">{% for i in items %}<li>{{ i.title }}{% if i.display %} <span class="muted">{{ i.display }}</span>{% endif %}</li>{% endfor %}</ul>
+    {% endfor %}
+    {% else %}
+    <p class="muted">No Lighthouse result on this audit yet. Run technical audit to measure it.</p>
+    {% endif %}
+  </section>
+
+  <section class="card tech-card" aria-label="Site crawl">
+    <h3>Site crawl</h3>
+    {% set c = tech.crawl %}
+    {% if c.status == "crawling" %}
+    <div class="warn-line" role="status">Crawling since {{ c.started_at }}, up to {{ c.max_pages }} pages.
+      <form class="inline" method="post" action="/console/audits/{{ p.audit_id }}/technical/check">{{ csrf_field(csrf) }}<button class="btn btn-xs" type="submit">Check again</button></form></div>
+    {% elif c.status == "failed" %}
+    <div class="warn-line" role="status">The last crawl did not start: {{ c.error }}</div>
+    {% endif %}
+    {% if c.health is not none %}
+    <div class="crawl-head">
+      <div class="gauge {{ 'good' if c.health >= 90 else 'ok' if c.health >= 50 else 'poor' }}" style="--v: {{ c.health }}" role="img" aria-label="Site health: {{ c.health }} out of 100"><span>{{ c.health }}</span></div>
+      <div><div class="font-semibold">Site health</div>
+      <div class="muted text-sm">{{ c.pages_crawled }} pages crawled{% if c.finished_at %}, {{ c.finished_at }}{% endif %}{% if c.cms %} &middot; built on {{ c.cms }}{% endif %}</div></div>
+    </div>
+    <ul class="site-checks">
+      {% for s in c.site %}<li>{% if s.ok %}{{ icon("check") }}{% elif s.ok is sameas false %}{{ icon("x") }}{% else %}{{ icon("info") }}{% endif %} {{ s.label }}{% if s.ok is none %} <span class="muted text-sm">not reported</span>{% endif %}</li>{% endfor %}
+    </ul>
+    {% if c.issues %}
+    <h4 class="sub">Issues found</h4>
+    <ul class="tech-issues">{% for i in c.issues %}<li>{{ i.label }} <b>{{ i.count }}</b></li>{% endfor %}</ul>
+    {% else %}<p class="muted text-sm">No issues found on the pages crawled.</p>{% endif %}
+    {% elif c.status != "crawling" %}
+    <p class="muted">No crawl yet. Run technical audit to check every page for broken links, missing titles, duplicate pages and more.</p>
+    {% endif %}
+  </section>
+
+  {% if tech.shot %}
+  <section class="card tech-card tech-shot" aria-label="Google's screenshot">
+    <h3>What Google saw</h3>
+    <a href="{{ tech.shot }}" target="_blank" rel="noopener noreferrer"><img src="{{ tech.shot }}" alt="The homepage as Lighthouse finished loading it on a phone" loading="lazy"></a>
+    <p class="muted text-sm">Lighthouse's own screenshot from the test above.</p>
+  </section>
+  {% endif %}
+</div>
+
 <h2>Score history</h2>
 {% if history_note %}<p class="muted">{{ history_note }}</p>{% endif %}
 {% if history %}
@@ -173,6 +250,33 @@
     <div class="primary">{{ modal_close() }}</div>
   </div>
   {% if evidence_html %}{{ evidence_html }}{% else %}<p class="muted">No screenshot was saved for this audit.</p>{% endif %}
+  {% set on_report = " It also replaces the screenshot on the published report." if p.report_slug else "" %}
+  <h4 class="sub">Replace the screenshot</h4>
+  <p class="muted text-sm">If the captured one came out wrong, retake it or upload your own.{{ on_report }}</p>
+  <div class="shot-tools">
+    <form method="post" action="/console/audits/{{ p.audit_id }}/screenshot/retake" class="empty-note"
+          onsubmit="return confirm('Retake the homepage screenshot on a phone-sized screen?{{ on_report }}')">
+      {{ csrf_field(csrf) }}
+      <p><strong>Retake on mobile.</strong> Renders the homepage again on a phone-sized screen. Takes about a minute.</p>
+      <div class="controls">
+        <select name="mode" class="select select-sm w-auto" aria-label="How much of the page">
+          <option value="full">Full page</option>
+          <option value="viewport">First screen only</option>
+        </select>
+        <button class="btn btn-sm" type="submit">{{ icon("refresh") }} Retake</button>
+      </div>
+      <p class="hint">If the full page comes out broken, first screen only usually fixes it.</p>
+    </form>
+    <form method="post" action="/console/audits/{{ p.audit_id }}/screenshot/upload" enctype="multipart/form-data"
+          class="empty-note" onsubmit="return confirm('Use this image as the screenshot?{{ on_report }}')">
+      {{ csrf_field(csrf) }}
+      <p><strong>Upload your own.</strong> A phone screenshot of their homepage works best. PNG, JPEG or WebP, up to 10 MB.</p>
+      <div class="controls">
+        <input type="file" name="file" accept="image/png,image/jpeg,image/webp" required class="file-input file-input-sm">
+        <button class="btn btn-sm" type="submit">{{ icon("download") }} Upload</button>
+      </div>
+    </form>
+  </div>
   </div>
   {{ modal_backdrop() }}
 </dialog>

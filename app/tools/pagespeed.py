@@ -54,9 +54,73 @@ class PsiResult:
     cls: float | None = None
     tbt_ms: float | None = None
     error: str | None = None
+    # The other three Lighthouse categories, for the console's Technical
+    # section. No check scores them; the operator reads them on a call.
+    accessibility_score: int | None = None
+    best_practices_score: int | None = None
+    seo_score: int | None = None
+    speed_index_ms: float | None = None
+    # The few failing items per category worth naming, worst first:
+    # {"category", "title", "display"}.
+    issues: tuple[dict[str, str], ...] = ()
+    # Google's own screenshot of the page as Lighthouse finished loading it,
+    # a small JPEG, base64. Kept in the cache because it is tens of KB, not
+    # the megabytes of a raw payload.
+    screenshot_b64: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {k: v for k, v in asdict(self).items() if v is not None}
+
+    @property
+    def report_url(self) -> str:
+        """The live PageSpeed Insights page for this URL, phone form factor.
+        Opening it runs a fresh test, which is the point: anyone can check."""
+        return psi_page_url(self.final_url or self.url, self.strategy)
+
+
+def psi_page_url(url: str, strategy: str = "mobile") -> str:
+    from urllib.parse import quote
+
+    form = "desktop" if strategy == "desktop" else "mobile"
+    return f"https://pagespeed.web.dev/report?url={quote(url, safe='')}&form_factor={form}"
+
+
+CATEGORIES = (("performance", "PERFORMANCE"), ("accessibility", "ACCESSIBILITY"),
+              ("best-practices", "BEST_PRACTICES"), ("seo", "SEO"))
+ISSUES_PER_CATEGORY = 5
+
+
+def _category_score(categories: Mapping[str, Any], key: str) -> int | None:
+    raw = (categories.get(key) or {}).get("score")
+    return round(raw * 100) if isinstance(raw, (int, float)) else None
+
+
+def _issues(categories: Mapping[str, Any], audits: Mapping[str, Any]) -> tuple[dict[str, str], ...]:
+    """Failing, scored items per category, heaviest first. Metric audits are
+    the numbers already shown, so they are not repeated as issues."""
+    out: list[dict[str, str]] = []
+    for key, _ in CATEGORIES:
+        rows = []
+        for ref in (categories.get(key) or {}).get("auditRefs") or []:
+            if ref.get("group") in ("metrics", "hidden"):
+                continue
+            audit = audits.get(ref.get("id")) or {}
+            score = audit.get("score")
+            if audit.get("scoreDisplayMode") not in ("binary", "numeric", "metricSavings"):
+                continue
+            if not isinstance(score, (int, float)) or score >= 0.9:
+                continue
+            rows.append((-(ref.get("weight") or 0), score, audit))
+        rows.sort(key=lambda r: (r[0], r[1]))
+        for _, _, audit in rows[:ISSUES_PER_CATEGORY]:
+            out.append({"category": key, "title": str(audit.get("title") or "").replace("`", ""),
+                        "display": str(audit.get("displayValue") or "")})
+    return tuple(out)
+
+
+def _screenshot(audits: Mapping[str, Any]) -> str | None:
+    data = str(((audits.get("final-screenshot") or {}).get("details") or {}).get("data") or "")
+    return data.split("base64,", 1)[1] if "base64," in data else None
 
 
 def _audit_ms(audits: Mapping[str, Any], key: str) -> float | None:
@@ -102,6 +166,12 @@ def flatten(payload: Mapping[str, Any], url: str, strategy: str) -> PsiResult:
         fcp_ms=_audit_ms(audits, "first-contentful-paint"),
         cls=(audits.get("cumulative-layout-shift") or {}).get("numericValue"),
         tbt_ms=_audit_ms(audits, "total-blocking-time"),
+        accessibility_score=_category_score(categories, "accessibility"),
+        best_practices_score=_category_score(categories, "best-practices"),
+        seo_score=_category_score(categories, "seo"),
+        speed_index_ms=_audit_ms(audits, "speed-index"),
+        issues=_issues(categories, audits),
+        screenshot_b64=_screenshot(audits),
     )
 
 
@@ -120,15 +190,15 @@ async def analyze(
     cache_request = {"url": url, "strategy": strategy}
     if not fresh:
         cached = await asyncio.to_thread(store.cache_get, "psi", cache_request)
-        if cached:
-            return PsiResult(**cached)
+        # A record cached before every category was requested has no SEO
+        # number; treat it as a miss so the Technical section fills in.
+        if cached and "seo_score" in cached:
+            return PsiResult(**{**cached, "issues": tuple(cached.get("issues") or ())})
 
-    params = {
-        "url": url,
-        "strategy": strategy,
-        "category": "PERFORMANCE",
-        "key": cfg.pagespeed_api_key,
-    }
+    # Every category in the one call: PSI runs a single Lighthouse pass for
+    # all of them, so the extra three cost nothing.
+    params = [("url", url), ("strategy", strategy), ("key", cfg.pagespeed_api_key)]
+    params += [("category", name) for _, name in CATEGORIES]
 
     owned = client is None
     http_client = client or httpx.AsyncClient(timeout=httpx.Timeout(timeout))

@@ -295,7 +295,9 @@
   .quo-row { @apply flex flex-row items-center gap-3 flex-wrap mb-1; }
   .empty-note { @apply bg-base-200 rounded-box px-4 py-3.5; }
   .empty-note p { @apply mb-3; }
-  .empty-note .btn:not(.btn-primary) { @apply bg-base-100 border-line; }
+  .shot-tools { @apply grid gap-3 mt-2; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+  .shot-tools .empty-note > p { @apply mb-2; }
+  .shot-tools .file-input { @apply max-w-60; }
   h4.sub { @apply mt-5 mb-0.5 text-sm text-ink2 uppercase tracking-wider; }
 
   /* Call notes. */
@@ -306,7 +308,6 @@
   .notes li { @apply my-0.5; }
   /* Leads: the same rows as a table or as a board by stage. A lead that
      needs something from you carries a primary edge in either view. */
-  .view-toggle .btn-active { @apply bg-base-100 border-primary text-ember; }
   .search-form { @apply flex-1 basis-64; }
   .search-form .input { @apply w-full; }
   .stage-form { @apply flex flex-row items-center gap-1.5 justify-end; }
@@ -328,6 +329,33 @@
   .board-empty { @apply px-1 py-2; }
   .wf-tools { @apply flex flex-row items-center gap-2 flex-wrap; }
 
+  /* Technical: score rings drawn with a conic gradient, Lighthouse's own
+     bands (90 and up good, 50 to 89 middling, under 50 poor). --v is the
+     score, set on the element. */
+  .tech-grid { @apply grid gap-3.5 items-start mt-3; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+  .tech-card { @apply mb-0; }
+  .tech-card h3 { @apply mt-0; }
+  .gauges { @apply grid grid-cols-4 gap-1 my-2; }
+  .gauge-wrap { @apply flex flex-col items-center gap-1.5 text-center; }
+  .gauge-label { @apply text-[0.7rem] leading-tight text-ink2 font-semibold min-w-0; overflow-wrap: anywhere; }
+  .gauge { @apply w-16 h-16 rounded-full grid place-items-center shrink-0;
+           background: conic-gradient(var(--gc) calc(var(--v) * 1%), var(--color-base-300) 0); }
+  .gauge > span { @apply w-[52px] h-[52px] rounded-full grid place-items-center bg-base-100 font-display font-bold text-lg; color: var(--gc); }
+  .gauge.good { --gc: var(--color-success); }
+  .gauge.ok { --gc: var(--color-warning); }
+  .gauge.poor { --gc: var(--color-error); }
+  .gauge.none { --gc: var(--color-ink2); }
+  .vitals { @apply grid gap-x-4 gap-y-1 my-3 text-sm; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); }
+  .vitals dt { @apply text-xs text-ink2; }
+  .vitals dd { @apply font-semibold; }
+  .tech-issues { @apply list-disc ml-5 text-sm; }
+  .tech-issues li + li { @apply mt-1; }
+  .crawl-head { @apply flex flex-row items-center gap-3 my-2; }
+  .site-checks { @apply list-none p-0 my-2 text-sm; }
+  .site-checks li { @apply flex flex-row items-center gap-1.5 py-0.5; }
+  .site-checks .ic { @apply w-4 h-4; }
+  .tech-shot img { @apply w-full max-w-[260px] border border-line rounded-box block mx-auto; }
+
   /* A send or reply per row: what happened, then what became of it. */
   .tl { @apply list-none pl-0; }
   .tl li { @apply flex flex-row gap-3 items-start py-2.5 border-b border-line; }
@@ -337,3 +365,11 @@
   .tl .t { @apply flex-1; }
   .tl .note { @apply block text-sm text-error mt-0.5; }
 }
+
+/* Button colour overrides. daisyUI paints .btn from inside the utilities
+   layer, and a layered rule loses to a later layer whatever its specificity,
+   so a recolour placed in @layer components silently does nothing. These sit
+   outside every layer, and set daisyUI's own --btn-color rather than fight
+   its background rule. */
+.empty-note .btn:not(.btn-primary) { --btn-color: var(--color-base-100); border-color: var(--color-line); }
+.view-toggle .btn-active { --btn-color: var(--color-base-100); border-color: var(--color-primary); color: var(--color-ember); }
