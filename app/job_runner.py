@@ -354,20 +354,31 @@ async def run_technical_job(job_id: str, params: Mapping[str, Any]) -> dict[str,
     if not domain:
         await say("No domain on record, so no crawl.")
         return {"audit_id": audit_id}
-    max_pages = get_config().onpage_max_pages
-    try:
-        task_id = await asyncio.to_thread(onpage.start, str(domain), max_pages=max_pages)
-    except onpage.OnPageUnavailable as exc:
-        # Recorded, not raised: a redelivered job would post, and pay for,
-        # another crawl.
+    cfg = get_config()
+    # A site whose robot check turned a plain crawl away is crawled in a
+    # browser from then on, without paying for the doomed plain attempt.
+    browser = bool((audit.get("technical") or {}).get("needs_browser"))
+
+    async def begin(browser: bool) -> str | None:
+        max_pages = cfg.onpage_browser_max_pages if browser else cfg.onpage_max_pages
+        try:
+            task_id = await asyncio.to_thread(onpage.start, str(domain), max_pages=max_pages, browser=browser)
+        except onpage.OnPageUnavailable as exc:
+            # Recorded, not raised: a redelivered job would post, and pay for,
+            # another crawl.
+            await asyncio.to_thread(store.update_audit, audit_id, {"technical": {
+                "status": "failed", "error": str(exc), "updated_at": store.utcnow()}})
+            await say(f"Crawl not started: {exc}")
+            return None
         await asyncio.to_thread(store.update_audit, audit_id, {"technical": {
-            "status": "failed", "error": str(exc), "updated_at": store.utcnow()}})
-        await say(f"Crawl not started: {exc}")
+            "status": "crawling", "task_id": task_id, "max_pages": max_pages, "error": None,
+            "browser": browser, "needs_browser": browser, "started_at": store.utcnow()}})
+        await say(f"Crawling {domain}{' in a real browser' if browser else ''}, up to {max_pages} pages.")
+        return task_id
+
+    task_id = await begin(browser)
+    if not task_id:
         return {"audit_id": audit_id}
-    await asyncio.to_thread(store.update_audit, audit_id, {"technical": {
-        "status": "crawling", "task_id": task_id, "max_pages": max_pages, "error": None,
-        "started_at": store.utcnow()}})
-    await say(f"Crawling {domain}, up to {max_pages} pages.")
 
     deadline = time.monotonic() + TECHNICAL_POLL_SECONDS
     while time.monotonic() < deadline:
@@ -377,12 +388,28 @@ async def run_technical_job(job_id: str, params: Mapping[str, Any]) -> dict[str,
         except onpage.OnPageUnavailable as exc:
             await say(f"Could not read the crawl yet: {exc}")
             continue
-        if result is not None:
+        if result is None:
+            continue
+        if onpage.pages_crawled(result) == 0:
+            if not browser:
+                await say("No pages came back: the site shows crawlers a robot check. "
+                          "Crawling again in a real browser, which gets past it.")
+                browser = True
+                task_id = await begin(True)
+                if not task_id:
+                    return {"audit_id": audit_id}
+                continue
             await asyncio.to_thread(store.update_audit, audit_id, {"technical": {
-                **onpage.distil(result), "status": "done", "task_id": task_id,
+                "status": "blocked", "task_id": task_id, "needs_browser": True,
+                "error": "Even a real browser got no pages back from this site.",
                 "finished_at": store.utcnow()}})
-            await say("Crawl finished.")
+            await say("No pages came back, even in a real browser.")
             return {"audit_id": audit_id}
+        await asyncio.to_thread(store.update_audit, audit_id, {"technical": {
+            **onpage.distil(result), "status": "done", "task_id": task_id, "error": None,
+            "browser": browser, "needs_browser": browser, "finished_at": store.utcnow()}})
+        await say("Crawl finished.")
+        return {"audit_id": audit_id}
     await say("Still crawling. The prospect page has Check again, which picks up the results "
               "without starting another crawl.")
     return {"audit_id": audit_id}

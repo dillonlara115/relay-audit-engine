@@ -159,6 +159,9 @@ class Config:
     hunter_monthly_cap: int = field(default_factory=lambda: _int("HUNTER_MONTHLY_CAP", 25))
     # Pages a technical crawl may fetch per site. DataForSEO bills per page.
     onpage_max_pages: int = field(default_factory=lambda: _int("DATAFORSEO_ONPAGE_MAX_PAGES", 100))
+    # The cap when a site's robot check forces a crawl in a real browser, which
+    # costs about thirty times as much per page: 50 pages is roughly $0.28.
+    onpage_browser_max_pages: int = field(default_factory=lambda: _int("DATAFORSEO_ONPAGE_BROWSER_MAX_PAGES", 50))
     # Map searches one Local reach run may make. Each grid point is one paid
     # DataForSEO Maps search; a 7 by 7 grid is 49.
     reach_max_points: int = field(default_factory=lambda: _int("DATAFORSEO_REACH_MAX_POINTS", 49))

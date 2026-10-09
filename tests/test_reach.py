@@ -348,3 +348,63 @@ def test_without_a_good_map_the_plain_grid_shows(rec_over, url):
     rec = {**_record(), "center": {"lat": 38.8, "lng": -104.8}, **rec_over}
     page = views_page(rec, url=url)
     assert 'class="rcell' in page and 'class="rpin' not in page
+
+
+# ── A map for a run made without one ──────────────────────────────────────────
+
+
+def _old_run():
+    rec = {**_record(), "center": {"lat": 38.8, "lng": -104.8}}
+    rec.pop("map", None)
+    return rec
+
+
+def test_a_run_from_before_maps_offers_to_add_one():
+    page = views_page(_old_run(), url=None)
+    assert "made before the map was added" in page and 'action="/console/audits/a1/reach/map"' in page
+
+
+def test_a_failed_map_offers_a_retry_with_the_reason():
+    page = views_page({**_old_run(), "map": {"zoom": 13, "error": "Static Maps returned 403"}}, url=None)
+    assert "The map didn't load: Static Maps returned 403" in page and "Try the map again" in page
+
+
+def test_adding_the_map_searches_nothing_and_saves_only_the_map(client, monkeypatch):
+    import app.console.routes as routes
+    from app.store import evidence as evidence_store
+    from app.tools import staticmap
+
+    written, uploads = [], []
+    monkeypatch.setattr(routes.store, "get_audit", lambda aid: {"prospect_id": "p1", "local_reach": _old_run()})
+    monkeypatch.setattr(routes.store, "update_audit", lambda aid, f: written.append(f))
+    monkeypatch.setattr(staticmap, "fetch", lambda center, zoom: b"\x89PNG")
+    monkeypatch.setattr(evidence_store, "upload", lambda *a, **kw: uploads.append(kw["kind"]))
+    monkeypatch.setattr(reach, "run", lambda **kw: pytest.fail("no search may run"))
+    csrf = sign_in(client)
+    r = client.post("/console/audits/a1/reach/map", data={"csrf": csrf}, follow_redirects=False)
+    assert "notice=reach_map_done" in r.headers["location"] and r.headers["location"].endswith("#reach")
+    assert uploads == ["reach_map"] and list(written[0]["local_reach"]) == ["map"]
+    assert written[0]["local_reach"]["map"]["error"] == ""
+
+
+def test_a_map_that_fails_to_add_says_why(client, monkeypatch):
+    import app.console.routes as routes
+    from app.tools import staticmap
+
+    def fail(center, zoom):
+        raise staticmap.MapUnavailable("Static Maps returned 403")
+    monkeypatch.setattr(routes.store, "get_audit", lambda aid: {"prospect_id": "p1", "local_reach": _old_run()})
+    monkeypatch.setattr(routes.store, "update_audit", lambda aid, f: None)
+    monkeypatch.setattr(staticmap, "fetch", fail)
+    csrf = sign_in(client)
+    r = client.post("/console/audits/a1/reach/map", data={"csrf": csrf}, follow_redirects=False)
+    assert "notice=reach_map_failed" in r.headers["location"]
+
+
+def test_no_run_no_map(client, monkeypatch):
+    import app.console.routes as routes
+
+    monkeypatch.setattr(routes.store, "get_audit", lambda aid: {"prospect_id": "p1"})
+    csrf = sign_in(client)
+    r = client.post("/console/audits/a1/reach/map", data={"csrf": csrf}, follow_redirects=False)
+    assert "notice=reach_map_failed" in r.headers["location"]

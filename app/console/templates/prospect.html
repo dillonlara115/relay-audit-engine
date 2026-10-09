@@ -165,12 +165,14 @@
       <form class="inline" method="post" action="/console/audits/{{ p.audit_id }}/technical/check">{{ csrf_field(csrf) }}<button class="btn btn-xs" type="submit">Check again</button></form></div>
     {% elif c.status == "failed" %}
     <div class="warn-line" role="status">The last crawl did not start: {{ c.error }}</div>
+    {% elif c.status == "blocked" %}
+    <div class="warn-line" role="status">The crawl got no pages: {{ c.error }}</div>
     {% endif %}
     {% if c.health is not none %}
     <div class="crawl-head">
       <div class="gauge {{ 'good' if c.health >= 90 else 'ok' if c.health >= 50 else 'poor' }}" style="--v: {{ c.health }}" role="img" aria-label="Site health: {{ c.health }} out of 100"><span>{{ c.health }}</span></div>
       <div><div class="font-semibold">Site health</div>
-      <div class="muted text-sm">{{ c.pages_crawled }} pages crawled{% if c.finished_at %}, {{ c.finished_at }}{% endif %}{% if c.cms %} &middot; built on {{ c.cms }}{% endif %}</div></div>
+      <div class="muted text-sm">{{ c.pages_crawled }} pages crawled{% if c.browser %} in a real browser (the site has a robot check){% endif %}{% if c.finished_at %}, {{ c.finished_at }}{% endif %}{% if c.cms %} &middot; built on {{ c.cms }}{% endif %}</div></div>
     </div>
     <ul class="site-checks">
       {% for s in c.site %}<li>{% if s.ok %}{{ icon("check") }}{% elif s.ok is sameas false %}{{ icon("x") }}{% else %}{{ icon("info") }}{% endif %} {{ s.label }}{% if s.ok is none %} <span class="muted text-sm">not reported</span>{% endif %}</li>{% endfor %}
@@ -179,7 +181,7 @@
     <h4 class="sub">Issues found</h4>
     <ul class="tech-issues">{% for i in c.issues %}<li>{{ i.label }} <b>{{ i.count }}</b></li>{% endfor %}</ul>
     {% else %}<p class="muted text-sm">No issues found on the pages crawled.</p>{% endif %}
-    {% elif c.status != "crawling" %}
+    {% elif c.status not in ("crawling", "blocked", "failed") %}
     <p class="muted">No crawl yet. Run technical audit to check every page for broken links, missing titles, duplicate pages and more.</p>
     {% endif %}
   </section>
@@ -230,6 +232,12 @@
     </div>
     {% endfor %}{% endfor %}
     {% else %}
+    {% if reach.can_add_map %}
+    <div class="warn-line flex flex-row flex-wrap items-center gap-2" role="status">
+      <span>{% if reach.map_error %}The map didn't load: {{ reach.map_error }}{% else %}This run was made before the map was added.{% endif %}</span>
+      <form class="inline" method="post" action="/console/audits/{{ p.audit_id }}/reach/map">{{ csrf_field(csrf) }}<button type="submit" class="btn btn-xs">{{ icon("pin") }} {% if reach.map_error %}Try the map again{% else %}Add the map{% endif %}</button></form>
+    </div>
+    {% endif %}
     <div class="rgrid" style="--n: {{ reach.size }}" role="img" aria-label="Maps positions on a {{ reach.size }} by {{ reach.size }} grid, north at the top">
       {% for row in reach.rows %}{% for c in row %}<a class="rcell {{ c.band }}{% if c.center %} center{% endif %}" href="{{ c.href }}" target="_blank" rel="noopener noreferrer" title="{{ c.title }}">{{ c.label }}</a>{% endfor %}{% endfor %}
     </div>

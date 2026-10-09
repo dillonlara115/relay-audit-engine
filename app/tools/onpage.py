@@ -65,10 +65,18 @@ def _task(body: Mapping[str, Any]) -> Mapping[str, Any]:
     return task
 
 
-def start(domain: str, *, max_pages: int, client: httpx.Client | None = None) -> str:
-    """Post a crawl of the domain. Returns the task id."""
+def start(domain: str, *, max_pages: int, browser: bool = False,
+          client: httpx.Client | None = None) -> str:
+    """Post a crawl of the domain. Returns the task id.
+
+    browser=True loads every page in a real browser. Some hosts put a robot
+    check in front of the site ("Robot Challenge Screen") that a plain fetch
+    never gets past: the crawl finishes in seconds with no pages. A browser
+    gets through, at roughly thirty times the cost per page."""
     payload = [{"target": domain, "max_crawl_pages": int(max_pages), "load_resources": True,
-                "enable_javascript": False, "store_raw_html": False}]
+                "enable_javascript": browser, "store_raw_html": False}]
+    if browser:
+        payload[0]["enable_browser_rendering"] = True
     http = client or httpx.Client(timeout=TIMEOUT)
     try:
         r = http.post(f"{BASE}/task_post", json=payload, auth=_auth())
@@ -101,6 +109,11 @@ def summary(task_id: str, *, client: httpx.Client | None = None) -> Mapping[str,
     if not result or result.get("crawl_progress") != "finished":
         return None
     return result
+
+
+def pages_crawled(result: Mapping[str, Any]) -> int:
+    status = result.get("crawl_status") or {}
+    return int(status.get("pages_crawled") or (result.get("domain_info") or {}).get("total_pages") or 0)
 
 
 def distil(result: Mapping[str, Any]) -> dict[str, Any]:

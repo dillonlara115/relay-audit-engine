@@ -139,6 +139,8 @@ NOTICES = {
     "screenshot_replaced": "Screenshot replaced.",
     "technical_done": "Technical audit updated.",
     "technical_pending": "Technical audit not ready.",
+    "reach_map_done": "Map added.",
+    "reach_map_failed": "Map not added.",
     "screenshot_rejected": "Screenshot not replaced.",
     "hunter_failed": "Hunter search did not run.",
     "stage_rejected": "Stage not changed.",
@@ -1033,7 +1035,12 @@ def technical_view(audit: Mapping[str, Any], prospect: Mapping[str, Any],
     site = prospect.get("website_url") or ""
 
     crawl = {"status": "", "health": None, "pages_crawled": 0, "cms": "", "site": [], "issues": [],
-             "error": "", "max_pages": 0, **(audit.get("technical") or {})}
+             "error": "", "max_pages": 0, "browser": False, **(audit.get("technical") or {})}
+    if crawl["status"] == "done" and crawl["health"] is None and not crawl["pages_crawled"]:
+        # Crawls from before robot checks were caught finished as "done" with
+        # nothing in them. Say what happened instead of "no crawl yet".
+        crawl.update(status="blocked", error="The site shows crawlers a robot check, so no pages came "
+                                             "back. Run technical audit again: it will crawl in a real browser.")
     for key in ("started_at", "finished_at"):
         when = crawl.get(key)
         crawl[key] = when.strftime("%b %d") if hasattr(when, "strftime") else ""
@@ -1108,6 +1115,11 @@ def reach_view(audit: Mapping[str, Any], prospect: Mapping[str, Any],
         **r,
         "rows": rows,
         "map_url": map_url,
+        # A finished run with no map under it (run before maps existed, or the
+        # map failed) can get one without searching again.
+        "can_add_map": bool(r["points"]) and not map_url and r.get("status") == "done"
+                       and center.get("lat") is not None,
+        "map_error": (r.get("map") or {}).get("error") or "",
         "has_grid": bool(r["points"]),
         "top3_pct": round(100 * r["top3"] / answered) if answered else 0,
         "found_pct": round(100 * r["found"] / answered) if answered else 0,

@@ -282,3 +282,73 @@ def test_the_public_report_never_takes_googles_screenshot():
 
     src = open(publish.__file__).read()
     assert 'row.get("kind") == "screenshot"' in src and '"lighthouse"' not in src
+
+
+# ── Sites behind a robot check ────────────────────────────────────────────────
+
+EMPTY = {"crawl_progress": "finished", "crawl_status": {"pages_crawled": 0}, "domain_info": {"total_pages": 0},
+         "page_metrics": None}
+
+
+def test_a_browser_crawl_asks_for_rendering(dfs):
+    sent = {}
+
+    def handler(request):
+        import json
+        sent.update(json.loads(request.content)[0])
+        return httpx.Response(200, json={"tasks": [{"status_code": 20100, "id": "T2"}]})
+
+    onpage.start("apex.com", max_pages=50, browser=True, client=_http(handler))
+    assert sent["enable_browser_rendering"] is True and sent["enable_javascript"] is True
+
+
+def test_an_empty_crawl_is_retried_in_a_browser(tech_env, monkeypatch):
+    starts = []
+    monkeypatch.setattr(onpage, "start", lambda domain, **kw: starts.append(kw) or f"T{len(starts)}")
+    tech_env["summary"][:] = [EMPTY, SUMMARY["tasks"][0]["result"][0]]
+    asyncio.run(job_runner.run_technical_job("j1", {"audit_id": "a1"}))
+    assert [k["browser"] for k in starts] == [False, True]
+    assert starts[1]["max_pages"] == Config().onpage_browser_max_pages
+    last = tech_env["updates"][-1]["technical"]
+    assert last["status"] == "done" and last["browser"] is True and last["needs_browser"] is True
+
+
+def test_empty_even_in_a_browser_is_blocked_not_retried_forever(tech_env, monkeypatch):
+    starts = []
+    monkeypatch.setattr(onpage, "start", lambda domain, **kw: starts.append(kw) or "T")
+    tech_env["summary"][:] = [EMPTY, EMPTY, EMPTY]
+    asyncio.run(job_runner.run_technical_job("j1", {"audit_id": "a1"}))
+    assert len(starts) == 2 and tech_env["updates"][-1]["technical"]["status"] == "blocked"
+
+
+def test_a_site_known_to_need_a_browser_skips_the_plain_crawl(tech_env, monkeypatch):
+    starts = []
+    monkeypatch.setattr(job_runner.store, "get_audit",
+                        lambda aid: {"prospect_id": "p1", "technical": {"needs_browser": True}})
+    monkeypatch.setattr(onpage, "start", lambda domain, **kw: starts.append(kw) or "T")
+    asyncio.run(job_runner.run_technical_job("j1", {"audit_id": "a1"}))
+    assert [k["browser"] for k in starts] == [True]
+
+
+def test_check_again_on_an_empty_crawl_records_the_block_and_spends_nothing(client, monkeypatch):
+    import app.console.routes as routes
+
+    written = []
+    monkeypatch.setattr(routes.store, "get_audit", lambda aid: {"technical": {"task_id": "T1", "status": "crawling"}})
+    monkeypatch.setattr(routes.store, "update_audit", lambda aid, f: written.append(f))
+    monkeypatch.setattr(onpage, "summary", lambda tid: EMPTY)
+    monkeypatch.setattr(onpage, "start", lambda *a, **k: pytest.fail("Check again must not start a crawl"))
+    csrf = sign_in(client)
+    client.post("/console/audits/a1/technical/check", data={"csrf": csrf}, follow_redirects=False)
+    assert written[0]["technical"]["status"] == "blocked" and written[0]["technical"]["needs_browser"] is True
+
+
+def test_an_old_empty_crawl_reads_as_blocked_not_as_never_run():
+    page = _with(technical={"status": "done", "health": None, "pages_crawled": 0, "issues": []})
+    assert "No crawl yet." not in page and "The crawl got no pages: The site shows crawlers a robot check" in page
+
+
+def test_a_browser_crawl_says_so():
+    page = _with(technical={"status": "done", "health": 81, "pages_crawled": 12, "browser": True,
+                            "issues": [], "site": []})
+    assert "12 pages crawled in a real browser (the site has a robot check)" in page

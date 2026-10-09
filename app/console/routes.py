@@ -912,8 +912,18 @@ async def check_technical(audit_id: str, request: Request, csrf: str = Form(None
             return "technical_pending", str(exc)
         if result is None:
             return "technical_pending", "Still crawling. Try again in a minute or two."
+        browser = bool((audit.get("technical") or {}).get("browser"))
+        if onpage.pages_crawled(result) == 0:
+            # Spends nothing here: the next Run technical audit crawls in a
+            # browser, because needs_browser is now on record.
+            store.update_audit(audit_id, {"technical": {
+                "status": "blocked", "needs_browser": True, "finished_at": store.utcnow(),
+                "error": ("Even a real browser got no pages back from this site." if browser else
+                          "The site shows crawlers a robot check, so no pages came back. "
+                          "Run technical audit again: it will crawl in a real browser.")}})
+            return "technical_pending", "No pages came back from the crawl."
         store.update_audit(audit_id, {"technical": {**onpage.distil(result), "status": "done",
-                                                    "finished_at": store.utcnow()}})
+                                                    "error": None, "finished_at": store.utcnow()}})
         return "technical_done", "Crawl results are in."
 
     code, detail = await asyncio.to_thread(check)
@@ -936,6 +946,33 @@ async def run_reach(audit_id: str, request: Request, csrf: str = Form(None),
                         {"audit_id": audit_id, "keyword": keyword, "size": size, "radius": radius,
                          "return_to": f"/console/audits/{audit_id}#reach"},
                         f"Local reach for {name}")
+
+
+@router.post("/audits/{audit_id}/reach/map")
+async def add_reach_map(audit_id: str, request: Request, csrf: str = Form(None)) -> Response:
+    """Put a Google map under a finished run that has none. One Static Maps
+    image; the searches already paid for are reused, none is run again."""
+    if not check_csrf(request, csrf):
+        return Response(status_code=403, content="stale form, reload the page")
+    from app.job_runner import _reach_map
+
+    audit = await asyncio.to_thread(store.get_audit, audit_id)
+    if audit is None:
+        return Response(status_code=404)
+    back = f"/console/audits/{audit_id}"
+    run = audit.get("local_reach") or {}
+    center = run.get("center") or {}
+    if run.get("status") != "done" or not run.get("points") or center.get("lat") is None:
+        return _redirect(_with_notice(back, "reach_map_failed", "No finished run to draw a map for.") + "#reach")
+    async def quiet(line: str) -> None:  # the error comes back in the record
+        return None
+
+    record = await _reach_map(str(audit.get("prospect_id") or ""), audit_id,
+                              (float(center["lat"]), float(center["lng"])), run["points"], quiet)
+    await asyncio.to_thread(store.update_audit, audit_id, {"local_reach": {"map": record}})
+    if record.get("error"):
+        return _redirect(_with_notice(back, "reach_map_failed", record["error"]) + "#reach")
+    return _redirect(_with_notice(back, "reach_map_done") + "#reach")
 
 
 # ── Screenshots ───────────────────────────────────────────────────────────────
