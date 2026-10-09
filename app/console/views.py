@@ -102,6 +102,7 @@ def css_href() -> str:
 # symbol ids without the i- prefix.
 NAV_GROUPS = [
     ("Prospecting", [("/console", "overview", "Overview", "home"),
+                     ("/console/leads", "leads", "Leads", "user"),
                      ("/console/batches", "batches", "Sweeps", "list"),
                      ("/console/templates", "templates", "Email templates", "mail")]),
     ("System", [("/console/jobs", "jobs", "Jobs", "activity")]),
@@ -132,6 +133,8 @@ NOTICES = {
     "not_sent": "Email not sent.",
     "text_sent": "Text sent.",
     "text_not_sent": "Text not sent.",
+    "stage_set": "Stage updated.",
+    "stage_rejected": "Stage not changed.",
     "quo_added": "Added to Quo.",
     "quo_failed": "Not added to Quo.",
     "queued": "Audits queued.",
@@ -701,6 +704,22 @@ def _confirm_attr(text: str) -> Markup:
     return Markup(esc("return confirm(" + json.dumps(text) + ")"))
 
 
+# What the carrier did with a text, as a pill and, when it went wrong, the
+# next thing to do. Quo answers "queued" or "sent" at send time; the webhook
+# replaces that with delivered, failed or undelivered.
+_DELIVERY: dict[str, tuple[tuple[str, str], str | None]] = {
+    "delivered": (("ok", "Delivered"), None),
+    "failed": (("bad", "Not delivered"),
+               "The carrier refused it. Check the number is a mobile, or call instead."),
+    "undelivered": (("bad", "Not delivered"),
+                    "The carrier could not deliver it. Check the number is a mobile, or call instead."),
+    "queued": (("dim", "Sending"), None),
+    "sent": (("dim", "Sent, awaiting delivery"), None),
+}
+_NO_DELIVERY_REPORT = (("dim", "No delivery report"), None)
+_CHANNEL_ICON = {"email": "mail", "sms": "message", "call": "phone"}
+
+
 def outreach_state(sequence: Mapping[str, Any] | None, *, can_start: bool) -> tuple[str, str]:
     """One pill for where a prospect sits in the four-email sequence."""
     from app import outreach
@@ -764,12 +783,11 @@ def outreach_context(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                                      signature=signature, sender_name=sender_name,
                                      templates=templates)
             if next_ordinal == 1:
-                note = (f"Opens your mail client with the report link and the three "
-                        f"findings for {owner_email}." if owner_email else "")
+                note = "Carries the report link and the three findings."
             else:
                 fu = later[next_ordinal - 2] if len(later) >= next_ordinal - 1 else {}
                 seen = " ".join(str(fu.get("what_we_saw") or "").split())
-                note = (f"Opens your mail client with follow-up finding {next_ordinal - 1}: "
+                note = (f"Carries follow-up finding {next_ordinal - 1}: "
                         f"{seen[:80]}{'...' if len(seen) > 80 else ''}")
             step1 = {"mode": "compose" if owner_email else "no_address",
                      "href": composer.fit_mailto(draft), "note": note,
@@ -790,15 +808,18 @@ def outreach_context(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                  "This only records that you already sent it from your own mailbox. "
                  "Nothing is sent from here.")}
 
-    events: list[tuple[Any, str, str]] = []
+    events: list[tuple[Any, dict[str, Any]]] = []
+    email_sent_on: dict[int, str] = {}
     for t in touches:
         when = t.get("sent_at")
         stamp = when.strftime("%b %d") if hasattr(when, "strftime") else ""
         channel = t.get("channel") or "email"
+        badge = note = None
         if channel == "sms":
             text = f"Text sent {stamp}".strip()
             if t.get("to"):
                 text += f" to {t['to']}"
+            badge, note = _DELIVERY.get(str(t.get("delivery_status") or ""), _NO_DELIVERY_REPORT)
         elif channel == "call":
             mins = int(t.get("duration") or 0) // 60
             text = f"Call {stamp}".strip() + (f", {mins} min" if mins else "") if t.get("answered", True) else f"Call {stamp}, no answer".strip()
@@ -810,7 +831,10 @@ def outreach_context(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                 text += f" to {t['to']}"
             if t.get("sent_via") == "console":
                 text += " from the console"
-        events.append((when, "sent", text))
+            if t.get("ordinal"):
+                email_sent_on[int(t["ordinal"])] = stamp
+        events.append((when, {"kind": "sent", "channel": channel, "icon": _CHANNEL_ICON.get(channel, "mail"),
+                              "text": text, "badge": badge, "note": note}))
     for r in replies:
         when = r.get("received_at")
         stamp = when.strftime("%b %d") if hasattr(when, "strftime") else ""
@@ -820,9 +844,10 @@ def outreach_context(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
         text = f"Reply {stamp}: {label}{who}".strip()
         if excerpt:
             text += f'. "{excerpt}"'
-        events.append((when, "reply", text))
+        events.append((when, {"kind": "reply", "channel": r.get("channel") or "email", "icon": "reply",
+                              "text": text, "badge": None, "note": None}))
     events.sort(key=lambda e: (e[0] is None, e[0] or 0))
-    timeline = [{"kind": k, "text": t} for _, k, t in events]
+    timeline = [e for _, e in events]
 
     nxt = None
     if seq and seq.status == outreach.CLOSED:
@@ -853,10 +878,31 @@ def outreach_context(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                 "menu": variable_menu(tpl_values(1, prospect, report_url or "", findings,
                                                  sender_name, signature))}
 
+    # One chip per email in the sequence: sent (with its date), the one due
+    # next, or later. The modal header shows where the sequence stands
+    # without reading the timeline.
+    due_label = seq.next_due_at.strftime("%b %d") if seq and seq.next_due_at else ""
+    emails = []
+    for n in range(1, max_touches + 1):
+        if n <= sent:
+            emails.append({"n": n, "state": "sent", "when": email_sent_on.get(n, "")})
+        elif n == next_ordinal and is_open:
+            emails.append({"n": n, "state": "next", "when": "due " + due_label if due_label and sent else ""})
+        else:
+            emails.append({"n": n, "state": "later", "when": ""})
+
     return {"state": outreach_state(sequence, can_start=published),
             "step1": step1, "step2": step2, "timeline": timeline, "next": nxt,
             "mailbox": mailbox or "your connected mailbox",
-            "quo_from": quo_from, "text": text}
+            "quo_from": quo_from, "text": text,
+            "emails": emails, "sent": sent, "max": max_touches, "next_ordinal": next_ordinal,
+            "is_open": is_open, "published": published,
+            "can_publish": (not published) and (findings or {}).get("status") == "approved",
+            "status": seq.status if seq else None, "due": bool(seq and seq.due()),
+            "due_label": due_label, "owner_email": owner_email or "",
+            "waiting": outreach.park_reason(seq) if seq and seq.status == outreach.WAITING else "",
+            "texts": [e for e in timeline if e["channel"] == "sms" and e["kind"] == "sent"][::-1][:3],
+            "tab": "email" if step1["mode"] != "hidden" else "activity"}
 
 
 def tpl_values(ordinal: int, prospect: Mapping[str, Any], report_url: str,
@@ -895,6 +941,108 @@ def variable_menu(values: Mapping[str, str] | None = None) -> list[dict[str, Any
     return out
 
 
+REPORT_FLOW_STEPS = ("Draft findings", "Choose three", "Publish report", "First email", "Follow-ups")
+
+
+def report_flow(*, audit_id: str, findings_status: str | None, report_slug: str,
+                o: Mapping[str, Any], csrf: str, deal_stage: str = "") -> dict[str, Any]:
+    """Where this prospect is in draft, choose, publish, email, follow up,
+    and the one thing to do next. The page puts this at the top so the next
+    step is never somewhere the operator has to remember."""
+    from app import outreach
+
+    aid = esc(audit_id)
+    open_report = (Markup(f'<a class="btn btn-ghost" href="/{esc(report_slug)}" target="_blank" '
+                          f'rel="noopener noreferrer">{icon("external")} Open report</a>')
+                   if report_slug else None)
+
+    def post(action: str, label: str) -> Markup:
+        return Markup(f'<form class="inline" method="post" action="/console/audits/{aid}/{action}">'
+                      f'{csrf_field(csrf)}<button type="submit" class="btn btn-primary">{label}</button></form>')
+
+    def opener(label: str, primary: bool = True) -> Markup:
+        cls = "btn btn-primary" if primary else "btn"
+        return Markup(f'<button type="button" class="{cls}" data-open="outreach" aria-haspopup="dialog" '
+                      f'aria-controls="outreach">{icon("mail")} {esc(label)}</button>')
+
+    sent, total = int(o.get("sent") or 0), int(o.get("max") or 1)
+    closed = o.get("status") == outreach.CLOSED
+    if not findings_status:
+        stage = 0
+        nxt = {"title": "Draft the findings",
+               "body": "The model ranks the problems costing this prospect the most work and "
+                       "explains each in plain language. You pick the three the owner reads.",
+               "cta": post("draft", "Draft findings")}
+    elif findings_status == "draft":
+        stage = 1
+        nxt = {"title": "Choose the three findings for the report",
+               "body": "Tick three below, in the order the owner should read them. The rest "
+                       "become follow-up emails, one per email. Choosing sends nothing.",
+               "cta": Markup('<a class="btn btn-primary" href="#findings">Choose findings</a>')}
+    elif not report_slug:
+        stage = 2
+        nxt = {"title": "Publish the report",
+               "body": "Puts the three findings on a private link only this prospect gets. "
+                       "Publishing sends nothing; the first email carries the link.",
+               "cta": post("publish", "Publish report"),
+               "secondary": Markup('<a class="btn btn-ghost" href="#findings">Review findings</a>')}
+    elif closed:
+        stage = len(REPORT_FLOW_STEPS)
+        nxt = {"title": o["state"][1],
+               "body": "Nothing more is scheduled for this prospect.",
+               "cta": opener("Open outreach", primary=False), "secondary": open_report}
+    elif o.get("waiting"):
+        stage = 3 if sent == 0 else 4
+        nxt = {"title": f"Waiting: {o['waiting']}",
+               "body": "The sequence is paused on their reply. Log the outcome from the CLI "
+                       "(python -m app.cli replies) to continue.",
+               "cta": opener("Open outreach", primary=False), "secondary": open_report}
+    elif sent == 0:
+        stage = 3
+        to = o.get("owner_email") or "the owner (find an address first)"
+        nxt = {"title": "Send the first email",
+               "body": f"Goes from {o.get('mailbox')} to {to} with the report link and the three "
+                       "findings. You read and edit it before it sends.",
+               "cta": opener("Write email 1"), "secondary": open_report}
+    else:
+        stage = 4
+        n = int(o.get("next_ordinal") or sent + 1)
+        if o.get("due"):
+            title = f"Email {n} of {total} is due today"
+        elif o.get("due_label"):
+            title = f"Email {n} of {total} is due {o['due_label']}"
+        else:
+            title = f"Email {n} of {total} is next"
+        nxt = {"title": title,
+               "body": "Each follow-up carries one held-back finding, so every email says "
+                       "something new.",
+               "cta": opener(f"Write email {n}", primary=bool(o.get("due"))), "secondary": open_report}
+
+    # A stage set by hand outranks the ledger: once a call is booked, the
+    # next thing is a conversation, not another email.
+    from app.console import leads as _leads
+    if deal_stage in _leads.MANUAL_STAGES:
+        label = _leads.CHOICE_LABELS[deal_stage]
+        nxt = {"title": f"Deal stage: {label}",
+               "body": {"call_booked": "Follow-up emails stopped when the call was booked. "
+                                       "Everything from here happens by hand.",
+                        "proposal_sent": "Waiting on their answer to the proposal. Follow-up "
+                                         "emails are stopped.",
+                        "won": "Won. Follow-up emails are stopped.",
+                        "lost": "Marked lost. Follow-up emails are stopped."}[deal_stage],
+               "cta": opener("Open outreach", primary=False), "secondary": open_report}
+    nxt.setdefault("secondary", None)
+    first_sent = (o.get("emails") or [{}])[0].get("when", "") if sent else ""
+    subs = {3: f"sent {first_sent}" if first_sent else "",
+            4: f"{max(0, sent - 1)} of {max(0, total - 1)} sent" if sent and total > 1 else ""}
+    steps = [{"label": label, "state": "done" if i < stage else "current" if i == stage else "todo",
+              "sub": subs.get(i, "")}
+             for i, label in enumerate(REPORT_FLOW_STEPS)]
+    return {"steps": steps, "stage": stage, "next": nxt,
+            "deal": deal_stage if deal_stage in _leads.MANUAL_STAGES else "auto",
+            "choices": _leads.CHOICES, "manual": sorted(_leads.MANUAL_STAGES)}
+
+
 def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                  checks: Sequence[Mapping[str, Any]], definitions: Mapping[str, Any],
                  findings: Mapping[str, Any] | None, evidence: Sequence[Mapping[str, Any]],
@@ -906,7 +1054,8 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                  report_url: str | None = None,
                  signature: str = "Relay for Roofers", sender_name: str = "",
                  templates: Mapping[str, Any] | None = None, mailbox: str = "",
-                 quo_from: str = "", sweep_label: str | None = None) -> str:
+                 quo_from: str = "", sweep_label: str | None = None,
+                 deal: Mapping[str, Any] | None = None) -> str:
     """One prospect: scores, findings, outreach, every check, the evidence."""
     from urllib.parse import urlparse
 
@@ -926,17 +1075,6 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
         lede += (f' &middot; <a href="{esc(prospect["maps_uri"])}" target="_blank" '
                  'rel="noopener noreferrer">Google Business Profile</a>')
     state = (findings or {}).get("status")
-    if audit.get("report_slug"):
-        primary = Markup(f'<a class="btn btn-primary" href="/{esc(audit["report_slug"])}" target="_blank" '
-                         'rel="noopener noreferrer">Open report</a>')
-    elif state == "approved":
-        primary = Markup(f'<form method="post" action="/console/audits/{esc(audit_id)}/publish">'
-                         f'{csrf_field(csrf)}<button type="submit">Publish report</button></form>')
-    elif not findings:
-        primary = Markup(f'<form method="post" action="/console/audits/{esc(audit_id)}/draft">'
-                         f'{csrf_field(csrf)}<button type="submit">Draft findings</button></form>')
-    else:
-        primary = None
 
     landing = None
     if audit.get("landing_url"):
@@ -949,7 +1087,7 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
     p_vm = {
         "audit_id": audit_id, "prospect_id": prospect_id, "name": name,
         "batch_id": audit.get("batch_id") or "", "sweep_label": sweep_label or "Call list",
-        "lede": Markup(lede), "primary": primary,
+        "lede": Markup(lede),
         "scores": {k: scores.get(k, 0) for k in ("found", "chosen", "booked", "total")},
         "chip": Markup(chip(audit.get("segment"))), "band": audit.get("band") or "",
         "landing": landing, "crawl_error": audit.get("crawl_error") or "",
@@ -1058,6 +1196,9 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                             report_url=report_url, signature=signature,
                             sender_name=sender_name, templates=templates, mailbox=mailbox,
                             quo_from=quo_from)
+    wf = report_flow(audit_id=audit_id, findings_status=state if findings else None,
+                     report_slug=str(audit.get("report_slug") or ""), o=o_vm, csrf=csrf,
+                     deal_stage=str((deal or {}).get("stage") or ""))
     from app import outreach as _outreach
     from app.console import callnotes
     notes = callnotes.build(prospect=prospect, audit=audit, checks=checks, definitions=definitions,
@@ -1066,6 +1207,33 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
 
     return _render("prospect.html", title=name, active="batches", csrf=csrf,
                    evidence_count=len(list(evidence or ())),
-                   p=p_vm, f=f_vm, o=o_vm, notes=notes, sections=sections, evidence_html=evidence_html,
+                   p=p_vm, f=f_vm, o=o_vm, wf=wf, notes=notes, sections=sections, evidence_html=evidence_html,
                    history=h_vm if len(h_vm) > 1 else [], history_note=history_note,
                    notice=notice)
+
+
+def render_leads(rows: Sequence[Mapping[str, Any]], *, view: str = "table", tab: str = "",
+                 q: str = "", csrf: str, notice: tuple[str, str] | None = None) -> str:
+    """Every lead and where it stands, as a table or as a board by stage."""
+    from urllib.parse import urlencode
+
+    from app.console import leads
+
+    view = view if view in ("table", "board") else "table"
+    counts = leads.counts(rows)
+    # Land on what needs doing; when nothing does, on everything.
+    if tab not in dict(leads.TABS):
+        tab = "action" if counts["action"] else "all"
+    shown = leads.filter_rows(rows, tab=tab if view == "table" else
+                              ("action" if tab == "action" else "all"), q=q)
+
+    def href(**over: str) -> str:
+        params = {"view": view, "tab": tab, "q": q, **over}
+        return "?" + urlencode({k: v for k, v in params.items() if v})
+
+    return _render("leads.html", title="Leads", active="leads", csrf=csrf, notice=notice,
+                   view=view, tab=tab, q=q, rows=shown, counts=counts,
+                   tabs=[(k, label, counts.get(k, 0), href(tab=k)) for k, label in leads.TABS],
+                   table_href=href(view="table"), board_href=href(view="board"),
+                   columns=leads.columns(shown), choices=leads.CHOICES,
+                   manual=sorted(leads.MANUAL_STAGES), total=len(rows))

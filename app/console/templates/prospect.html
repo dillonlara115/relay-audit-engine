@@ -1,9 +1,31 @@
 {% extends "base.html" %}
 {% from "_components.html" import page_header, kpi, pill, table_wrap, empty_row, modal_open, modal_close, modal_backdrop %}
 {% from "_outreach.html" import outreach_card %}
-{% from "_scripts.html" import insert_variables, copy_button, send_confirm, modals %}
+{% from "_scripts.html" import insert_variables, copy_button, send_confirm, modals, stage_confirm %}
 {% block body %}
-{{ page_header(p.name, p.lede, primary_html=p.primary,
+{#- Rare and destructive actions live behind More, away from the next step. -#}
+{% set header_actions %}
+  {{ modal_open("callnotes", "Call notes", "phone") }}
+  {{ modal_open("evidence", "Screenshots", "file", pill("dim", evidence_count ~ "") if evidence_count else None) }}
+  <details class="popover more-menu dropdown dropdown-end">
+    <summary aria-label="More actions">{{ icon("more") }} More</summary>
+    <div class="inner">
+      <form method="post" action="/console/audits/{{ p.audit_id }}/reaudit" onsubmit="{{ p.reaudit_confirm }}">
+        {{ csrf_field(csrf) }}<button class="menu-item" type="submit">{{ icon("refresh") }} Re-audit</button>
+      </form>
+      <form method="post" action="/console/suppress" onsubmit="{{ p.suppress_confirm }}">
+        {{ csrf_field(csrf) }}
+        <input type="hidden" name="value" value="{{ p.prospect_id }}">
+        <input type="hidden" name="match_type" value="place_id">
+        <input type="hidden" name="reason" value="requested">
+        <button class="menu-item danger" type="submit">{{ icon("ban") }} Suppress prospect</button>
+      </form>
+      <p class="hint">Suppressing means never contacting them again. There is no undo here.</p>
+    </div>
+  </details>
+{% endset %}
+{% set lede %}{{ p.lede }}{% if p.audited %} &middot; Audited {{ p.audited }}{% endif %}{% endset %}
+{{ page_header(p.name, lede, primary_html=header_actions,
                crumbs=[("/console/batches", "Sweeps"), ("/console/batches/" ~ p.batch_id, p.sweep_label), (None, p.name)]) }}
 
 <div class="kpis">
@@ -25,43 +47,42 @@
 <div class="banner"><span><strong>Partial audit.</strong> Not enough of the {{ p.partial_sections }} {{ "section" if p.partial_count == 1 else "sections" }} finished to score fairly. When Booked is affected the segment is left as Incomplete rather than guessed.</span></div>
 {% endif %}
 
-<div class="card actions">
-  <form class="inline" method="post" action="/console/audits/{{ p.audit_id }}/reaudit" onsubmit="{{ p.reaudit_confirm }}">
-    {{ csrf_field(csrf) }}<button class="btn btn-sm" type="submit">Re-audit</button>
-  </form>
-  <form class="inline" method="post" action="/console/suppress" onsubmit="{{ p.suppress_confirm }}">
-    {{ csrf_field(csrf) }}
-    <input type="hidden" name="value" value="{{ p.prospect_id }}">
-    <input type="hidden" name="match_type" value="place_id">
-    <input type="hidden" name="reason" value="requested">
-    <button class="btn btn-sm btn-error" type="submit">Suppress prospect</button>
-  </form>
-  {% if p.audited %}<span class="muted ml-2.5">Audited {{ p.audited }}</span>{% endif %}
-  <span class="openers">
-    {{ modal_open("outreach", "Outreach", "mail", pill(o.state[0], o.state[1])) }}
-    {{ modal_open("callnotes", "Call notes", "phone") }}
-    {{ modal_open("evidence", "Screenshots", "file", pill("dim", evidence_count ~ "") if evidence_count else None) }}
-  </span>
-</div>
+{#- The report flow: every stage in order, and the one thing to do next.
+    Every stage's action lives here, so nothing has to be hunted for. -#}
+<section class="card wf" aria-labelledby="wf-title">
+  <div class="wf-head">
+    <h2 id="wf-title">Report and outreach</h2>
+    <div class="wf-tools">
+      <form method="post" action="/console/leads/{{ p.prospect_id }}/stage" class="stage-form"
+            data-name="{{ p.name }}" onsubmit="return stageConfirm(this)">
+        {{ csrf_field(csrf) }}
+        <span class="muted text-sm whitespace-nowrap">Deal stage</span>
+        <select name="stage" class="select select-sm" aria-label="Deal stage for {{ p.name }}">
+          {% for k, label in wf.choices %}<option value="{{ k }}"{% if k == wf.deal %} selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+        <button class="btn btn-sm" type="submit">Set</button>
+      </form>
+      {{ modal_open("outreach", "Outreach", "mail", pill(o.state[0], o.state[1])) }}
+    </div>
+  </div>
+  <ul class="steps wf-steps">
+    {% for s in wf.steps %}
+    <li class="step{% if s.state != 'todo' %} step-primary{% endif %}{% if s.state == 'current' %} current{% endif %}"{% if s.state == 'done' %} data-content="&#10003;"{% endif %}{% if s.state == 'current' %} aria-current="step"{% endif %}>
+      <span class="lbl">{{ s.label }}{% if s.sub %}<small>{{ s.sub }}</small>{% endif %}</span>
+    </li>
+    {% endfor %}
+  </ul>
+  <div class="wf-next">
+    <div class="wf-copy">
+      <div class="wf-eyebrow">{{ "Done" if wf.stage >= wf.steps|length else "Next" }}</div>
+      <h3>{{ wf.next.title }}</h3>
+      <p class="muted">{{ wf.next.body }}</p>
+    </div>
+    <div class="wf-cta">{% if wf.next.secondary %}{{ wf.next.secondary }}{% endif %}{{ wf.next.cta }}</div>
+  </div>
+</section>
 
-<h2>Score history</h2>
-{% if history_note %}<p class="muted">{{ history_note }}</p>{% endif %}
-{% if history %}
-{% call table_wrap() %}
-<thead><tr><th data-sort="date">Date</th><th data-sort="sweep">Sweep</th><th data-sort="f">F</th><th data-sort="c">C</th><th data-sort="b">B</th><th data-sort="total">Total</th><th data-sort="segment">Segment</th><th></th></tr></thead>
-<tbody>
-{% for h in history %}
-<tr{% if h.current %} class="current"{% endif %} data-sort_date="{{ h.date_iso }}">
-<td>{{ h.date }}</td><td>{{ h.sweep }}</td>
-<td class="num">{{ h.found }}</td><td class="num">{{ h.chosen }}</td><td class="num">{{ h.booked }}</td>
-<td class="num">{{ h.total }}</td><td>{{ h.chip }}</td>
-<td>{% if h.current %}<span class="muted">this audit</span>{% endif %}{% if h.partial %} <span class="tag warn" title="{{ tag_titles['Partial'] }}">Partial</span>{% endif %}</td>
-</tr>
-{% endfor %}
-</tbody>{% endcall %}
-{% endif %}
-
-<h2>Findings {{ pill(p.findings_state[0], p.findings_state[1]) }}</h2>
+<h2 id="findings">Findings {{ pill(p.findings_state[0], p.findings_state[1]) }}</h2>
 {% if f %}
   {% if f.stale %}<div class="banner"><span>This site was checked again after these were written, so they describe what we saw last time. Anything the owner has fixed since would still be named here. Draft the findings again before composing an email.</span></div>{% endif %}
   {% if f.needs_review %}<div class="banner"><span>Read this before approving. Some wording may describe how we found the problem rather than what the owner would notice. The owner should hear what a customer experiences, never how we measured it.</span></div>{% endif %}
@@ -82,17 +103,27 @@
   <p class="hint">Tick the three the owner should read. They go in the report in the order shown here. Whatever stays unticked is held back, one per follow-up email, so each email after the first says something new. Choosing does not send or publish anything.</p>
   <button type="submit" class="btn btn-primary mt-3.5">Choose these three for the report</button>
   </form>
-  {% elif f.can_publish %}
-  <form method="post" action="/console/audits/{{ p.audit_id }}/publish">{{ csrf_field(csrf) }}<button type="submit" class="btn btn-primary mt-3.5">Publish report</button></form>
-  {% elif p.report_slug %}
-  <p><a href="/{{ p.report_slug }}" target="_blank" rel="noopener noreferrer">Open report</a></p>
   {% endif %}
   {% if f.thin_note %}<p class="muted">{{ f.thin_note }}</p>{% endif %}
 {% else %}
-<div class="card">
-  <p class="muted">Nothing drafted yet. The model ranks the problems costing this prospect the most work and explains each in plain language. A person picks the three the owner reads.</p>
-  <form method="post" action="/console/audits/{{ p.audit_id }}/draft">{{ csrf_field(csrf) }}<button type="submit" class="btn btn-primary mt-3.5">Draft findings</button></form>
-</div>
+<p class="muted">Nothing drafted yet. Start from Report and outreach above.</p>
+{% endif %}
+
+<h2>Score history</h2>
+{% if history_note %}<p class="muted">{{ history_note }}</p>{% endif %}
+{% if history %}
+{% call table_wrap() %}
+<thead><tr><th data-sort="date">Date</th><th data-sort="sweep">Sweep</th><th data-sort="f">F</th><th data-sort="c">C</th><th data-sort="b">B</th><th data-sort="total">Total</th><th data-sort="segment">Segment</th><th></th></tr></thead>
+<tbody>
+{% for h in history %}
+<tr{% if h.current %} class="current"{% endif %} data-sort_date="{{ h.date_iso }}">
+<td>{{ h.date }}</td><td>{{ h.sweep }}</td>
+<td class="num">{{ h.found }}</td><td class="num">{{ h.chosen }}</td><td class="num">{{ h.booked }}</td>
+<td class="num">{{ h.total }}</td><td>{{ h.chip }}</td>
+<td>{% if h.current %}<span class="muted">this audit</span>{% endif %}{% if h.partial %} <span class="tag warn" title="{{ tag_titles['Partial'] }}">Partial</span>{% endif %}</td>
+</tr>
+{% endfor %}
+</tbody>{% endcall %}
 {% endif %}
 
 <dialog class="modal" id="callnotes" aria-labelledby="callnotes-title">
@@ -144,6 +175,7 @@
 {{ modals() }}
 {{ insert_variables() }}
 {{ send_confirm() }}
+{{ stage_confirm(wf.manual) }}
 {{ copy_button() }}
 
 {% for section in sections %}

@@ -112,7 +112,7 @@ catch a lead at all, and the answer is usually no.
 |---|---|---|---|---|
 | B1 | **Self-serve booking** | Homeowner can pick a time without waiting | 10 | Crawl |
 | B2 | **Form health** | Form has an action, validates, resolves without error | 8 | Render |
-| B3 | Missed-call text-back | Detected on the primary number | 6 | Crawl |
+| B3 | Text option on the site | Homeowner can text the business from the website | 6 | Crawl |
 | B4 | Live chat | Widget present and configured | 4 | Crawl |
 | B5 | Response promise | A stated response time anywhere on site | 4 | Crawl |
 | B6 | Confirmation clarity | Thank-you state tells him what happens next | 4 | Render |

@@ -2,8 +2,8 @@
 {% from "_components.html" import page_header %}
 {% block body %}
 {{ page_header(job.label, crumbs=[("/console/jobs", "Jobs"), (None, job.label)]) }}
-<div class="muted mb-3">Job {{ job.job_id }} &middot; {{ status_pill(job.status) }}
-<span id="job-status" class="hidden"></span></div>
+<div class="muted mb-3 flex flex-wrap items-center gap-2">Job {{ job.job_id }} &middot;
+<span id="job-status">{{ status_pill(job.status) }}</span></div>
 
 {% if job.error %}
 <div class="alert alert-error alert-soft mb-3.5"><span><strong>Failed.</strong> {{ job.error }}</span></div>

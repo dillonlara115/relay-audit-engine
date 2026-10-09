@@ -61,7 +61,7 @@ sweep_coordinator (LlmAgent)
   └── audit_agent (fanned out per prospect over Pub/Sub)
         ├── recon (SequentialAgent)   robots → homepage → sitemap → key pages
         ├── inspector (ParallelAgent) onpage | speed | vision
-        ├── booked        tool        booking, form health, chat, text-back
+        ├── booked        tool        booking, form health, chat, text option
         ├── score         tool        pure function
         └── diagnostician LlmAgent    picks 3 findings, writes consequences
   ├── ranker        tool     sorts by segment priority

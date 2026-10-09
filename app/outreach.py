@@ -210,6 +210,15 @@ def open_sequence(prospect_id: str, *, audit_id: str | None = None,
     )
 
 
+def close(seq: Sequence, reason: str) -> Sequence:
+    """Stop the sequence for good. Used when a person moves the lead into a
+    deal (call booked, proposal, won, lost): a follow-up that opens with
+    "one more thing I noticed" must never reach someone already in talks."""
+    if not seq.is_open and seq.status != WAITING:
+        return seq
+    return replace(seq, status=CLOSED, next_due_at=None, closed_reason=reason)
+
+
 def advance(seq: Sequence, *, sent_at: datetime | None = None) -> Sequence:
     """Record that a touch went out. Closes the sequence on the fourth."""
     if not seq.is_open:

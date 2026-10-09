@@ -33,7 +33,10 @@ BOOKING_PHRASES = ("book online", "book your inspection online", "schedule onlin
                    "pick a time", "choose a time", "book an appointment online",
                    "schedule your appointment online", "instant quote")
 
-# ── B3 missed-call text-back ──────────────────────────────────────────────────
+# ── B3 text option on the site ────────────────────────────────────────────────
+# What the website offers, never what the phone line does. Missed-call text-back
+# is configured in the phone system and is invisible to a crawl, so a verdict
+# about voicemail would be a claim we never measured.
 
 TEXTBACK_FINGERPRINTS = ("podium.com", "widget.podium", "hatchapp", "usehatchapp",
                          "textrequest", "text-request", "zipwhip", "skipio",
@@ -154,12 +157,22 @@ def b2_form_health(ctx: AuditContext) -> CheckResult:
                           "so its behavior was not checked.",
                     visible=False, field_count=health.get("field_count"))
 
+    # The browser only enforces the native `required` attribute. Fluent Forms,
+    # Gravity Forms and Contact Form 7 mark required fields with aria-required
+    # and enforce them in their own script, which we never run because running
+    # it means submitting. Fields declared required while an empty form still
+    # passes the browser is that pattern, not a form that takes blank entries.
+    # Measured on a real prospect: six aria-required fields, a form that showed
+    # "This field is required" on every one, reported as accepting empty entries.
+    scripted = bool(health.get("novalidate")) or (
+        bool(health.get("empty_valid")) and (health.get("required_count") or 0) > 0)
+
     problems = []
     if not health.get("has_submit_control"):
         problems.append("the form has no working send button")
-    if health.get("empty_valid") and not health.get("novalidate"):
-        problems.append("it accepts a completely empty submission, so broken and "
-                        "spam entries go straight through")
+    if health.get("empty_valid") and not scripted:
+        problems.append("no field on it is marked required, so nothing stops a "
+                        "completely empty submission")
     if not health.get("filled_valid") and not health.get("novalidate"):
         problems.append("it rejects a correctly filled entry, so a real homeowner "
                         "cannot get through")
@@ -182,7 +195,7 @@ def b2_form_health(ctx: AuditContext) -> CheckResult:
                       "The contact form was filled and checked, never sent: "
                       + "; ".join(problems) + ".", **observed)
 
-    if health.get("novalidate"):
+    if scripted:
         return result("B2", True,
                       "The contact form accepts a correctly filled entry. Its checks run "
                       "in scripts we cannot exercise, so empty-entry handling was not measured.",
@@ -207,11 +220,11 @@ def b3_text_back(ctx: AuditContext) -> CheckResult:
         how = (f"a {vendor} texting tool" if vendor
                else "a tap-to-text link" if sms
                else f"the site invites texting ({phrase!r})")
-        return result("B3", True, f"A missed call has a text path: {how}.",
+        return result("B3", True, f"The site offers a way to text the business: {how}.",
                       vendor=vendor, sms_link=sms or None, phrase=phrase)
     return result("B3", False,
-                  "A caller who gets voicemail has no text path back. The lead is "
-                  "gone the moment they hang up.")
+                  "Nothing on the site offers a way to text the business. A homeowner "
+                  "who would rather text than call has nowhere to start.")
 
 
 @check("B4")

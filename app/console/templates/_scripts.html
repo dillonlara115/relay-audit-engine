@@ -36,8 +36,7 @@
     fetch('/console/jobs/' + id + '.json', {credentials: 'same-origin'})
       .then(function (r) { return r.json(); })
       .then(function (j) {
-        status.textContent = j.status;
-        status.className = 'status ' + j.status;
+        if (j.status_html) { status.innerHTML = j.status_html; }
         log.textContent = (j.log || []).map(function (l) { return l.line; }).join('\n');
         log.scrollTop = log.scrollHeight;
         if (j.status === 'done' || j.status === 'failed') {
@@ -277,6 +276,20 @@ function sendConfirm(form) {
 </script>
 {%- endmacro %}
 
+{#- Choosing a deal stage closes the email sequence. Say so before it does.
+    Forms opt in with onsubmit="return stageConfirm(this)" and data-name. -#}
+{% macro stage_confirm(manual) -%}
+<script>
+  var MANUAL_STAGES = {{ manual|tojson }};
+  function stageConfirm(form) {
+    var sel = form.elements.stage;
+    if (MANUAL_STAGES.indexOf(sel.value) === -1) return true;
+    var label = sel.options[sel.selectedIndex].text;
+    return confirm('Move ' + form.dataset.name + ' to ' + label + '? Any follow-up emails still scheduled will stop.');
+  }
+</script>
+{%- endmacro %}
+
 {#- Dialogs. A button with data-open shows the dialog of that id; Escape,
     the close button and a click on the backdrop close it. A redirect that
     lands on #outreach or #text (the send and log routes do) opens the
@@ -285,11 +298,18 @@ function sendConfirm(form) {
 <script>
 (function () {
   function open(id) {
-    var d = document.getElementById(id);
+    var target = document.getElementById(id);
+    var d = target;
     while (d && d.tagName !== 'DIALOG') d = d.parentNode && d.parentNode.tagName ? d.parentNode : null;
     if (!d || d.open) return;
+    // A target inside a tab panel (#text, #activity) selects that tab: the
+    // panel's radio is the element just before it.
+    var pane = target.closest ? target.closest('.tab-content') : null;
+    if (pane && pane.previousElementSibling && pane.previousElementSibling.type === 'radio') {
+      pane.previousElementSibling.checked = true;
+    }
     if (typeof d.showModal === 'function') d.showModal(); else d.setAttribute('open', '');
-    var first = d.querySelector('input:not([type=hidden]), textarea, button:not([data-close])');
+    var first = (pane || d).querySelector('input:not([type=hidden]):not([type=radio]), textarea, button:not([data-close])');
     if (first) first.focus();
   }
   document.querySelectorAll('[data-open]').forEach(function (btn) {

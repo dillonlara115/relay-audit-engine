@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% from "_components.html" import page_header, pill, table_wrap, empty_row %}
+{% from "_scripts.html" import stage_confirm %}
+
+{#- The stage a person sets after a reply. Choosing one of the four deal
+    stages stops the follow-up emails, so the confirm says so first. -#}
+{% macro stage_form(r, csrf, choices) -%}
+<form method="post" action="/console/leads/{{ r.prospect_id }}/stage" class="stage-form"
+      data-name="{{ r.name }}" onsubmit="return stageConfirm(this)">
+  {{ csrf_field(csrf) }}
+  <select name="stage" class="select select-sm" aria-label="Stage for {{ r.name }}">
+    {% for k, label in choices %}<option value="{{ k }}"{% if k == r.hand_set %} selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <button class="btn btn-sm" type="submit">Set</button>
+</form>
+{%- endmacro %}
+
+{% macro lead_meta(r) -%}
+{% if r.last %}<span class="lastc">{{ icon(r.last.icon) }} {{ r.last.text }}</span>{% endif %}
+{%- endmacro %}
+
+{% block body %}
+{% set toggle %}
+<div class="join view-toggle" role="group" aria-label="View">
+  <a class="btn btn-sm join-item{{ ' btn-active' if view == 'table' else '' }}" href="{{ table_href }}"{% if view == 'table' %} aria-current="page"{% endif %}>{{ icon("list") }} Table</a>
+  <a class="btn btn-sm join-item{{ ' btn-active' if view == 'board' else '' }}" href="{{ board_href }}"{% if view == 'board' %} aria-current="page"{% endif %}>{{ icon("columns") }} Board</a>
+</div>
+{% endset %}
+{{ page_header("Leads", "Every prospect with a published report or any contact, and where each one stands. Stages follow sends and replies until you set one by hand.", primary_html=toggle) }}
+
+<div class="toolbar">
+  <form method="get" class="search-form" role="search">
+    <input type="hidden" name="view" value="{{ view }}"><input type="hidden" name="tab" value="{{ tab }}">
+    <label class="input search">{{ icon("search") }}<input type="search" name="q" value="{{ q }}" class="grow" placeholder="Search by business or city" aria-label="Search by business or city"></label>
+  </form>
+  {% if view == "board" %}
+  <a class="btn btn-sm{{ ' btn-active' if tab == 'action' else '' }}" href="?view=board&tab={{ 'all' if tab == 'action' else 'action' }}{{ '&q=' ~ q if q else '' }}">{{ icon("alert") }} Needs action only <b class="ml-1">{{ counts.action }}</b></a>
+  {% endif %}
+  <span class="muted text-sm">{{ rows|length }} of {{ total }}</span>
+</div>
+
+{% if view == "table" %}
+<div class="tabs-row" role="tablist">
+  {% for key, label, n, link in tabs %}
+  <a role="tab" class="tab{{ ' tab-active on' if key == tab else '' }}" href="{{ link }}"{% if key == tab %} aria-selected="true"{% endif %}>{{ label }} <b>{{ n }}</b></a>
+  {% endfor %}
+</div>
+
+{% call table_wrap() %}
+<thead><tr><th data-sort="lead">Lead</th><th data-sort="stage">Stage</th><th data-sort="last">Last contact</th>
+<th>Next step</th><th>Reply</th><th data-sort="score">Score</th><th>Set stage</th></tr></thead>
+<tbody>
+{% for r in rows %}
+<tr{% if r.attention %} class="attention"{% endif %} data-sort_lead="{{ r.name|lower }}" data-sort_last="{{ r.sort_last.isoformat() }}" data-sort_score="{{ r.total if r.total is not none else -1 }}">
+<td>{% if r.audit_id %}<a href="/console/audits/{{ r.audit_id }}">{{ r.name }}</a>{% else %}{{ r.name }}{% endif %}
+  <div class="muted text-sm">{{ r.city }}{% if r.phone %} &middot; <a class="whitespace-nowrap" href="tel:{{ r.phone }}">{{ r.phone }}</a>{% endif %}</div></td>
+<td>{{ pill(r.stage_pill, r.stage_label) }}{% if r.stage_detail %}<div class="muted text-sm">{{ r.stage_detail }}</div>{% endif %}</td>
+<td>{% if r.last %}{{ lead_meta(r) }}{% else %}<span class="muted">Never</span>{% endif %}</td>
+<td>{% if r.next %}<span class="nextstep{{ ' attention' if r.attention else '' }}">{{ r.next }}</span>{% endif %}</td>
+<td>{% if r.reply %}{{ pill(r.reply.kind, r.reply.label) }} <span class="muted text-sm">{{ r.reply.when }}</span>{% if r.reply.excerpt %}<div class="excerpt">&ldquo;{{ r.reply.excerpt }}&rdquo;</div>{% endif %}{% endif %}</td>
+<td class="num">{{ r.total if r.total is not none else "" }}</td>
+<td class="rowact">{{ stage_form(r, csrf, choices) }}</td>
+</tr>
+{% else %}
+{{ empty_row(7, "No leads here. A lead appears once its report is published or it has been contacted." if not q else "Nothing matches that search.") }}
+{% endfor %}
+</tbody>{% endcall %}
+
+{% else %}
+<div class="board" aria-label="Leads by stage">
+  {% for col in columns %}
+  <section class="board-col" aria-label="{{ col.label }}">
+    <header class="board-head">{{ pill(col.pill, col.label) }}<span class="muted text-sm">{{ col.rows|length }}</span></header>
+    {% for r in col.rows %}
+    <article class="lead-card{{ ' attention' if r.attention else '' }}">
+      {% if r.audit_id %}<a class="name" href="/console/audits/{{ r.audit_id }}">{{ r.name }}</a>{% else %}<span class="name">{{ r.name }}</span>{% endif %}
+      <div class="muted text-sm">{{ r.city }}{% if r.stage_detail %} &middot; {{ r.stage_detail }}{% endif %}</div>
+      {% if r.last or r.reply %}<div class="card-meta">{{ lead_meta(r) }}{% if r.reply %}{{ pill(r.reply.kind, r.reply.label) }}{% endif %}</div>{% endif %}
+      {% if r.next %}<div class="nextstep{{ ' attention' if r.attention else '' }}">{{ r.next }}</div>{% endif %}
+      {{ stage_form(r, csrf, choices) }}
+    </article>
+    {% else %}
+    <p class="muted text-sm board-empty">None</p>
+    {% endfor %}
+  </section>
+  {% endfor %}
+</div>
+{% endif %}
+
+{{ stage_confirm(manual) }}
+{% endblock %}

@@ -95,7 +95,7 @@ sweep_coordinator (LlmAgent)
         │     ├── speed     tool      PageSpeed Insights
         │     ├── serp      tool      map pack + organic  [after Aug 31]
         │     └── vision    LlmAgent  screenshot: stock photos, trust read
-        ├── booked        tool        booking, form health, chat, text-back
+        ├── booked        tool        booking, form health, chat, text option
         ├── score         tool        pure function, fully tested
         └── diagnostician LlmAgent    picks 3 findings, writes consequences
   └── ranker            tool          sorts by segment priority, builds the call list

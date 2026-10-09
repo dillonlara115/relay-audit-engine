@@ -117,9 +117,21 @@ def test_b2_healthy_form_passes_and_says_never_sent():
 
 
 def test_b2_accepting_an_empty_submission_is_the_finding():
-    res = run("B2", context(form_health={**HEALTHY, "empty_valid": True}))
+    res = run("B2", context(form_health={**HEALTHY, "empty_valid": True, "required_count": 0}))
     assert res.status == FAIL
     assert "empty submission" in res.note
+
+
+def test_b2_script_enforced_required_fields_are_not_called_empty_accepting():
+    """Regression, Patriot Roofing (Fluent Forms). Six fields carried
+    aria-required, the browser ignores that, so the empty form passed its
+    check while the form's own script showed "This field is required" on
+    every one. Declared-required plus empty-passes is script validation we
+    never run, not a form that takes blank entries."""
+    res = run("B2", context(form_health={**HEALTHY, "empty_valid": True, "required_count": 6}))
+    assert res.status == PASS
+    assert "not measured" in res.note
+    assert "empty submission" not in res.note
 
 
 def test_b2_rejecting_a_valid_entry_is_the_expensive_break():
@@ -171,6 +183,21 @@ def test_b2_unprobed_but_crawled_form_skips():
 )
 def test_b3_text_paths(html, status):
     assert run("B3", context(homepage_html=doc(html))).status == status
+
+
+def test_b3_claims_only_what_the_website_shows():
+    """Regression, Patriot Roofing. B3 crawls the site; it never calls the
+    number. Its old note said a caller "who gets voicemail has no text path
+    back", and the report turned that into a claim about the phone line that
+    nothing had measured."""
+    from app.checks.definitions import by_code
+
+    for html in ("<p>Give us a call today.</p>", '<a href="sms:+17195550142">Text us</a>'):
+        note = run("B3", context(homepage_html=doc(html))).note.lower()
+        assert "site" in note
+        assert not any(w in note for w in ("voicemail", "missed call", "hang up", "phone line"))
+    b3 = by_code()["B3"]
+    assert "missed" not in b3["title"].lower() and "number" not in b3["full_credit"].lower()
 
 
 # ── B4 live chat ──────────────────────────────────────────────────────────────
@@ -260,6 +287,7 @@ def test_booked_notes_state_the_limit_and_never_use_a_dash():
     contexts = [
         context(), context(form_health=HEALTHY),
         context(form_health={**HEALTHY, "empty_valid": True}),
+        context(form_health={**HEALTHY, "empty_valid": True, "required_count": 0}),
         context(homepage_html=doc("<p>Call or text us. 24/7 emergency.</p>")),
     ]
     for ctx in contexts:

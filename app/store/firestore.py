@@ -818,3 +818,70 @@ def sequences_by_status(status: str, *, limit: int = 200) -> list[dict[str, Any]
 def all_sequences() -> list[dict[str, Any]]:
     """The whole ledger. Small by design: target volume is a hundred a month."""
     return [snap.to_dict() or {} for snap in get_client().collection(OUTREACH).stream()]
+
+
+# ── The leads view ────────────────────────────────────────────────────────────
+# One read per collection, never one per lead: the ledger is small by design,
+# and a page that fans out a query per row is the wrong shape at any size.
+
+DEALS = "deals"  # deals/{prospect_id}: the stage a person set after a reply
+
+
+def all_deals() -> dict[str, dict[str, Any]]:
+    return {snap.id: snap.to_dict() or {} for snap in get_client().collection(DEALS).stream()}
+
+
+def get_deal(prospect_id: str) -> dict[str, Any] | None:
+    snap = get_client().collection(DEALS).document(prospect_id).get()
+    return snap.to_dict() if snap.exists else None
+
+
+def set_deal_stage(prospect_id: str, stage: str | None) -> None:
+    """Set, or with None clear, the hand-set stage. Every change is kept in
+    history, so when a call was booked or a job won stays answerable."""
+    now = utcnow()
+    get_client().collection(DEALS).document(prospect_id).set({
+        "prospect_id": prospect_id,
+        "stage": stage if stage else firestore.DELETE_FIELD,
+        "updated_at": now,
+        "history": firestore.ArrayUnion([{"stage": stage or "auto", "at": now}]),
+    }, merge=True)
+
+
+def published_audits() -> list[dict[str, Any]]:
+    """Every audit with a live report. Ordering on published_at keeps only the
+    docs that have one; a single-field index, which Firestore keeps by default."""
+    query = get_client().collection(AUDITS).order_by("published_at")
+    return [{"audit_id": snap.id, **(snap.to_dict() or {})} for snap in query.stream()]
+
+
+def _all_under_outreach(sub: str) -> list[tuple[str, dict[str, Any]]]:
+    """(prospect_id, row) for every doc in outreach/*/<sub>. A collection group
+    read with no filter or order needs no collection-group index."""
+    out = []
+    for snap in get_client().collection_group(sub).stream():
+        parent = snap.reference.parent.parent
+        if parent is not None and parent.parent.id == OUTREACH:
+            out.append((parent.id, snap.to_dict() or {}))
+    return out
+
+
+def all_touches() -> list[tuple[str, dict[str, Any]]]:
+    return _all_under_outreach(TOUCHES)
+
+
+def all_replies() -> list[tuple[str, dict[str, Any]]]:
+    return _all_under_outreach(REPLIES)
+
+
+def prospects_by_id(ids: Iterable[str]) -> dict[str, dict[str, Any]]:
+    """An exact multi-get, chunked: get_all takes a bounded list."""
+    client = get_client()
+    wanted = sorted({str(i) for i in ids if i})
+    out: dict[str, dict[str, Any]] = {}
+    for start in range(0, len(wanted), 100):
+        refs = [client.collection(PROSPECTS).document(pid) for pid in wanted[start:start + 100]]
+        for snap in client.get_all(refs):
+            if snap.exists:
+                out[snap.id] = snap.to_dict() or {}
+    return out

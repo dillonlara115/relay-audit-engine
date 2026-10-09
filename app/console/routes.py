@@ -222,6 +222,7 @@ async def job_json(job_id: str, request: Request) -> Response:
     return JSONResponse({
         "job_id": job_id,
         "status": record.get("status"),
+        "status_html": views.status_pill(record.get("status") or ""),
         "log": [{"line": entry.get("line", "")} for entry in (record.get("log") or [])],
         "result": record.get("result") or {},
         "error": record.get("error"),
@@ -234,6 +235,65 @@ async def job_screen(job_id: str, request: Request) -> Response:
     if record is None:
         return Response(status_code=404)
     return _page(views.render_job(record, csrf=csrf_token(request), notice=_notice(request)))
+
+
+# ── Leads ─────────────────────────────────────────────────────────────────────
+
+
+@router.get("/leads")
+async def leads_screen(request: Request, view: str = "table", tab: str = "", q: str = "") -> Response:
+    """Every prospect with a published report or any contact, by stage. One
+    read per collection; the rows are assembled in leads.build."""
+    from app.console import leads
+
+    def load() -> list[dict[str, Any]]:
+        published = store.published_audits()
+        sequences = store.all_sequences()
+        touches = store.all_touches()
+        replies = store.all_replies()
+        deals = _soft(store.all_deals, {})
+        ids = ({str(a.get("prospect_id")) for a in published}
+               | {str(s.get("prospect_id")) for s in sequences} | {pid for pid, _ in touches})
+        return leads.build(published=published, sequences=sequences,
+                           prospects=store.prospects_by_id(ids),
+                           touches=touches, replies=replies, deals=deals)
+
+    rows = await asyncio.to_thread(load)
+    return _page(views.render_leads(rows, view=view, tab=tab, q=q, csrf=csrf_token(request),
+                                    notice=_notice(request)))
+
+
+@router.post("/leads/{prospect_id}/stage")
+async def set_lead_stage(prospect_id: str, request: Request, stage: str = Form("auto"),
+                         csrf: str = Form(None)) -> Response:
+    """Set the stage a person decides: call booked, proposal sent, won, lost,
+    or back to automatic. Any of the four closes an open email sequence, so
+    no follow-up reaches someone already in talks. Sends nothing."""
+    if not check_csrf(request, csrf):
+        return Response(status_code=403, content="stale form, reload the page")
+    from app import outreach
+    from app.console import leads
+
+    back = _back(request, "/console/leads")
+    if stage not in leads.CHOICE_LABELS:
+        return _redirect(_with_notice(back, "stage_rejected", f"Not a stage: {stage}"))
+    label = leads.CHOICE_LABELS[stage]
+
+    def apply() -> str:
+        store.set_deal_stage(prospect_id, None if stage == "auto" else stage)
+        if stage not in leads.MANUAL_STAGES:
+            return "Back to automatic."
+        row = store.get_sequence(prospect_id)
+        if row:
+            seq = outreach.Sequence.from_dict(row)
+            closed = outreach.close(seq, f"deal: {label.lower()}")
+            if closed is not seq:
+                store.save_sequence(closed)
+                return f"{label}. Follow-up emails stopped."
+        return f"{label}."
+
+    detail = await asyncio.to_thread(apply)
+    return _redirect(_with_notice(back, "stage_set", detail))
 
 
 # ── Batches ───────────────────────────────────────────────────────────────────
@@ -535,13 +595,14 @@ async def audit_screen(audit_id: str, request: Request) -> Response:
             _soft(store.replies_for, [], pid),
             _history_for(pid),
             _soft(store.get_email_templates, None),
+            _soft(store.get_deal, None, pid),
         )
 
     loaded = await asyncio.to_thread(load)
     if loaded is None:
         return Response(status_code=404)
     (audit, prospect, checks, definitions, findings, evidence,
-     sequence, touches, replies, history, templates) = loaded
+     sequence, touches, replies, history, templates, deal) = loaded
     return _page(views.render_audit(
         audit=audit, prospect=prospect, checks=checks, definitions=definitions,
         findings=findings, evidence=evidence, csrf=csrf_token(request), notice=_notice(request),
@@ -552,6 +613,7 @@ async def audit_screen(audit_id: str, request: Request) -> Response:
         templates=templates,
         mailbox=get_config().outreach_mailbox,
         quo_from=get_config().quo_from,
+        deal=deal,
     ))
 
 
@@ -934,6 +996,9 @@ async def send_text(prospect_id: str, request: Request, audit_id: str = Form(Non
             "sent_via": "console", "to": number, "body": text,
             "message_id": sent.message_id, "resource_id": sent.message_id,
             "conversation_id": sent.conversation_id,
+            # Quo's answer at send time (queued or sent). The delivered or
+            # failed webhook for this message id overwrites it.
+            "delivery_status": sent.status or "queued",
         })
         if not store.get_sequence(prospect_id):
             pool = len((findings_doc or {}).get("findings") or [])
@@ -941,7 +1006,7 @@ async def send_text(prospect_id: str, request: Request, audit_id: str = Form(Non
             store.save_sequence(outreach.open_sequence(prospect_id, audit_id=audit_id,
                                                        max_touches=outreach.touches_supported(pool) or 1))
         store.bump_daily_texts(today)
-        return None, f"Text to {number}."
+        return None, f"Text to {number}. Delivery shows under Activity once the carrier reports it."
 
     blocked, detail = await asyncio.to_thread(send)
     back = _back(request, f"/console/audits/{audit_id}" if audit_id else "/console/batches")

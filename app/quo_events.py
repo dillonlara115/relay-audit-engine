@@ -24,7 +24,7 @@ from app.tools import quo
 
 @dataclass(frozen=True)
 class Outcome:
-    action: str                      # ignored | duplicate | suppressed | reply | touch | summary | unknown
+    action: str                      # ignored | duplicate | suppressed | reply | touch | summary | status | unknown
     prospect_id: str = ""
     intent: str = ""
     detail: str = ""
@@ -54,9 +54,14 @@ def _suppress(prospect_id: str, prospect: Mapping[str, Any], phone: str, reason:
     store.mark_suppressed(prospect_id, reason)
 
 
+# What the carrier finally did with a text we sent. Each is terminal.
+DELIVERY = {"message.delivered": "delivered", "message.failed": "failed",
+            "message.undelivered": "undelivered"}
+
+
 async def handle(payload: Mapping[str, Any]) -> Outcome:
     event = quo.parse_event(payload)
-    if event.kind in ("other", "text_status"):
+    if event.kind == "other":
         return Outcome("ignored", detail=event.raw_type)
     if not store.claim_event(event.event_id):
         return Outcome("duplicate", detail=event.event_id)
@@ -66,6 +71,17 @@ async def handle(payload: Mapping[str, Any]) -> Outcome:
         return Outcome("unknown", detail=event.phone or ",".join(event.contact_ids))
     pid = str(prospect.get("place_id") or "")
     now = datetime.now(timezone.utc)
+
+    if event.kind == "text_status":
+        # The send route stored Quo's message id as the touch's resource_id,
+        # so the delivery report lands on the text it is about.
+        found = store.touch_by_resource(pid, event.resource_id) if event.resource_id else None
+        if not found:
+            return Outcome("ignored", pid, detail="status for a text not on record")
+        touch_id, _ = found
+        status = DELIVERY.get(event.raw_type, event.status or "unknown")
+        store.update_touch(pid, touch_id, {"delivery_status": status, "delivery_at": now})
+        return Outcome("status", pid, detail=status)
 
     if event.kind == "text_in":
         if quo.is_stop(event.text):

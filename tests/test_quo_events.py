@@ -109,11 +109,42 @@ def test_a_finished_call_is_a_touch_and_its_summary_attaches(ledger):
     assert ledger["updates"][0] == ("p1", "t1", {"summary": ["Owner interested."], "next_steps": ["Send the report."]})
 
 
-def test_status_and_task_events_are_ignored_without_a_claim(ledger):
-    for t in ("message.delivered", "task.created", "contact.updated"):
+def test_task_and_contact_events_are_ignored_without_a_claim(ledger):
+    for t in ("task.created", "contact.updated"):
         out = run(quo_events.handle({"id": "EVx", "type": t, "data": {}}))
         assert out.action == "ignored"
     assert ledger["claimed"] == []
+
+
+def text_status(kind, *, message_id="AC2", event_id="EV9"):
+    return {"id": event_id, "type": kind, "data": {
+        "resource": {"id": message_id, "direction": "outgoing", "status": kind.split(".")[1]},
+        "context": {"recipientIdentifiers": ["+19702241200"], "contacts": {"ids": ["CT1"]}}}}
+
+
+@pytest.mark.parametrize("kind, status", [("message.delivered", "delivered"),
+                                          ("message.failed", "failed"),
+                                          ("message.undelivered", "undelivered")])
+def test_a_delivery_report_lands_on_the_text_it_is_about(ledger, kind, status):
+    """These were dropped, so the console could never say whether a text
+    arrived. The send route keeps Quo's message id as the touch's
+    resource_id; the report finds the touch by it."""
+    out = run(quo_events.handle(text_status(kind)))
+    assert out.action == "status" and out.detail == status
+    pid, tid, fields = ledger["updates"][0]
+    assert (pid, tid, fields["delivery_status"]) == ("p1", "t1", status)
+    assert ledger["touches"] == [] and ledger["replies"] == []
+
+
+def test_a_delivery_report_for_a_text_we_did_not_send_changes_nothing(ledger):
+    out = run(quo_events.handle(text_status("message.delivered", message_id="AC-unknown")))
+    assert out.action == "ignored" and ledger["updates"] == []
+
+
+def test_a_retried_delivery_report_is_applied_once(ledger):
+    run(quo_events.handle(text_status("message.failed")))
+    assert run(quo_events.handle(text_status("message.failed"))).action == "duplicate"
+    assert len(ledger["updates"]) == 1
 
 
 # ── The route ─────────────────────────────────────────────────────────────────

@@ -1,24 +1,37 @@
-{#- The Outreach card. Three steps a person cannot misread: read and edit
-    the next email and press Send on it, or mark one sent from elsewhere,
-    and see where the sequence stands. The one sentence about what sends
-    and when is fixed and appears beside the button on purpose. -#}
+{#- The Outreach dialog. Where the sequence stands sits at the top, then
+    three tabs: the next email to read, edit and send; a text; and every
+    send and reply with what became of it. The one sentence about what
+    sends and when is fixed and stays in view on purpose. -#}
 {% from "_components.html" import pill, variables_menu, modal_close, modal_backdrop %}
 
 {% macro outreach_card(o, csrf, prospect_id, audit_id) -%}
 <dialog class="modal" id="outreach" aria-labelledby="outreach-title">
-  <div class="modal-box">
+  <div class="modal-box outreach-box">
   <div class="pagehead">
     <h2 id="outreach-title" class="mt-0">Outreach {{ pill(o.state[0], o.state[1]) }}</h2>
     <div class="primary">{{ modal_close() }}</div>
   </div>
-  <p class="muted">Sends from {{ o.mailbox }} when you press Send on an email you have read. Nothing goes out on its own.</p>
+  <ol class="emails" aria-label="The email sequence">
+    {% for e in o.emails %}
+    <li class="{{ e.state }}">{% if e.state == "sent" %}{{ icon("check") }}{% endif %}Email {{ e.n }}{% if e.when %} <span>{{ e.when }}</span>{% endif %}</li>
+    {% endfor %}
+  </ol>
+  <p class="muted text-sm">Sends from {{ o.mailbox }} when you press Send on an email you have read. Nothing goes out on its own.</p>
 
-  {% if o.step1.mode != "hidden" %}
-  <div class="step">
-    <h4>1. Read, edit, send</h4>
-    {% if o.step1.mode == "unpublished" %}
-      <span class="btn btn-disabled">Send email</span>
-      <p class="muted">Publish the report first. The email carries its link.</p>
+  <div role="tablist" class="tabs tabs-border otabs">
+    <input type="radio" name="otab" class="tab" aria-label="Email"{% if o.tab == "email" %} checked{% endif %}>
+    <div class="tab-content" id="email">
+    {% if o.step1.mode == "hidden" %}
+      <p class="muted">{{ o.next or "Every email in this sequence has been sent." }}</p>
+    {% elif o.step1.mode == "unpublished" %}
+      <div class="empty-note">
+        <p><strong>Publish the report first.</strong> The email carries its link, so there is nothing to send until it is live.</p>
+        {% if o.can_publish %}
+        <form method="post" action="/console/audits/{{ audit_id }}/publish">{{ csrf_field(csrf) }}<button type="submit" class="btn btn-primary">Publish report</button></form>
+        {% else %}
+        <p class="muted">Choose the three findings on the page first, then publish.</p>
+        {% endif %}
+      </div>
     {% else %}
       <form method="post" action="/console/outreach/{{ prospect_id }}/send" id="send-form"
             data-confirm="{{ o.step1.confirm }}" onsubmit="return sendConfirm(this)">
@@ -38,74 +51,85 @@
         </div>
         <input id="send-subject" name="subject" type="text" value="{{ o.step1.subject }}" maxlength="120" class="input w-full" required>
         <label for="send-body">Body</label>
-        <textarea id="send-body" name="body" rows="16" class="textarea w-full" required>{{ o.step1.body }}</textarea>
+        <textarea id="send-body" name="body" rows="14" class="textarea w-full" required>{{ o.step1.body }}</textarea>
         {% for w in o.step1.warnings %}<div class="warn-line" role="status">{{ w }}</div>{% endfor %}
-        <p class="muted">Email {{ o.step1.ordinal }} of {{ o.step1.max }}. {{ o.step1.note }} Variables you type are filled in when it sends.</p>
-        <div class="flex gap-2 items-center mt-3.5 flex-wrap">
-        <button type="submit" class="btn btn-primary">Send email</button>
-        <a class="btn btn-sm" href="{{ o.step1.href }}">Open in my mail client instead</a>
+        <p class="hint">Email {{ o.step1.ordinal }} of {{ o.step1.max }}. {{ o.step1.note }} Variables you type are filled in when it sends.</p>
+        <div class="send-row">
+          <button type="submit" class="btn btn-primary">{{ icon("mail") }} Send email {{ o.step1.ordinal }}</button>
+          <a class="btn btn-ghost" href="{{ o.step1.href }}">Open in my mail client instead</a>
         </div>
       </form>
-      <p class="hint">Sending records it below and schedules the next one: day 3, day 7, day 14. Edit the wording for every prospect under <a href="/console/templates">Email templates</a>.</p>
+      {% if o.step2.show %}
+      <form class="mark-sent" method="post" action="/console/outreach/{{ prospect_id }}/log-touch"
+            onsubmit="{{ o.step2.confirm }}">
+        {{ csrf_field(csrf) }}
+        <input type="hidden" name="audit_id" value="{{ audit_id }}">
+        <span class="muted">Already sent it from your own mail client?</span>
+        <button class="btn btn-link btn-sm" type="submit">Mark as sent</button>
+      </form>
+      {% endif %}
+      <p class="hint">Sending records it under Activity and schedules the next one: day 3, day 7, day 14. Edit the wording for every prospect under <a href="/console/templates">Email templates</a>.</p>
     {% endif %}
-  </div>
-  {% endif %}
+    </div>
 
-  {% if o.text.show %}
-  <div class="step" id="text">
-    <h4>Text or call</h4>
-    <p class="muted">Calls happen in the Quo app: click the number at the top of the page. A text goes from {{ o.quo_from or "your Quo number" }} when you press Send on it.</p>
-    <form class="inline" method="post" action="/console/outreach/{{ prospect_id }}/quo-contact">
-      {{ csrf_field(csrf) }}
-      <input type="hidden" name="audit_id" value="{{ audit_id }}">
-      {% if o.text.in_quo %}{{ pill("ok", "In Quo") }}{% else %}<button class="btn btn-sm" type="submit">Add to Quo</button>{% endif %}
-    </form>
-    <p class="muted">{% if o.text.in_quo %}The contact carries the business, the number and the report link, so a call shows who it is.{% else %}Creates a Quo contact with the business, the number and the report link, so a call shows who it is. Sends nothing.{% endif %}</p>
-    <form method="post" action="/console/outreach/{{ prospect_id }}/text" id="text-form"
-          data-confirm="{{ o.text.confirm }}" onsubmit="return sendConfirm(this)">
-      {{ csrf_field(csrf) }}
-      <input type="hidden" name="audit_id" value="{{ audit_id }}">
-      <label for="text-to">To</label>
-      <input id="text-to" name="to" type="tel" value="{{ o.text.to }}" class="input w-full" required placeholder="+19705551234">
-      {% if not o.text.to %}<p class="mt-1">{{ pill("warn", "No number on record") }}</p>{% endif %}
-      <div class="fieldrow">
-        <label for="text-body">Text</label>
-        {{ variables_menu(o.text.menu, ["text-body"]) }}
+    {% if o.text.show %}
+    <input type="radio" name="otab" class="tab" aria-label="Text">
+    <div class="tab-content" id="text">
+      <div class="quo-row">
+        <form class="inline" method="post" action="/console/outreach/{{ prospect_id }}/quo-contact">
+          {{ csrf_field(csrf) }}
+          <input type="hidden" name="audit_id" value="{{ audit_id }}">
+          {% if o.text.in_quo %}{{ pill("ok", "In Quo") }}{% else %}<button class="btn btn-sm" type="submit">Add to Quo</button>{% endif %}
+        </form>
+        <span class="muted text-sm">{% if o.text.in_quo %}Calls show who it is: the contact carries the business, the number and the report link.{% else %}Creates a Quo contact with the business, the number and the report link, so a call shows who it is. Sends nothing.{% endif %}</span>
       </div>
-      <textarea id="text-body" name="body" rows="4" maxlength="320" class="textarea w-full" required>{{ o.text.body }}</textarea>
-      {% for w in o.text.warnings %}<div class="warn-line" role="status">{{ w }}</div>{% endfor %}
-      {% if not o.text.published %}<div class="warn-line" role="status">The report is not published, so the link in this text will not work yet.</div>{% endif %}
-      <button type="submit" class="btn btn-primary mt-3.5">Send text</button>
-    </form>
-    <p class="hint">A text does not move the email schedule. It is recorded below, and a reply by text lands there too.</p>
-  </div>
-  {% endif %}
-
-  {% if o.step2.show %}
-  <div class="step">
-    <h4>2. Sent it from somewhere else?</h4>
-    <form class="inline" method="post" action="/console/outreach/{{ prospect_id }}/log-touch"
-          onsubmit="{{ o.step2.confirm }}">
-      {{ csrf_field(csrf) }}
-      <input type="hidden" name="audit_id" value="{{ audit_id }}">
-      <button class="btn btn-sm" type="submit">Mark as sent</button>
-    </form>
-    <p class="muted">Records a send you made from your own mail client, so the sequence clock moves. Nothing is sent from here.</p>
-  </div>
-  {% endif %}
-
-  <div class="step">
-    <h4>3. Timeline</h4>
-    {% if o.timeline %}
-    <ol class="tl">
-      {% for t in o.timeline %}<li class="{{ t.kind }}">{{ t.text }}</li>{% endfor %}
-    </ol>
-    {% else %}
-    <p class="muted">Nothing sent yet.</p>
+      <form method="post" action="/console/outreach/{{ prospect_id }}/text" id="text-form"
+            data-confirm="{{ o.text.confirm }}" onsubmit="return sendConfirm(this)">
+        {{ csrf_field(csrf) }}
+        <input type="hidden" name="audit_id" value="{{ audit_id }}">
+        <label for="text-to">To</label>
+        <input id="text-to" name="to" type="tel" value="{{ o.text.to }}" class="input w-full" required placeholder="+19705551234">
+        {% if not o.text.to %}<p class="mt-1">{{ pill("warn", "No number on record") }}</p>{% endif %}
+        <div class="fieldrow">
+          <label for="text-body">Text</label>
+          {{ variables_menu(o.text.menu, ["text-body"]) }}
+        </div>
+        <textarea id="text-body" name="body" rows="4" maxlength="320" class="textarea w-full" required>{{ o.text.body }}</textarea>
+        {% for w in o.text.warnings %}<div class="warn-line" role="status">{{ w }}</div>{% endfor %}
+        {% if not o.text.published %}<div class="warn-line" role="status">The report is not published, so the link in this text will not work yet.</div>{% endif %}
+        <p class="hint">Goes from {{ o.quo_from or "your Quo number" }}. A text does not move the email schedule; a reply by text lands under Activity. Calls happen in the Quo app.</p>
+        <div class="send-row">
+          <button type="submit" class="btn btn-primary">{{ icon("message") }} Send text</button>
+        </div>
+      </form>
+      {% if o.texts %}
+      <h4 class="sub">Recent texts</h4>
+      <ul class="tl">
+        {% for t in o.texts %}{{ timeline_item(t) }}{% endfor %}
+      </ul>
+      {% endif %}
+    </div>
     {% endif %}
-    {% if o.next %}<p class="muted">{{ o.next }}</p>{% endif %}
+
+    <input type="radio" name="otab" class="tab" aria-label="Activity ({{ o.timeline|length }})"{% if o.tab == "activity" %} checked{% endif %}>
+    <div class="tab-content" id="activity">
+    {% if o.timeline %}
+      <ul class="tl">
+        {% for t in o.timeline %}{{ timeline_item(t) }}{% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">Nothing sent yet.</p>
+    {% endif %}
+    {% if o.next %}<p class="hint">{{ o.next }}</p>{% endif %}
+    </div>
   </div>
   </div>
   {{ modal_backdrop() }}
 </dialog>
+{%- endmacro %}
+
+{#- One send or reply. A text carries what the carrier did with it, and
+    when it did not arrive, what to do about it. -#}
+{% macro timeline_item(t) -%}
+<li class="{{ t.kind }} {{ t.channel }}">{{ icon(t.icon) }}<span class="t">{{ t.text }}{% if t.note %}<span class="note">{{ t.note }}</span>{% endif %}</span>{% if t.badge %}{{ pill(t.badge[0], t.badge[1]) }}{% endif %}</li>
 {%- endmacro %}

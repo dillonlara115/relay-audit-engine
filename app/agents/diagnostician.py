@@ -61,7 +61,9 @@ selection. For each, write three short plain sentences for the owner:
   change to the site, a service his office can turn on). No vendor names.
 
 Rules: never use an em-dash or en-dash. Never mention scores, points, bands, or
-segments. Write as if the owner will read this over coffee. Return exactly {count},
+segments. Claim only what the auditor saw on the website and in search. The audit
+never places a call and never sends a form, so never describe what happens on a
+phone call, at voicemail, or after a form is sent. Write as if the owner will read this over coffee. Return exactly {count},
 each citing a different failed check.
 
 Business: {business_name}, {city}

@@ -120,8 +120,11 @@
   .ic { @apply w-[18px] h-[18px] shrink-0; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
   /* Page header, breadcrumb, KPI tiles. */
-  .pagehead { @apply flex items-start justify-between gap-4 flex-wrap mb-1; }
-  .pagehead .primary { @apply mt-1.5 flex gap-2 items-center; }
+  /* The title column takes the slack, so the actions hold the top right
+     rather than wrapping under a long lede. */
+  .pagehead { @apply flex flex-row items-start justify-between gap-4 flex-wrap mb-1; }
+  .pagehead > div:first-child { @apply flex-1 min-w-[280px]; }
+  .pagehead .primary { @apply mt-1.5 flex flex-row gap-2 items-center shrink-0; }
   .crumbs { @apply text-sm text-ink2 mb-1.5; }
   .crumbs a { @apply text-ink2; }
   .crumbs span { @apply mx-1.5; }
@@ -172,7 +175,9 @@
   /* A number field is a short answer; full width makes the button fall
      under it for nothing. */
   input[type=number].input { @apply max-w-40; }
-  .actions { @apply flex flex-wrap items-center gap-2; }
+  /* flex-row on purpose: daisyUI's .card is a column, and a card that is
+     also an action bar stacked every control down the middle. */
+  .actions { @apply flex flex-row flex-wrap items-center gap-2; }
   .rowact { @apply whitespace-nowrap text-right; }
   tr.current td { @apply bg-base-200; }
   .pass { @apply text-success font-semibold; }
@@ -245,9 +250,49 @@
   .modal-box { @apply max-w-[760px] w-[calc(100vw-32px)] border border-line; }
   .modal-box.wide { @apply max-w-[1100px]; }
   .modal-box .pagehead { @apply mb-2; }
-  .step { @apply mt-4; }
-  .openers { @apply inline-flex gap-2 flex-wrap ml-auto; }
   .warn-line { @apply alert alert-warning alert-soft text-sm py-2 my-2 block; }
+
+  /* The report flow on a prospect: five stages, then the one next action.
+     Done stages carry a tick, the current one a halo. */
+  .wf { @apply px-6 py-5 mb-6; }
+  .wf-head { @apply flex flex-row items-center justify-between gap-3 flex-wrap; }
+  .wf-head h2 { @apply m-0 text-lg; }
+  .wf-steps { @apply w-full mt-4 mb-1 text-sm; }
+  .wf-steps .step { @apply text-ink2; }
+  .wf-steps .step.step-primary { @apply text-base-content; }
+  .wf-steps .step.current .lbl { @apply font-semibold text-ember; }
+  .wf-steps .step.current::after { box-shadow: 0 0 0 4px rgb(242 92 31 / 0.22); }
+  .wf-steps .lbl small { @apply block text-xs text-ink2 font-normal; }
+  .wf-next { @apply flex flex-row items-center justify-between gap-4 flex-wrap border-t border-line pt-4 mt-3; }
+  .wf-copy { @apply flex-1 min-w-[260px]; }
+  .wf-eyebrow { @apply text-xs tracking-widest uppercase text-ember font-semibold; }
+  .wf-copy h3 { @apply text-lg mt-0.5 mb-1; }
+  .wf-copy p { @apply max-w-[70ch] m-0; }
+  .wf-cta { @apply flex flex-row gap-2 items-center flex-wrap; }
+
+  /* The More menu in a page header: rare actions, the destructive one red. */
+  details.more-menu > .inner { @apply min-w-64 p-1.5; }
+  .menu-item { @apply flex w-full items-center gap-2.5 px-3 py-2 rounded-lg text-left text-sm font-medium bg-transparent border-0 text-base-content cursor-pointer; }
+  .menu-item:hover, .menu-item:focus-visible { @apply bg-base-200; }
+  .menu-item.danger { @apply text-error; }
+  .more-menu .hint { @apply px-3 pb-1 mt-1; }
+
+  /* The Outreach dialog: where the sequence stands, then tabs. */
+  .emails { @apply flex flex-row flex-wrap gap-1.5 list-none p-0 mt-2 mb-2.5; }
+  .emails li { @apply inline-flex items-center gap-1 rounded-full border border-line px-2.5 py-0.5 text-xs font-semibold text-ink2; }
+  .emails li span { @apply font-normal; }
+  .emails li.sent { @apply bg-[#E7F1EA] text-success border-transparent; }
+  .emails li.next { @apply border-primary text-ember; }
+  .emails .ic { @apply w-3.5 h-3.5; }
+  .otabs { @apply mt-3; }
+  .otabs > .tab-content { @apply pt-3; }
+  .send-row { @apply flex flex-row gap-2 items-center mt-3.5 flex-wrap; }
+  .mark-sent { @apply flex flex-row items-center gap-1 mt-3 text-sm; }
+  .mark-sent .btn-link { @apply px-1 text-ember; }
+  .quo-row { @apply flex flex-row items-center gap-3 flex-wrap mb-1; }
+  .empty-note { @apply bg-base-200 rounded-box px-4 py-3.5; }
+  .empty-note p { @apply mb-3; }
+  h4.sub { @apply mt-5 mb-0.5 text-sm text-ink2 uppercase tracking-wider; }
 
   /* Call notes. */
   .notes h4 { @apply mt-3.5 mb-1; }
@@ -255,7 +300,36 @@
   .notes ul, .notes ol { @apply mb-1 ml-[18px] list-disc; }
   .notes ol { @apply list-decimal; }
   .notes li { @apply my-0.5; }
+  /* Leads: the same rows as a table or as a board by stage. A lead that
+     needs something from you carries a primary edge in either view. */
+  .view-toggle .btn-active { @apply bg-base-100 border-primary text-ember; }
+  .search-form { @apply flex-1 basis-64; }
+  .search-form .input { @apply w-full; }
+  .stage-form { @apply flex flex-row items-center gap-1.5 justify-end; }
+  .stage-form .select { @apply w-auto min-w-36; }
+  .lastc { @apply inline-flex items-center gap-1.5 text-sm whitespace-nowrap; }
+  .lastc .ic { @apply w-4 h-4 text-ink2; }
+  .nextstep { @apply text-sm; }
+  .nextstep.attention { @apply text-ember font-semibold; }
+  .excerpt { @apply text-sm text-ink2 mt-0.5 max-w-xs; }
+  tr.attention td:first-child { box-shadow: inset 3px 0 0 var(--color-primary); }
+  .board { @apply flex flex-row gap-3 overflow-x-auto pb-3 items-start; }
+  .board-col { @apply bg-base-200 border border-line rounded-box p-2.5 w-[236px] shrink-0 flex flex-col gap-2; }
+  .board-head { @apply flex flex-row items-center justify-between px-1 pb-0.5; }
+  .lead-card { @apply border border-line rounded-lg p-3 bg-base-100 flex flex-col gap-1.5; }
+  .lead-card.attention { @apply border-l-4 border-l-primary; }
+  .lead-card .name { @apply font-semibold text-base-content leading-snug; }
+  .card-meta { @apply flex flex-row flex-wrap items-center gap-2; }
+  .lead-card .stage-form { @apply justify-start mt-1; }
+  .board-empty { @apply px-1 py-2; }
+  .wf-tools { @apply flex flex-row items-center gap-2 flex-wrap; }
+
+  /* A send or reply per row: what happened, then what became of it. */
   .tl { @apply list-none pl-0; }
-  .tl li { @apply py-1 border-b border-line; }
+  .tl li { @apply flex flex-row gap-3 items-start py-2.5 border-b border-line; }
   .tl li:last-child { @apply border-b-0; }
+  .tl li > .ic { @apply mt-0.5 text-ink2; }
+  .tl li.reply > .ic { @apply text-info; }
+  .tl .t { @apply flex-1; }
+  .tl .note { @apply block text-sm text-error mt-0.5; }
 }

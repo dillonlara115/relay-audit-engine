@@ -1014,8 +1014,10 @@ def test_the_whole_pool_is_shown_for_the_human_to_choose_from():
 
 def test_the_models_ranking_is_pre_ticked_but_only_the_top_three():
     """Rule 7 is the person changing it, so the default cannot be all six."""
+    import re
+
     page = _audit_page(_pool())
-    assert page.count("checked>") == 3
+    assert len(re.findall(r'name="selected" value="\d+" checked>', page)) == 3
 
 
 def test_an_approved_pool_shows_which_three_the_contractor_reads():
@@ -1832,6 +1834,21 @@ def test_the_job_page_carries_its_id_for_the_poller():
     assert "/console/jobs/' + id + '.json" in page
 
 
+def test_the_job_page_shows_one_status_badge_inside_the_polled_slot():
+    page = views.render_job(_job(status="queued"), csrf="t")
+    assert page.count('class="badge ') == 1
+    assert f'<span id="job-status">{views.status_pill("queued")}</span>' in page
+
+
+def test_the_job_json_carries_the_rendered_badge_for_the_poller(client, monkeypatch):
+    import app.console.routes as routes
+
+    monkeypatch.setattr(routes.jobs, "get", lambda job_id: {"status": "running", "log": []})
+    sign_in(client)
+    body = client.get("/console/jobs/j1.json").json()
+    assert body["status_html"] == views.status_pill("running")
+
+
 def test_a_finished_job_does_not_poll():
     assert "/console/jobs/' + id + '.json" not in views.render_job(_job(), csrf="t")
 
@@ -2055,6 +2072,113 @@ def test_the_prospect_page_speaks_the_new_vocabulary():
         assert gone not in page, gone
 
 
+# ── The report flow panel ─────────────────────────────────────────────────────
+
+
+def _flow(page):
+    import re
+
+    m = re.search(r'<section class="card wf".*?</section>', page, re.S)
+    assert m, "the report flow panel is on the page"
+    return m.group(0)
+
+
+def _sent_once():
+    from datetime import datetime, timezone
+
+    from app import outreach
+
+    # Far in the future, so "due today" never depends on the day the suite runs.
+    return outreach.advance(outreach.open_sequence("p1"),
+                            sent_at=datetime(2099, 10, 7, tzinfo=timezone.utc)).to_dict()
+
+
+@pytest.mark.parametrize("kw, current, action", [
+    ({}, "Draft findings", 'action="/console/audits/a1/draft"'),
+    ({"findings": _pool()}, "Choose three", 'href="#findings"'),
+    ({"findings": _approved()}, "Publish report", 'action="/console/audits/a1/publish"'),
+    ({"findings": _approved(), "audit": {"report_slug": "abcdefghijklmnop"}}, "First email",
+     'data-open="outreach"'),
+])
+def test_the_flow_panel_names_the_current_stage_and_its_one_action(kw, current, action):
+    """The next step lived in the header, mid-page or a modal depending on
+    the stage. It now has one home, at the top, with a styled button."""
+    import re
+
+    flow = _flow(_prospect_page(**kw))
+    cur = re.search(r'<li class="step[^"]*current"[^>]*>\s*<span class="lbl">([^<]+)', flow)
+    assert cur and cur.group(1) == current
+    assert action in flow
+    assert re.search(r'class="btn btn-primary"', flow), "the next action is a primary button"
+
+
+def test_publish_is_a_real_button_and_appears_once():
+    """Regression: the header rendered <button type="submit">Publish report</button>
+    with no classes, so it looked like text and had no pointer."""
+    page = _prospect_page(findings=_approved())
+    on_page = page.split('<dialog class="modal" id="outreach"', 1)[0]
+    assert on_page.count(">Publish report</button>") == 1, "once on the page; the Outreach dialog may offer it too"
+    assert '<button type="submit" class="btn btn-primary">Publish report</button>' in on_page
+    assert '<button type="submit">' not in page
+
+
+def test_follow_ups_say_which_email_is_next_and_when():
+    page = _prospect_page(findings=_approved(), audit={"report_slug": "abcdefghijklmnop"},
+                          prospect={"owner_email": "dave@apexroofingusa.com"}, sequence=_sent_once(),
+                          touches=[{"ordinal": 1, "channel": "email", "to": "dave@apexroofingusa.com",
+                                    "sent_at": __import__("datetime").datetime(2099, 10, 7)}])
+    flow = _flow(page)
+    assert "Email 2 of 4 is due Oct 10" in flow and "Write email 2" in flow
+    assert "sent Oct 07" in flow and "0 of 3 sent" in flow
+
+
+def test_suppress_lives_behind_more_and_is_not_a_page_level_red_button():
+    page = _prospect_page(findings=_approved())
+    assert "btn-error" not in page
+    more = page.split('<details class="popover more-menu', 1)[1].split("</details>", 1)[0]
+    assert "Suppress prospect" in more and "Re-audit" in more and 'class="menu-item danger"' in more
+
+
+# ── Text delivery and the Outreach tabs ───────────────────────────────────────
+
+
+@pytest.mark.parametrize("status, label", [("delivered", "Delivered"), ("failed", "Not delivered"),
+                                           ("undelivered", "Not delivered"), ("queued", "Sending"),
+                                           (None, "No delivery report")])
+def test_every_text_shows_what_the_carrier_did_with_it(status, label):
+    from datetime import datetime
+
+    touch = {"channel": "sms", "to": "+19702241200", "sent_at": datetime(2026, 10, 8)}
+    if status:
+        touch["delivery_status"] = status
+    o = views.outreach_context(audit={"report_slug": "x"}, prospect={}, findings=_approved(), sequence=None,
+                               touches=[touch], replies=[], report_url="https://x/x", signature="s")
+    item = o["timeline"][0]
+    assert item["channel"] == "sms" and item["badge"][1] == label
+    assert (item["note"] is not None) == (status in ("failed", "undelivered")), "a failure says what to do"
+    assert o["texts"] == [item], "recent texts sit on the Text tab too"
+
+
+def test_the_outreach_dialog_is_tabbed_and_opens_on_the_email_when_one_is_due():
+    page = _prospect_page(findings=_approved(), audit={"report_slug": "abcdefghijklmnop"},
+                          prospect={"owner_email": "dave@apexroofingusa.com", "gbp_phone": "(970) 224-1200"})
+    assert '<input type="radio" name="otab" class="tab" aria-label="Email" checked>' in page
+    for pane in ('id="email"', 'id="text"', 'id="activity"'):
+        assert pane in page
+    assert "pane.previousElementSibling.checked = true" in page, "#text and #activity select their tab"
+
+
+def test_the_outreach_dialog_opens_on_activity_when_nothing_is_left_to_send():
+    from app import outreach
+
+    import dataclasses
+
+    closed = dataclasses.replace(outreach.Sequence.from_dict(_sent_once()), status=outreach.CLOSED)
+    page = _prospect_page(findings=_approved(), audit={"report_slug": "abcdefghijklmnop"},
+                          sequence=closed.to_dict())
+    assert 'aria-label="Activity (0)" checked>' in page
+
+
 def test_compose_opens_the_mail_client_with_the_report_and_the_three_findings():
     page = _prospect_page(findings=_approved(), audit={"report_slug": "abcdefghijklmnop"},
                           prospect={"owner_email": "dave@apexroofingusa.com"},
@@ -2063,13 +2187,14 @@ def test_compose_opens_the_mail_client_with_the_report_and_the_three_findings():
     assert "body=" in page
     assert "reports.relayforroofers.com%2Fabcdefghijklmnop" in page
     assert "Nothing goes out on its own" in page
-    assert "for dave@apexroofingusa.com" in page
+    assert "Carries the report link and the three findings." in page
+    assert "Opens your mail client" not in page, "the button sends; it does not open a mail client"
     assert 'action="/console/outreach/p1/send"' in page
     assert 'name="to" type="email" value="dave@apexroofingusa.com"' in page
     assert 'data-confirm="Send email 1 of 4 to {to}? It leaves your mailbox now."' in page
     assert 'onsubmit="return sendConfirm(this)"' in page
     assert "function sendConfirm(form)" in page and "form.elements.to" in page
-    assert ">Send email</button>" in page and "Open in my mail client instead" in page
+    assert "Send email 1</button>" in page and "Open in my mail client instead" in page
 
 
 def test_without_an_address_compose_still_opens_but_says_so():
@@ -2984,6 +3109,8 @@ def test_a_text_sends_once_and_is_recorded_without_moving_the_email_schedule(cli
     assert written["texts"][0]["content"].startswith("Hi there, Dillon with Relay for Roofers here: http")
     touch = written["touches"][0][1]
     assert touch["channel"] == "sms" and touch["to"] == "+19702241200" and touch["message_id"] == "AC1"
+    assert touch["resource_id"] == "AC1", "the delivery webhook finds the text by this"
+    assert touch["delivery_status"] == "queued", "Quo's answer at send time, until the carrier reports"
     assert "ordinal" not in touch, "a text is not one of the four emails"
     assert written["bumps"] == 1
     assert written["sequences"] and written["sequences"][0].touch_count == 0, "opened, not advanced"
