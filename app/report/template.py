@@ -8,6 +8,7 @@ of this file and the escaping visible at the call site.
 from __future__ import annotations
 
 import html as html_escape
+from typing import Any, Mapping
 
 from app.report.data import PublicReport
 
@@ -70,6 +71,22 @@ _PAGE = """<!doctype html>
   .ask a {{ color: var(--orange); font-weight: 600; }}
   a {{ color: var(--orange); }}
   footer {{ margin-top: 40px; font-size: 0.85rem; opacity: 0.6; }}
+  .rings {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 14px 0 18px; }}
+  .ring-wrap {{ text-align: center; font-size: 0.95rem; font-weight: 600; }}
+  .ring {{
+    width: 76px; height: 76px; margin: 0 auto 6px; border-radius: 50%;
+    display: grid; place-items: center;
+    background: conic-gradient(var(--c) calc(var(--v) * 1%), #d9d1c4 0);
+  }}
+  .ring span {{
+    width: 62px; height: 62px; border-radius: 50%; background: var(--chalk);
+    display: grid; place-items: center; font-family: 'PT Sans', sans-serif;
+    font-weight: 700; font-size: 1.3rem; color: var(--c);
+  }}
+  .good {{ --c: #1f7a43; }} .ok {{ --c: #a86200; }} .poor {{ --c: #c0341d; }}
+  .checks {{ background: #fff; border-radius: 6px; padding: 16px 18px 6px 36px; margin: 0 0 14px; }}
+  .checks li {{ margin: 0 0 10px; }}
+  .note {{ font-size: 0.95rem; opacity: 0.8; }}
 </style>
 </head>
 <body>
@@ -87,6 +104,10 @@ _PAGE = """<!doctype html>
 
   <h2>Three things costing you booked jobs</h2>
   {findings_block}
+
+  {speed_block}
+
+  {site_check_block}
 
   <p class="limit">From the outside we can see whether the tools are in place to
   catch a lead. We cannot see how fast your team actually moves. That is the
@@ -123,6 +144,20 @@ _SCREENSHOT = """<h2>What we found</h2>
   <img class="shot" src="{url}" alt="Your site on a phone">
   <div class="shot-caption">Captured during the review. Nothing was altered.</div>"""
 
+_SPEED = """<h2>Google's own speed test</h2>
+  <p>We ran your homepage through Google's free PageSpeed test on a phone{measured}. It is
+  the same test anyone can run, and Google uses what it measures.</p>
+  <div class="rings">{rings}</div>
+  {timing}
+  <p class="note"><a href="{url}">Run the same test yourself</a>. Results move a little from run to run.</p>"""
+
+_RING = """<div class="ring-wrap"><div class="ring {band}" style="--v: {value}"><span>{value}</span></div>{label}</div>"""
+
+_SITE_CHECK = """<h2>Every page, checked</h2>
+  <p>We went through {pages} pages of your site looking for things that send a visitor away or keep
+  a page out of Google.{health}</p>
+  {lines}"""
+
 _COMPETITOR = """<h2>What good looks like</h2>
   <p>{note}</p>"""
 
@@ -147,6 +182,8 @@ def render_report(report: PublicReport) -> str:
         if report.competitor_note else ""
     )
     return _PAGE.format(
+        speed_block=_speed_block(report.speed) if report.speed else "",
+        site_check_block=_site_check_block(report.site_check) if report.site_check else "",
         business_name=esc(report.business_name),
         city=esc(report.city or "your city"),
         screenshot_block=screenshot,
@@ -154,3 +191,30 @@ def render_report(report: PublicReport) -> str:
         competitor_block=competitor,
         calculator_url=esc(report.calculator_url, quote=True),
     )
+
+
+def _band(value: float) -> str:
+    return "good" if value >= 90 else "ok" if value >= 50 else "poor"
+
+
+def _speed_block(speed: Mapping[str, Any]) -> str:
+    esc = html_escape.escape
+    rings = "".join(_RING.format(band=_band(r["value"]), value=int(round(r["value"])), label=esc(r["label"]))
+                    for r in speed.get("ratings") or [])
+    timing = ""
+    if speed.get("main_content"):
+        who = "for real visitors on phones" if speed.get("real_visitors") else "on a typical phone"
+        timing = f"<p>The main part of your homepage took {esc(speed['main_content'])} to show up {who}.</p>"
+    measured = f", {esc(speed['measured'])}" if speed.get("measured") else ""
+    url = speed.get("test_url") or "https://pagespeed.web.dev/"
+    return _SPEED.format(rings=rings, timing=timing, measured=measured, url=esc(url, quote=True))
+
+
+def _site_check_block(check: Mapping[str, Any]) -> str:
+    esc = html_escape.escape
+    health = (f" Overall, the site rates {int(round(check['health']))} out of 100 on site health."
+              if check.get("health") is not None else "")
+    lines = check.get("lines") or []
+    body = ('<ul class="checks">' + "".join(f"<li>{esc(line)}</li>" for line in lines) + "</ul>"
+            if lines else "<p>Nothing broken turned up. That part of the site is in good shape.</p>")
+    return _SITE_CHECK.format(pages=int(check.get("pages") or 0), health=health, lines=body)

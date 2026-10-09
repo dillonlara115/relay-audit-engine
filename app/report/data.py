@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Mapping
 
 CALCULATOR_URL = "https://relayforroofers.com/tools/lead-leakage-calculator/"
 
@@ -50,6 +50,9 @@ class PublicReport:
     screenshot_url: str | None = None
     calculator_url: str = CALCULATOR_URL
     competitor_note: str | None = None   # optional, human-written, named only if fair
+    # Optional sections a person switched on, snapshots from app/report/extras.py.
+    speed: Mapping[str, Any] | None = None
+    site_check: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         # Exactly three, enforced at runtime, not just at publish time.
@@ -75,6 +78,8 @@ class PublicReport:
             "screenshot_url": self.screenshot_url,
             "calculator_url": self.calculator_url,
             "competitor_note": self.competitor_note,
+            "speed": dict(self.speed) if self.speed else None,
+            "site_check": dict(self.site_check) if self.site_check else None,
         }
 
 

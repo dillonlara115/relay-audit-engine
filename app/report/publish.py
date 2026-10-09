@@ -48,6 +48,8 @@ def build_public_report(
         findings=findings,
         screenshot_url=screenshot_url,
         competitor_note=findings_doc.get("competitor_note"),
+        speed=(audit.get("report_extras") or {}).get("speed"),
+        site_check=(audit.get("report_extras") or {}).get("site_check"),
     )
 
 

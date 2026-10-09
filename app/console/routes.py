@@ -32,7 +32,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse
 from fastapi import APIRouter, File, Form, Request, Response, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from app import jobs
+from app import findings_edit, jobs
 from app.config import get_config
 from app.console import views
 from app.console import auth
@@ -840,6 +840,80 @@ async def approve_findings(audit_id: str, request: Request,
     except ValueError as exc:
         return _redirect(_with_notice(f"/console/audits/{audit_id}", "not_approved", str(exc)))
     return _redirect(f"/console/audits/{audit_id}")
+
+
+# ── Findings a person writes, and what else goes on the report ───────────────
+
+
+@router.post("/audits/{audit_id}/findings/custom")
+async def add_custom_finding(audit_id: str, request: Request, csrf: str = Form(None),
+                             what_we_saw: str = Form(""), what_it_means: str = Form(""),
+                             what_fixing_takes: str = Form("")) -> Response:
+    return await _change_findings(request, csrf, audit_id, "added", lambda doc: findings_edit.add(
+        doc, {"what_we_saw": what_we_saw, "what_it_means": what_it_means,
+              "what_fixing_takes": what_fixing_takes}))
+
+
+@router.post("/audits/{audit_id}/findings/{ordinal}/edit")
+async def edit_finding(audit_id: str, ordinal: int, request: Request, csrf: str = Form(None),
+                       what_we_saw: str = Form(""), what_it_means: str = Form(""),
+                       what_fixing_takes: str = Form("")) -> Response:
+    return await _change_findings(request, csrf, audit_id, "edited", lambda doc: findings_edit.edit(
+        doc, ordinal, {"what_we_saw": what_we_saw, "what_it_means": what_it_means,
+                       "what_fixing_takes": what_fixing_takes}))
+
+
+@router.post("/audits/{audit_id}/findings/{ordinal}/remove")
+async def remove_finding(audit_id: str, ordinal: int, request: Request, csrf: str = Form(None)) -> Response:
+    return await _change_findings(request, csrf, audit_id, "removed",
+                                  lambda doc: findings_edit.remove(doc, ordinal))
+
+
+async def _change_findings(request: Request, csrf: str | None, audit_id: str, what: str,
+                           change: Any) -> Response:
+    if not check_csrf(request, csrf):
+        return Response(status_code=403, content="stale form, reload the page")
+    back = f"/console/audits/{audit_id}"
+
+    def apply() -> tuple[str, str]:
+        if store.get_audit(audit_id) is None:
+            return "", ""
+        try:
+            pool = change(store.get_draft_findings(audit_id))
+        except findings_edit.FindingRejected as exc:
+            return "finding_rejected", str(exc)
+        store.set_findings_pool(audit_id, pool)
+        return f"finding_{what}", ""
+
+    code, detail = await asyncio.to_thread(apply)
+    if not code:
+        return Response(status_code=404)
+    return _redirect(_with_notice(back, code, detail) + "#findings")
+
+
+@router.post("/audits/{audit_id}/report-sections")
+async def set_report_sections(audit_id: str, request: Request, csrf: str = Form(None),
+                              speed: str = Form(""), site_check: str = Form("")) -> Response:
+    """Switch the optional report sections on or off. Switching one on takes a
+    snapshot of today's results; the report never changes behind it."""
+    if not check_csrf(request, csrf):
+        return Response(status_code=403, content="stale form, reload the page")
+    from app.report import extras
+
+    audit = await asyncio.to_thread(store.get_audit, audit_id)
+    if audit is None:
+        return Response(status_code=404)
+    snap = extras.snapshot(audit, speed=bool(speed), site_check=bool(site_check))
+    await asyncio.to_thread(store.update_audit, audit_id,
+                            {"report_extras": {**snap, "updated_at": store.utcnow()}})
+    missing = [label for asked, key, label in ((speed, "speed", "the speed test"),
+                                               (site_check, "site_check", "the page check"))
+               if asked and not snap[key]]
+    if missing:
+        return _redirect(_with_notice(f"/console/audits/{audit_id}", "sections_partial",
+                                      f"No results yet for {' or '.join(missing)}. Run technical audit first.")
+                         + "#on-report")
+    return _redirect(_with_notice(f"/console/audits/{audit_id}", "sections_saved") + "#on-report")
 
 
 @router.post("/audits/{audit_id}/publish")

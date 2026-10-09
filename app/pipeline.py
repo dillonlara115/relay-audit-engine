@@ -35,6 +35,7 @@ from app.agents.vision import VisionVerdict, read_screenshot
 from app.tools.pagespeed import PsiResult, analyze
 from app.tools.places import PlaceRecord, ingest_market
 from app.tools.render import RenderResult, render
+from app.tools import stack
 from app.tools.site_signals import SiteSignals, extract_signals
 from app.tools.verify_email import verify
 
@@ -583,6 +584,9 @@ async def persist_audit(
             # on, so it is the right one to score and the wrong one to leave
             # unnamed.
             "landing_url": landing_url,
+            # Tools on the site that can make these results read wrong; the
+            # console notes them. See app/tools/stack.py.
+            "stack": {"tools": stack.detect(render.html, render.title) if render is not None else []},
             "finished_at": store.utcnow(),
         },
     )

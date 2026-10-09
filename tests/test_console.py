@@ -1017,14 +1017,19 @@ def test_the_models_ranking_is_pre_ticked_but_only_the_top_three():
     import re
 
     page = _audit_page(_pool())
-    assert len(re.findall(r'name="selected" value="\d+" checked>', page)) == 3
+    assert len(re.findall(r'name="selected" value="\d+" form="choose-three" checked>', page)) == 3
 
 
 def test_an_approved_pool_shows_which_three_the_contractor_reads():
     page = _audit_page(_pool(status="approved", selected=[2, 4, 1]))
     assert "report, number 1" in page
     assert "follow up 1" in page
-    assert 'name="selected"' not in page
+    # The three can be changed after choosing, from a control that starts
+    # closed and ticks the current three.
+    assert "Change which three are on the report" in page
+    import re
+    ticked = re.findall(r'name="selected" value="(\d+)" form="choose-three" checked>', page)
+    assert sorted(ticked) == ["1", "2", "4"]
 
 
 def test_a_thin_pool_says_the_company_gets_fewer_messages():

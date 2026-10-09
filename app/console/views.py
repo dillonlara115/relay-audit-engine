@@ -139,6 +139,12 @@ NOTICES = {
     "screenshot_replaced": "Screenshot replaced.",
     "technical_done": "Technical audit updated.",
     "technical_pending": "Technical audit not ready.",
+    "finding_added": "Finding added.",
+    "finding_edited": "Finding updated.",
+    "finding_removed": "Finding removed.",
+    "finding_rejected": "Finding not saved.",
+    "sections_saved": "Report sections saved.",
+    "sections_partial": "Report sections saved, with a gap.",
     "reach_map_done": "Map added.",
     "reach_map_failed": "Map not added.",
     "screenshot_rejected": "Screenshot not replaced.",
@@ -1065,6 +1071,44 @@ def technical_view(audit: Mapping[str, Any], prospect: Mapping[str, Any],
     }
 
 
+def report_parts_view(audit: Mapping[str, Any], evidence: Sequence[Mapping[str, Any]], *,
+                      report_url: str | None) -> dict[str, Any]:
+    """The 'On the report' panel: the screenshot and the optional sections."""
+    from app.report import extras
+
+    saved = audit.get("report_extras") or {}
+    when = saved.get("updated_at")
+    stamp = when.strftime("%b %d") if hasattr(when, "strftime") else "earlier"
+    return {
+        "screenshot": next((e.get("url") for e in evidence if e.get("kind") == "screenshot" and e.get("url")), None),
+        "speed_on": stamp if saved.get("speed") else "",
+        "site_check_on": stamp if saved.get("site_check") else "",
+        "speed_ready": extras.speed_snapshot(audit.get("lighthouse") or {}) is not None,
+        "site_check_ready": extras.site_check_snapshot(audit.get("technical") or {}) is not None,
+        "published": bool(audit.get("report_slug")),
+        "report_url": report_url if audit.get("report_slug") else None,
+    }
+
+
+def _and_list(items: Sequence[str]) -> str:
+    """'A', 'A and B', 'A, B and C'."""
+    return " and ".join(items) if len(items) < 3 else f"{', '.join(items[:-1])} and {items[-1]}"
+
+
+def cautions_view(audit: Mapping[str, Any]) -> dict[str, Any]:
+    """Tools on the site that can make our results read wrong, and how."""
+    from app.tools import stack
+
+    tools = stack.found_on(audit)
+    return {
+        "tools": [{"label": t.label, "effect": t.effect} for t in tools],
+        "names": _and_list([t.label if t.key != "robot_check" else "a robot check" for t in tools]),
+        # Checks read from the page itself: a challenge page or a held-back
+        # widget can turn a pass into a fail.
+        "affects_checks": stack.any_of(tools, "challenge") or stack.any_of(tools, "delays_scripts"),
+    }
+
+
 def reach_view(audit: Mapping[str, Any], prospect: Mapping[str, Any],
                evidence: Sequence[Mapping[str, Any]] = ()) -> dict[str, Any]:
     """The console's Local reach section: Maps positions around the business,
@@ -1311,7 +1355,11 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                           "saw": item.get("what_we_saw") or "",
                           "means": item.get("what_it_means") or "",
                           "fix": item.get("what_fixing_takes") or "",
-                          "source": extra_evidence.SOURCE_LABEL.get(str(item.get("code") or ""), ""),
+                          "source": ("Written by you" if item.get("custom") else
+                                     (f"From {extra_evidence.SOURCE_LABEL[item['code']]}"
+                                      if item.get("code") in extra_evidence.SOURCE_LABEL else "")),
+                          "custom": bool(item.get("custom")), "edited": bool(item.get("edited")),
+                          "on_report": not draft and ordinal in selected,
                           "flags": ", ".join(item.get("mechanism_flags") or [])})
         held = max(0, len(pool) - 3)
         thin = ""
@@ -1324,6 +1372,7 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
                 # Once a report is out, its findings feed the follow-ups; a
                 # redraft would pull the ground out from under them.
                 "can_redraft": not audit.get("report_slug"),
+                "published": bool(audit.get("report_slug")),
                 "needs_review": bool(findings.get("needs_review")),
                 "can_publish": state == "approved" and not audit.get("report_slug"),
                 "thin_note": thin}
@@ -1406,7 +1455,8 @@ def render_audit(*, audit: Mapping[str, Any], prospect: Mapping[str, Any],
 
     tech = technical_view(audit, prospect, evidence or ())
     return _render("prospect.html", title=name, active="batches", csrf=csrf, tech=tech,
-                   reach=reach_view(audit, prospect, evidence or ()),
+                   reach=reach_view(audit, prospect, evidence or ()), cautions=cautions_view(audit),
+                   rp=report_parts_view(audit, evidence or (), report_url=report_url),
                    evidence_count=len(list(evidence or ())),
                    p=p_vm, f=f_vm, o=o_vm, wf=wf, notes=notes, sections=sections, evidence_html=evidence_html,
                    history=h_vm if len(h_vm) > 1 else [], history_note=history_note,

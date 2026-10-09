@@ -2,6 +2,15 @@
 {% from "_components.html" import page_header, kpi, pill, table_wrap, empty_row, modal_open, modal_close, modal_backdrop %}
 {% from "_outreach.html" import outreach_card %}
 {% from "_scripts.html" import insert_variables, copy_button, send_confirm, modals, stage_confirm %}
+{% macro finding_form(action, saw, means, fix, label, note) -%}
+<form class="finding-form" method="post" action="{{ action }}">
+  {{ csrf_field(csrf) }}
+  <label>What a homeowner sees<textarea class="textarea w-full" name="what_we_saw" rows="2" maxlength="700" required>{{ saw }}</textarea></label>
+  <label>What it costs them <span class="muted">(calls, trust or jobs)</span><textarea class="textarea w-full" name="what_it_means" rows="2" maxlength="700" required>{{ means }}</textarea></label>
+  <label>What fixing it takes<textarea class="textarea w-full" name="what_fixing_takes" rows="2" maxlength="700" required>{{ fix }}</textarea></label>
+  <div class="flex flex-row flex-wrap items-center gap-3 mt-2"><button type="submit" class="btn btn-sm btn-primary">{{ label }}</button>{% if note %}<span class="muted text-sm">{{ note }}</span>{% endif %}</div>
+</form>
+{%- endmacro %}
 {% block body %}
 {#- Rare and destructive actions live behind More, away from the next step. -#}
 {% set header_actions %}
@@ -87,37 +96,81 @@
 </section>
 
 <h2 id="findings">Findings {{ pill(p.findings_state[0], p.findings_state[1]) }}</h2>
+{% if cautions.affects_checks %}<div class="caution-line" role="note">{{ icon("alert") }} <span><b>Read with care:</b> this site uses {{ cautions.names }}, which can make some checks read wrong. A finding about a missing widget or slow loading is worth confirming on their site first. <a href="#technical">Why</a></span></div>{% endif %}
 {% if f %}
   {% set redraft %}{% if f.can_redraft %}<form class="inline" method="post" action="/console/audits/{{ p.audit_id }}/draft" onsubmit="return confirm('Draft the findings again? This replaces the ones below{% if not f.draft %}, including the three you chose{% endif %}.')">{{ csrf_field(csrf) }}<button type="submit" class="btn btn-sm">{{ icon("refresh") }} Draft findings again</button></form>{% endif %}{% endset %}
   {% if f.stale %}<div class="banner"><span>This site was checked again after these were written, so they describe what we saw last time. Anything the owner has fixed since would still be named here. Draft the findings again before composing an email.</span>{{ redraft }}</div>
   {% elif f.newer and f.can_redraft %}<div class="banner"><span>{{ f.newer|join(" and ") }} ran after these were drafted, so they don't use it yet. Draft again to include it.</span>{{ redraft }}</div>{% endif %}
   {% if f.needs_review %}<div class="banner"><span>Read this before approving. Some wording may describe how we found the problem rather than what the owner would notice. The owner should hear what a customer experiences, never how we measured it.</span></div>{% endif %}
-  {% if f.draft %}<form method="post" action="/console/audits/{{ p.audit_id }}/approve">{{ csrf_field(csrf) }}{% endif %}
+  {#- The choose form stands alone and its checkboxes point at it with form=,
+      so each card can carry its own edit form without nesting forms. -#}
+  <form id="choose-three" method="post" action="/console/audits/{{ p.audit_id }}/approve">{{ csrf_field(csrf) }}</form>
   {% for c in f.cards %}
-  <div class="finding">
+  <div class="finding" id="finding-{{ c.ordinal }}">
     {% if f.draft %}
-    <label class="pick"><input type="checkbox" class="checkbox checkbox-primary mt-1" name="selected" value="{{ c.ordinal }}"{% if c.preticked %} checked{% endif %}> <strong>{{ c.saw }}</strong></label>
+    <label class="pick"><input type="checkbox" class="checkbox checkbox-primary mt-1" name="selected" value="{{ c.ordinal }}" form="choose-three"{% if c.preticked %} checked{% endif %}> <strong>{{ c.saw }}</strong></label>
     {% else %}
     <h3>{% if c.tag %}<span class="tag {{ c.tag[0] }}">{{ c.tag[1] }}</span> {% endif %}{{ c.saw }}</h3>
     {% endif %}
-    {% if c.source %}<p class="muted text-sm mt-1 mb-0">From {{ c.source }}</p>{% endif %}
+    {% if c.source %}<p class="muted text-sm mt-1 mb-0">{{ c.source }}{% if c.edited %} &middot; reworded by you{% endif %}</p>{% elif c.edited %}<p class="muted text-sm mt-1 mb-0">Reworded by you</p>{% endif %}
     <p>{{ c.means }}</p>
     <p><strong>{{ c.fix }}</strong></p>
     {% if c.flags %}<p class="muted">flagged: {{ c.flags }}</p>{% endif %}
+    <details class="fedit">
+      <summary>{{ icon("pen") }} Edit wording</summary>
+      {{ finding_form("/console/audits/" ~ p.audit_id ~ "/findings/" ~ c.ordinal ~ "/edit", c.saw, c.means, c.fix, "Save wording",
+                      "Shows on the published report right away." if f.published and c.on_report else "") }}
+      {% if c.custom %}
+      <form class="mt-2" method="post" action="/console/audits/{{ p.audit_id }}/findings/{{ c.ordinal }}/remove" onsubmit="return confirm('Remove this finding?')">{{ csrf_field(csrf) }}<button type="submit" class="btn btn-xs btn-ghost">{{ icon("x") }} Remove it</button></form>
+      {% endif %}
+    </details>
   </div>
   {% endfor %}
   {% if f.draft %}
   <p class="hint">Tick the three the owner should read. They go in the report in the order shown here. Whatever stays unticked is held back, one per follow-up email, so each email after the first says something new. Choosing does not send or publish anything.</p>
-  <button type="submit" class="btn btn-primary mt-3.5">Choose these three for the report</button>
-  </form>
+  <button type="submit" form="choose-three" class="btn btn-primary mt-3.5">Choose these three for the report</button>
+  {% else %}
+  <details class="fedit mt-2">
+    <summary>{{ icon("list") }} Change which three are on the report</summary>
+    <div class="mt-2">
+      {% for c in f.cards %}<label class="pick mb-2"><input type="checkbox" class="checkbox checkbox-primary checkbox-sm mt-0.5" name="selected" value="{{ c.ordinal }}" form="choose-three"{% if c.on_report %} checked{% endif %}> <span>{{ c.saw }}</span></label>{% endfor %}
+      <p class="hint">Tick three.{% if f.published %} The published report changes as soon as you save.{% endif %} Whatever stays unticked becomes follow-up material.</p>
+      <button type="submit" form="choose-three" class="btn btn-sm btn-primary mt-2">Save these three</button>
+    </div>
+  </details>
   {% endif %}
   {% if f.thin_note %}<p class="muted">{{ f.thin_note }}</p>{% endif %}
 {% else %}
-<p class="muted">Nothing drafted yet. Start from Report and outreach above.</p>
+<p class="muted">Nothing drafted yet. Start from Report and outreach above, or write your own below.</p>
 {% endif %}
+<details class="fedit add-own"{% if not f %} open{% endif %}>
+  <summary>{{ icon("pen") }} Add your own finding</summary>
+  <p class="muted text-sm mt-2">Something you saw on their site, their Google listing or a call that the audit didn't catch. It joins the list above, where you can choose it for the report or keep it for a follow-up email. Write it the way the owner would read it: what a homeowner sees, what it costs, what fixing it takes.</p>
+  {{ finding_form("/console/audits/" ~ p.audit_id ~ "/findings/custom", "", "", "", "Add finding", "") }}
+</details>
 
-{#- Lighthouse and the crawl. For the operator only: the public report never
-    shows a score, so none of this reaches the roofer. -#}
+{#- What the owner's report carries beyond the three findings: the
+    screenshot, and the optional sections switched on here. -#}
+<h2 id="on-report">On the report</h2>
+<div class="on-report">
+  <div class="on-shot">
+    {% if rp.screenshot %}<a href="{{ rp.screenshot }}" target="_blank" rel="noopener noreferrer"><img src="{{ rp.screenshot }}" alt="The screenshot on the report" loading="lazy"></a>{% else %}<div class="muted text-sm">No screenshot yet.</div>{% endif %}
+    <button type="button" class="btn btn-sm mt-2" data-open="evidence" aria-haspopup="dialog" aria-controls="evidence">{{ icon("refresh") }} Change screenshot</button>
+  </div>
+  <form class="on-sections" method="post" action="/console/audits/{{ p.audit_id }}/report-sections">
+    {{ csrf_field(csrf) }}
+    <div class="font-semibold">Extra sections</div>
+    <label class="pick"><input type="checkbox" class="checkbox checkbox-primary checkbox-sm mt-0.5" name="speed" value="1"{% if rp.speed_on %} checked{% endif %}{% if not rp.speed_ready and not rp.speed_on %} disabled{% endif %}>
+      <span><b>Google's own speed test.</b> The four ratings out of 100, how long the homepage took to show up, and a link to run it themselves.{% if not rp.speed_ready %} <span class="muted">Run technical audit first.</span>{% elif rp.speed_on %} <span class="muted">Saved {{ rp.speed_on }}.</span>{% endif %}</span></label>
+    <label class="pick"><input type="checkbox" class="checkbox checkbox-primary checkbox-sm mt-0.5" name="site_check" value="1"{% if rp.site_check_on %} checked{% endif %}{% if not rp.site_check_ready and not rp.site_check_on %} disabled{% endif %}>
+      <span><b>Every page, checked.</b> How many pages we checked and what's broken, in plain words: links that lead nowhere, images that don't load, pages Google can't title.{% if not rp.site_check_ready %} <span class="muted">Needs a finished site crawl.</span>{% endif %}</span></label>
+    <p class="hint">Saving takes a snapshot of today's results, so a later re-run never changes what the owner already has. Save again to refresh it.{% if rp.published %} Changes show on the published report right away.{% endif %}</p>
+    <div class="flex flex-row flex-wrap gap-2 items-center"><button type="submit" class="btn btn-sm btn-primary">Save report sections</button>{% if rp.report_url %}<a class="btn btn-sm btn-ghost" href="{{ rp.report_url }}" target="_blank" rel="noopener noreferrer">{{ icon("external") }} Open report</a>{% endif %}</div>
+  </form>
+</div>
+
+{#- Lighthouse and the crawl. Scores live here; the report only carries them
+    when a section above is switched on, in the owner's words. -#}
 <div class="pagehead mt-8" id="technical">
   <div><h2 class="mt-0">Technical</h2>
   <p class="muted text-sm">Google Lighthouse on a phone{% if tech.measured %}, measured {{ tech.measured }}{% endif %}, and a crawl of the site. Scores stay here; problems found can become findings when you draft.</p></div>
@@ -132,6 +185,12 @@
   </div>
 </div>
 
+{% if cautions.tools %}
+<div class="caution-box" role="note">
+  <div class="caution-head">{{ icon("alert") }} Read these results with care</div>
+  <ul>{% for t in cautions.tools %}<li><b>{{ t.label }}.</b> {{ t.effect }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
 <div class="tech-grid">
   <section class="card tech-card" aria-label="Lighthouse">
     <h3>Lighthouse</h3>

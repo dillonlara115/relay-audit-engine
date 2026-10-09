@@ -263,9 +263,13 @@ async def _draft_row(job_id: str, row: Any, prospect: Mapping[str, Any],
         await asyncio.to_thread(jobs.log, job_id, f"{row.business_name}: no draft ({diagnosis.error})")
         return "skipped"
 
+    from app.findings_edit import carry_custom
+
+    # A fresh draft replaces the model's findings, never the ones a person wrote.
+    previous = await asyncio.to_thread(store.get_draft_findings, row.audit_id)
     await asyncio.to_thread(
         store.save_draft_findings, row.audit_id,
-        [f.to_dict() for f in diagnosis.findings],
+        carry_custom(previous, [f.to_dict() for f in diagnosis.findings]),
         needs_review=diagnosis.needs_review, model=diagnosis.model, sources=sources,
     )
     flag = " (flagged for review)" if diagnosis.needs_review else ""

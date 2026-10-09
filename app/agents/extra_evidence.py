@@ -89,10 +89,14 @@ def reach_row(reach: Mapping[str, Any]) -> tuple[dict[str, Any] | None, str | No
             "note": note}, None
 
 
-def crawl_row(technical: Mapping[str, Any]) -> dict[str, Any] | None:
+def crawl_row(technical: Mapping[str, Any], *, text_unreliable: bool = False) -> dict[str, Any] | None:
     if technical.get("status") != "done":
         return None
-    issues = [i for i in technical.get("issues") or [] if i.get("key") in CRAWL_KEYS and i.get("count")]
+    keys = set(CRAWL_KEYS)
+    if text_unreliable:
+        # A browser crawl, or a tool that holds text back, undercounts words.
+        keys.discard("low_content_rate")
+    issues = [i for i in technical.get("issues") or [] if i.get("key") in keys and i.get("count")]
     if not issues:
         return None
     listed = "; ".join(f"{i['label']}: {i['count']}" for i in issues)
@@ -148,7 +152,12 @@ def merge(audit: Mapping[str, Any], failures: Sequence[Mapping[str, Any]],
     if row or truth:
         used.append("local_reach")
 
-    row = crawl_row(audit.get("technical") or {})
+    from app.tools import stack
+
+    tools = stack.found_on(audit)
+    technical = audit.get("technical") or {}
+    row = crawl_row(technical, text_unreliable=bool(technical.get("browser"))
+                    or stack.any_of(tools, "delays_scripts"))
     if row:
         failures.append(row)
         used.append("crawl")
@@ -156,6 +165,11 @@ def merge(audit: Mapping[str, Any], failures: Sequence[Mapping[str, Any]],
     lh = audit.get("lighthouse") or {}
     verdict, line = _speed_verdict(lh), _speed_line(lh)
     retested = _newer(lh.get("measured_at"), audit.get("finished_at") or audit.get("started_at"))
+    # A tool that serves speed tests an optimised copy makes a simulated
+    # "fast" worthless; only real visitors' timings may clear a failure.
+    lab_only = (lh.get("metrics") or {}).get("lcp_source") != "field"
+    if lab_only and stack.any_of(tools, "flatters_speed") and verdict == "fast":
+        verdict = None
     failing_speed = [f for f in failures if f.get("code") in SPEED_CHECKS]
     if failing_speed and verdict == "fast" and retested:
         failures = [f for f in failures if f.get("code") not in SPEED_CHECKS]

@@ -357,6 +357,28 @@
   .site-checks .ic { @apply w-4 h-4; }
   .tech-shot img { @apply w-full max-w-[260px] border border-line rounded-box block mx-auto; }
 
+  /* Findings a person writes or rewords, and the On the report panel. */
+  .fedit { @apply mt-2; }
+  .fedit > summary { @apply inline-flex flex-row items-center gap-1.5 cursor-pointer text-sm text-ink2 font-semibold; }
+  .fedit > summary .ic { @apply w-4 h-4; }
+  .fedit[open] > summary { @apply mb-1; }
+  .add-own { @apply bg-base-100 border border-line rounded-box px-5 py-3 mt-3; }
+  .finding-form label { @apply mt-2; }
+  .finding-form textarea { @apply mt-1 font-normal text-base; }
+  .on-report { @apply flex flex-row flex-wrap gap-6 items-start bg-base-100 border border-line rounded-box px-5 py-4; }
+  .on-shot { @apply w-[180px] shrink-0; }
+  .on-shot img { @apply w-full max-h-[320px] object-cover object-top border border-line rounded-box; }
+  .on-sections { @apply flex-1 min-w-[280px] grid gap-2; }
+
+  /* Tools on the site that can skew our results (app/tools/stack.py). */
+  .caution-box { @apply alert alert-warning alert-soft block mt-3 text-sm; }
+  .caution-head { @apply flex flex-row items-center gap-2 font-semibold; }
+  .caution-head .ic { @apply w-4 h-4 shrink-0; }
+  .caution-box ul { @apply list-disc ml-5 mt-1.5; }
+  .caution-box li + li { @apply mt-1; }
+  .caution-line { @apply flex flex-row items-start gap-2 text-sm text-ink2 mb-3; }
+  .caution-line .ic { @apply w-4 h-4 mt-0.5 shrink-0 text-warning; }
+
   /* Add a roofer: the Places matches, one card each, the action on the right. */
   .controls input[type="search"] { @apply flex-1 min-w-60; }
   .match-list { @apply list-none p-0 grid gap-2.5; }

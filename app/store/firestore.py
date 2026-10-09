@@ -472,6 +472,16 @@ def save_draft_findings(audit_id: str, findings: list[Mapping[str, Any]],
     )
 
 
+def set_findings_pool(audit_id: str, pool: list[Mapping[str, Any]]) -> None:
+    """Replace the pool after a person added or reworded a finding. Keeps the
+    status and selection; a pool that did not exist starts as a draft."""
+    doc = get_client().collection(REPORT_FINDINGS).document(audit_id)
+    fields: dict[str, Any] = {"findings": list(pool), "edited_at": utcnow()}
+    if not doc.get().exists:
+        fields.update(status="draft", needs_review=False, model=None, sources=[], drafted_at=utcnow())
+    doc.set(_plain(fields), merge=True)
+
+
 def approve_report_findings(audit_id: str, selected: list[int], *, via: str = "console") -> None:
     """Record which of the drafted pool a human chose for the report.
 
