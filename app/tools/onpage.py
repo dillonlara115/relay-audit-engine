@@ -177,16 +177,24 @@ def detail(task_id: str, key: str, *, client: httpx.Client | None = None) -> dic
             res = _post("resources", {"id": task_id, "filters": [["checks.is_broken", "=", True]],
                                       "limit": DETAIL_LIMIT}, http)
             items = res.get("items") or []
-            rows = []
-            for i, it in enumerate(items):
-                where = ""
-                if i < DETAIL_PAGES_FOR:
-                    on = _post("pages_by_resource", {"id": task_id, "url": it.get("url"), "limit": 3}, http)
-                    pages = [p.get("url") for p in on.get("items") or [] if p.get("url")]
-                    where = pages[0] if pages else ""
-                    if len(pages) > 1:
-                        where += f" (+{int(on.get('total_items_count') or len(pages)) - 1} more)"
-                rows.append([it.get("url") or "", str(it.get("status_code") or "no answer"), where])
+
+            def found_on(it: Mapping[str, Any]) -> str:
+                on = _post("pages_by_resource", {"id": task_id, "url": it.get("url"), "limit": 3}, http)
+                pages = [p.get("url") for p in on.get("items") or [] if p.get("url")]
+                if not pages:
+                    return ""
+                more = int(on.get("total_items_count") or len(pages)) - 1
+                return pages[0] + (f" (+{more} more)" if more > 0 else "")
+
+            # One lookup per file, so they run side by side: nine files took
+            # fifteen seconds one after another.
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                wheres = list(pool.map(found_on, items[:DETAIL_PAGES_FOR]))
+            wheres += [""] * (len(items) - len(wheres))
+            rows = [[it.get("url") or "", str(it.get("status_code") or "no answer"), where]
+                    for it, where in zip(items, wheres)]
             return {"columns": ["File", "Status", "Found on"], "rows": rows,
                     "total": int(res.get("total_items_count") or len(rows))}
         if key == "broken_links":
