@@ -330,3 +330,30 @@ function sendConfirm(form) {
 })();
 </script>
 {%- endmacro %}
+
+
+{#- Technical: a crawl issue opens a dialog listing what is behind its count.
+    The list comes from the server as escaped HTML, read from the crawl
+    DataForSEO already ran, so opening one costs nothing. -#}
+{% macro issue_detail(audit_id) -%}
+<script>
+(function () {
+  var d = document.getElementById('issue');
+  if (!d) return;
+  var title = document.getElementById('issue-title');
+  var body = document.getElementById('issue-body');
+  document.querySelectorAll('[data-issue]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      title.textContent = btn.dataset.label;
+      body.innerHTML = '<p class="muted">Loading the list from the crawl...</p>';
+      if (typeof d.showModal === 'function') d.showModal(); else d.setAttribute('open', '');
+      fetch('/console/audits/{{ audit_id }}/technical/issue/' + encodeURIComponent(btn.dataset.issue),
+            {credentials: 'same-origin'})
+        .then(function (r) { return r.text(); })
+        .then(function (html) { body.innerHTML = html; })
+        .catch(function () { body.innerHTML = '<p class="muted">Could not load the list. Try again.</p>'; });
+    });
+  });
+})();
+</script>
+{%- endmacro %}

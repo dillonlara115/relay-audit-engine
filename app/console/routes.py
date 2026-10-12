@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import re
 from typing import Any, Mapping
@@ -1010,6 +1011,44 @@ async def check_technical(audit_id: str, request: Request, csrf: str = Form(None
 
     code, detail = await asyncio.to_thread(check)
     return _redirect(_with_notice(f"/console/audits/{audit_id}", code, detail) + "#technical")
+
+
+@router.get("/audits/{audit_id}/technical/issue/{key}")
+async def technical_issue(audit_id: str, key: str) -> Response:
+    """The pages or files behind one crawl issue, as a fragment for the
+    dialog. Read back from the finished crawl, which is free, and cached."""
+    from app.tools import onpage
+
+    def load() -> tuple[dict[str, Any] | None, str]:
+        if key not in onpage.LABELS:
+            return None, "Unknown issue."
+        task_id = ((store.get_audit(audit_id) or {}).get("technical") or {}).get("task_id")
+        if not task_id:
+            return None, "No crawl on record. Run technical audit first."
+        request = {"task": str(task_id), "key": key}
+        # Kept as JSON text: rows are lists of cells, and Firestore refuses a
+        # list directly inside a list. The cache is a saving, never a gate.
+        try:
+            cached = store.cache_get("onpage_detail", request)
+            if cached and cached.get("json"):
+                return json.loads(cached["json"]), ""
+        except Exception as exc:  # noqa: BLE001
+            log.warning("issue cache read failed: %s", exc)
+        try:
+            found = onpage.detail(str(task_id), key)
+        except onpage.OnPageUnavailable as exc:
+            return None, str(exc)
+        try:
+            store.cache_put("onpage_detail", request, {"json": json.dumps(found)})
+        except Exception as exc:  # noqa: BLE001
+            log.warning("issue cache write failed: %s", exc)
+        return found, ""
+
+    found, error = await asyncio.to_thread(load)
+    note = ("Pages are looked up for the first 25 files." if key == "broken_resources"
+            and found and len(found.get("rows") or []) > onpage.DETAIL_PAGES_FOR else "")
+    return Response(views.render_issue(found, error=error, note=note), media_type="text/html",
+                    headers={"Cache-Control": "no-store"})
 
 
 # ── Local reach ───────────────────────────────────────────────────────────────

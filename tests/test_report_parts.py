@@ -136,10 +136,8 @@ def test_snapshots_speak_the_owners_language():
     assert [r["label"] for r in speed["ratings"]] == ["Speed", "Accessibility", "Best practices", "Search basics"]
     assert speed["main_content"] == "6.8 seconds" and speed["real_visitors"] and speed["measured"] == "October 1, 2026"
     check = extras.site_check_snapshot(TECH)
-    assert check["lines"] == ["7 links lead nowhere", "1 page has no title for Google to show",
-                              "40 pages have very little text on them"]
-    assert "favicon" not in json.dumps(check)
-    assert "very little text" not in json.dumps(extras.site_check_snapshot(TECH, text_unreliable=True))
+    assert check["lines"] == ["7 links lead nowhere", "1 page has no title for Google to show"]
+    assert "favicon" not in json.dumps(check) and "text" not in json.dumps(check["lines"])
     assert extras.site_check_snapshot({"status": "done", "pages_crawled": 0}) is None
 
 

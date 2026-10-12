@@ -32,7 +32,9 @@ PAGE_CHECKS: tuple[tuple[str, str], ...] = (
     ("no_description", "Pages with no meta description"),
     ("no_h1_tag", "Pages with no main heading (H1)"),
     ("title_too_long", "Titles too long to show in Google"),
-    ("low_content_rate", "Thin pages, little text"),
+    # Text against page code, not a word count: a 1,151 word homepage was
+    # flagged. Not thin content, so never called that.
+    ("low_content_rate", "Pages heavy on code for their text"),
     ("no_image_alt", "Pages with images missing alt text"),
     ("is_http", "Pages not on https"),
     ("https_to_http_links", "Secure pages linking to insecure ones"),
@@ -49,6 +51,10 @@ METRIC_CHECKS: tuple[tuple[str, str], ...] = (
     ("duplicate_description", "Pages sharing a meta description"),
     ("duplicate_content", "Near-duplicate pages"),
 )
+LABELS = dict(PAGE_CHECKS + METRIC_CHECKS)
+
+DETAIL_LIMIT = 100        # rows a detail list shows
+DETAIL_PAGES_FOR = 25     # broken files whose pages are looked up, one call each
 
 
 def _auth() -> tuple[str, str]:
@@ -139,3 +145,83 @@ def distil(result: Mapping[str, Any]) -> dict[str, Any]:
         ],
         "issues": issues,
     }
+
+
+# ── One issue, item by item ──────────────────────────────────────────────────
+# Reading a finished crawl back costs nothing; DataForSEO keeps it 30 days
+# and the console caches what it read for as long.
+
+
+def _post(path: str, body: Mapping[str, Any], client: httpx.Client) -> Mapping[str, Any]:
+    try:
+        r = client.post(f"{BASE}/{path}", json=[body], auth=_auth())
+    except httpx.HTTPError as exc:
+        raise OnPageUnavailable(f"Could not reach DataForSEO: {type(exc).__name__}") from exc
+    if r.status_code >= 400:
+        raise OnPageUnavailable(f"DataForSEO answered {r.status_code}")
+    return (_task(r.json()).get("result") or [{}])[0] or {}
+
+
+def _secs(ms: Any) -> str:
+    return f"{ms / 1000:.1f} s" if isinstance(ms, (int, float)) else ""
+
+
+def detail(task_id: str, key: str, *, client: httpx.Client | None = None) -> dict[str, Any]:
+    """The items behind one issue count: {columns, rows, total, groups?}.
+    rows are lists of cells; a cell starting with http is shown as a link."""
+    if key not in LABELS:
+        raise OnPageUnavailable(f"no such issue: {key}")
+    http = client or httpx.Client(timeout=TIMEOUT)
+    try:
+        if key == "broken_resources":
+            res = _post("resources", {"id": task_id, "filters": [["checks.is_broken", "=", True]],
+                                      "limit": DETAIL_LIMIT}, http)
+            items = res.get("items") or []
+            rows = []
+            for i, it in enumerate(items):
+                where = ""
+                if i < DETAIL_PAGES_FOR:
+                    on = _post("pages_by_resource", {"id": task_id, "url": it.get("url"), "limit": 3}, http)
+                    pages = [p.get("url") for p in on.get("items") or [] if p.get("url")]
+                    where = pages[0] if pages else ""
+                    if len(pages) > 1:
+                        where += f" (+{int(on.get('total_items_count') or len(pages)) - 1} more)"
+                rows.append([it.get("url") or "", str(it.get("status_code") or "no answer"), where])
+            return {"columns": ["File", "Status", "Found on"], "rows": rows,
+                    "total": int(res.get("total_items_count") or len(rows))}
+        if key == "broken_links":
+            res = _post("links", {"id": task_id, "filters": [["is_broken", "=", True]], "limit": DETAIL_LIMIT}, http)
+            rows = [[it.get("link_to") or "", str(it.get("page_to_status_code") or "no answer"),
+                     it.get("link_from") or "", str(it.get("text") or "")] for it in res.get("items") or []]
+            return {"columns": ["Link goes to", "Status", "On page", "Link text"], "rows": rows,
+                    "total": int(res.get("total_items_count") or len(rows))}
+        if key in ("duplicate_title", "duplicate_description"):
+            res = _post("duplicate_tags", {"id": task_id, "type": key, "limit": DETAIL_LIMIT}, http)
+            groups = [{"shared": str(it.get("accumulator") or ""), "count": int(it.get("total_count") or 0),
+                       "pages": [p.get("url") for p in it.get("pages") or [] if p.get("url")]}
+                      for it in res.get("items") or []]
+            return {"columns": [], "rows": [], "groups": groups,
+                    "total": sum(g["count"] for g in groups)}
+        # Page-level: the pages the check flagged, and the one number that says why.
+        flag = ["duplicate_content", "=", True] if key == "duplicate_content" else [f"checks.{key}", "=", True]
+        res = _post("pages", {"id": task_id, "filters": [flag], "limit": DETAIL_LIMIT}, http)
+        extra_col, extra = {
+            "title_too_long": ("Title length", lambda it: str((it.get("meta") or {}).get("title_length") or "")),
+            "low_content_rate": ("Words on page", lambda it: str(((it.get("meta") or {}).get("content") or {}).get("plain_text_word_count") or "")),
+            "no_image_alt": ("Images on page", lambda it: str((it.get("meta") or {}).get("images_count") or "")),
+            "high_loading_time": ("Load time", lambda it: _secs((it.get("page_timing") or {}).get("duration_time"))),
+            "redirect_chain": ("Status", lambda it: str(it.get("status_code") or "")),
+            "is_4xx_code": ("Status", lambda it: str(it.get("status_code") or "")),
+            "is_5xx_code": ("Status", lambda it: str(it.get("status_code") or "")),
+        }.get(key, ("", None))
+        rows = []
+        for it in res.get("items") or []:
+            row = [it.get("url") or "", str((it.get("meta") or {}).get("title") or "")]
+            if extra:
+                row.append(extra(it))
+            rows.append(row)
+        return {"columns": ["Page", "Title"] + ([extra_col] if extra else []), "rows": rows,
+                "total": int(res.get("total_items_count") or len(rows))}
+    finally:
+        if client is None:
+            http.close()

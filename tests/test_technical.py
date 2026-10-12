@@ -352,3 +352,114 @@ def test_a_browser_crawl_says_so():
     page = _with(technical={"status": "done", "health": 81, "pages_crawled": 12, "browser": True,
                             "issues": [], "site": []})
     assert "12 pages crawled in a real browser (the site has a robot check)" in page
+
+
+# ── One issue, item by item ──────────────────────────────────────────────────
+
+
+def _routed(responses):
+    """A DataForSEO stand-in answering by endpoint path."""
+    import json
+
+    sent = []
+
+    def handler(request):
+        path = request.url.path.rsplit("/", 1)[-1]
+        sent.append((path, json.loads(request.content)[0]))
+        return httpx.Response(200, json={"tasks": [{"status_code": 20000, "result": [responses[path]]}]})
+
+    return _http(handler), sent
+
+
+def test_broken_files_come_with_the_page_each_is_on(dfs):
+    client, sent = _routed({
+        "resources": {"total_items_count": 2, "items": [{"url": "https://a.com/x.png", "status_code": 404},
+                                                        {"url": "https://a.com/y.js", "status_code": 0}]},
+        "pages_by_resource": {"total_items_count": 3, "items": [{"url": "https://a.com/roofs/"}, {"url": "https://a.com/b/"}]}})
+    d = onpage.detail("T1", "broken_resources", client=client)
+    assert d["columns"] == ["File", "Status", "Found on"] and d["total"] == 2
+    assert d["rows"][0] == ["https://a.com/x.png", "404", "https://a.com/roofs/ (+2 more)"]
+    assert d["rows"][1][1] == "no answer"
+    assert sent[0][1]["filters"] == [["checks.is_broken", "=", True]]
+
+
+def test_page_checks_list_the_pages_and_why(dfs):
+    client, sent = _routed({"pages": {"total_items_count": 1, "items": [
+        {"url": "https://a.com/", "meta": {"title": "Roofing", "title_length": 116}}]}})
+    d = onpage.detail("T1", "title_too_long", client=client)
+    assert d["columns"] == ["Page", "Title", "Title length"] and d["rows"] == [["https://a.com/", "Roofing", "116"]]
+    assert sent[0][1]["filters"] == [["checks.title_too_long", "=", True]]
+    client, sent = _routed({"pages": {"total_items_count": 0, "items": []}})
+    onpage.detail("T1", "duplicate_content", client=client)
+    assert sent[0][1]["filters"] == [["duplicate_content", "=", True]], "a page field, not a check"
+
+
+def test_shared_titles_come_grouped_by_the_text_they_share(dfs):
+    client, _ = _routed({"duplicate_tags": {"items": [
+        {"accumulator": "Introduction:", "total_count": 7, "pages": [{"url": "https://a.com/1"}, {"url": "https://a.com/2"}]}]}})
+    d = onpage.detail("T1", "duplicate_description", client=client)
+    assert d["groups"] == [{"shared": "Introduction:", "count": 7, "pages": ["https://a.com/1", "https://a.com/2"]}]
+
+
+def test_an_unknown_issue_is_refused(dfs):
+    with pytest.raises(onpage.OnPageUnavailable):
+        onpage.detail("T1", "drop_tables", client=_http(lambda r: pytest.fail("no call")))
+
+
+def test_the_code_to_text_check_is_labelled_for_what_it_measures():
+    page = _with(technical={"status": "done", "health": 90, "pages_crawled": 50, "task_id": "T1", "site": [],
+                            "issues": [{"key": "low_content_rate", "label": "Thin pages, little text", "count": 47}]})
+    assert "Pages heavy on code for their text" in page and "Thin pages" not in page
+
+
+def test_issues_open_a_dialog_when_a_crawl_is_on_record():
+    page = _with(technical={"status": "done", "health": 90, "pages_crawled": 50, "task_id": "T1", "site": [],
+                            "issues": [{"key": "broken_resources", "label": "x", "count": 18}]})
+    assert 'data-issue="broken_resources"' in page and 'id="issue"' in page
+    assert "/technical/issue/" in page
+
+
+def test_the_issue_route_reads_once_then_from_the_cache(client, monkeypatch):
+    import app.console.routes as routes
+
+    cache, calls = {}, []
+    monkeypatch.setattr(routes.store, "get_audit", lambda aid: {"technical": {"task_id": "T1"}})
+    monkeypatch.setattr(routes.store, "cache_get", lambda kind, req: cache.get(str(sorted(req.items()))))
+    def put(kind, req, v):
+        # Firestore refuses a list inside a list; the cached value must not carry one.
+        assert all(not isinstance(x, list) for val in v.values() if isinstance(val, list) for x in val)
+        cache.update({str(sorted(req.items())): v})
+
+    monkeypatch.setattr(routes.store, "cache_put", put)
+
+    def detail(task_id, key):
+        calls.append((task_id, key))
+        return {"columns": ["File", "Status", "Found on"], "total": 1,
+                "rows": [["https://a.com/wp-content/x.png", "404", "https://a.com/roofs/"]]}
+
+    monkeypatch.setattr(onpage, "detail", detail)
+    sign_in(client)
+    for _ in range(2):
+        r = client.get("/console/audits/a1/technical/issue/broken_resources")
+        assert r.status_code == 200 and "/wp-content/x.png" in r.text and 'href="https://a.com/roofs/"' in r.text
+    assert calls == [("T1", "broken_resources")]
+    assert "Unknown issue" in client.get("/console/audits/a1/technical/issue/nope").text
+
+
+def test_the_issue_route_needs_a_session(client):
+    assert client.get("/console/audits/a1/technical/issue/broken_resources").status_code in (401, 303, 302)
+
+
+def test_a_cache_that_fails_still_shows_the_list(client, monkeypatch):
+    import app.console.routes as routes
+
+    def boom(*a):
+        raise RuntimeError("400 Property response contains an invalid nested entity.")
+    monkeypatch.setattr(routes.store, "get_audit", lambda aid: {"technical": {"task_id": "T1"}})
+    monkeypatch.setattr(routes.store, "cache_get", boom)
+    monkeypatch.setattr(routes.store, "cache_put", boom)
+    monkeypatch.setattr(onpage, "detail", lambda t, k: {"columns": ["Page", "Title"], "total": 1,
+                                                       "rows": [["https://a.com/x", "X"]]})
+    sign_in(client)
+    r = client.get("/console/audits/a1/technical/issue/no_title")
+    assert r.status_code == 200 and "/x" in r.text

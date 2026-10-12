@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "_components.html" import page_header, kpi, pill, table_wrap, empty_row, modal_open, modal_close, modal_backdrop %}
 {% from "_outreach.html" import outreach_card %}
-{% from "_scripts.html" import insert_variables, copy_button, send_confirm, modals, stage_confirm %}
+{% from "_scripts.html" import insert_variables, copy_button, send_confirm, modals, stage_confirm, issue_detail %}
 {% macro finding_form(action, saw, means, fix, label, note) -%}
 <form class="finding-form" method="post" action="{{ action }}">
   {{ csrf_field(csrf) }}
@@ -238,7 +238,8 @@
     </ul>
     {% if c.issues %}
     <h4 class="sub">Issues found</h4>
-    <ul class="tech-issues">{% for i in c.issues %}<li>{{ i.label }} <b>{{ i.count }}</b></li>{% endfor %}</ul>
+    <ul class="tech-issues">{% for i in c.issues %}<li>{% if c.task_id %}<button type="button" class="issue-link" data-issue="{{ i.key }}" data-label="{{ i.label }}">{{ i.label }} <b>{{ i.count }}</b></button>{% else %}{{ i.label }} <b>{{ i.count }}</b>{% endif %}</li>{% endfor %}</ul>
+    {% if c.task_id %}<p class="muted text-sm">Click an issue to see each page or file.</p>{% endif %}
     {% else %}<p class="muted text-sm">No issues found on the pages crawled.</p>{% endif %}
     {% elif c.status not in ("crawling", "blocked", "failed") %}
     <p class="muted">No crawl yet. Run technical audit to check every page for broken links, missing titles, duplicate pages and more.</p>
@@ -422,6 +423,17 @@
   </div>
   {{ modal_backdrop() }}
 </dialog>
+<dialog class="modal" id="issue" aria-labelledby="issue-title">
+  <div class="modal-box issue-box">
+  <div class="pagehead">
+    <h2 id="issue-title" class="mt-0">Issue</h2>
+    <div class="primary">{{ modal_close() }}</div>
+  </div>
+  <div id="issue-body" aria-live="polite"></div>
+  </div>
+  {{ modal_backdrop() }}
+</dialog>
+{{ issue_detail(p.audit_id) }}
 {{ modals() }}
 {{ insert_variables() }}
 {{ send_confirm() }}

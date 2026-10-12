@@ -62,15 +62,15 @@ def test_a_flattered_lab_test_never_clears_a_speed_failure():
     assert failures == []
 
 
-def test_word_counts_are_left_out_when_text_is_held_back():
-    tech = {"status": "done", "pages_crawled": 50, "cms": "nitropack", "issues": [
-        {"key": "low_content_rate", "label": "Thin pages, little text", "count": 47},
+def test_the_code_to_text_check_never_reaches_a_finding():
+    """It measures text against page code, not words: it flagged a 1,151 word
+    homepage. Calling that thin content would be a false claim."""
+    tech = {"status": "done", "pages_crawled": 50, "issues": [
+        {"key": "low_content_rate", "label": "x", "count": 47},
         {"key": "broken_resources", "label": "Broken images or files", "count": 24}]}
     failures, _, _ = ex.merge({"technical": tech}, [], [])
     note = next(f["note"] for f in failures if f["code"] == "T1")
-    assert "Broken images or files: 24" in note and "Thin pages" not in note
-    failures, _, _ = ex.merge({"technical": {**tech, "cms": ""}}, [], [])
-    assert "Thin pages" in next(f["note"] for f in failures if f["code"] == "T1")
+    assert "Broken images or files: 24" in note and "x: 47" not in note
 
 
 def test_every_audit_records_what_its_render_saw(monkeypatch):

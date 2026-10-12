@@ -355,6 +355,13 @@
   .site-checks { @apply list-none p-0 my-2 text-sm; }
   .site-checks li { @apply flex flex-row items-center gap-1.5 py-0.5; }
   .site-checks .ic { @apply w-4 h-4; }
+  .issue-link { @apply text-left cursor-pointer underline decoration-dotted underline-offset-4 decoration-ink2 hover:text-ember; }
+  .issue-box { @apply max-w-4xl w-[94vw]; }
+  .issue-table { @apply max-h-[60vh] overflow-auto; }
+  .issue-table table { @apply min-w-0 text-sm; }
+  .issue-table td { @apply break-all; }
+  .issue-group { @apply border-b border-line py-2.5; }
+  .issue-group ul { @apply list-disc ml-5 mt-1 text-sm break-all; }
   .tech-shot img { @apply w-full max-w-[260px] border border-line rounded-box block mx-auto; }
 
   /* Findings a person writes or rewords, and the On the report panel. */
@@ -453,3 +460,7 @@
    its background rule. */
 .empty-note .btn:not(.btn-primary) { --btn-color: var(--color-base-100); border-color: var(--color-line); }
 .view-toggle .btn-active { --btn-color: var(--color-base-100); border-color: var(--color-primary); color: var(--color-ember); }
+
+/* The crawl-issue dialog carries wide tables of URLs; daisyUI's modal-box
+   width is set from its own layer, so the override lives out here too. */
+.modal-box.issue-box { max-width: 60rem; width: 94vw; }

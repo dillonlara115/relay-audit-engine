@@ -1,0 +1,23 @@
+{#- One crawl issue, item by item. A fragment the Technical dialog loads. -#}
+{% macro cell(v) -%}
+{% if v.startswith("http") %}<a href="{{ v }}" target="_blank" rel="noopener noreferrer" title="{{ v }}">{{ v|short_url }}</a>{% else %}{{ v }}{% endif %}
+{%- endmacro %}
+{% if error %}
+<p class="muted">{{ error }}</p>
+{% elif d.groups is defined and d.groups %}
+<p class="muted text-sm">{{ d.groups|length }} group{{ "s" if d.groups|length != 1 }} of pages sharing the same text.</p>
+{% for g in d.groups %}
+<div class="issue-group">
+  <div><b>&ldquo;{{ g.shared }}&rdquo;</b> <span class="muted text-sm">on {{ g.count }} pages</span></div>
+  <ul>{% for u in g.pages %}<li>{{ cell(u) }}</li>{% endfor %}</ul>
+</div>
+{% endfor %}
+{% elif d.rows %}
+<p class="muted text-sm">{% if d.total > d.rows|length %}Showing the first {{ d.rows|length }} of {{ d.total }}.{% else %}{{ d.total }} in all.{% endif %}{% if note %} {{ note }}{% endif %}</p>
+<div class="table-wrap issue-table"><table>
+<thead><tr>{% for c in d.columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+<tbody>{% for row in d.rows %}<tr>{% for v in row %}<td>{{ cell(v) }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+</table></div>
+{% else %}
+<p class="muted">The crawl has no items on record for this one. DataForSEO keeps a crawl's details for 30 days; run technical audit again for a fresh list.</p>
+{% endif %}

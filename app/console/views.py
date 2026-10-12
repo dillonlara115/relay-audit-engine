@@ -1045,8 +1045,12 @@ def technical_view(audit: Mapping[str, Any], prospect: Mapping[str, Any],
     measured = lh.get("measured_at")
     site = prospect.get("website_url") or ""
 
+    from app.tools import onpage
+
     crawl = {"status": "", "health": None, "pages_crawled": 0, "cms": "", "site": [], "issues": [],
-             "error": "", "max_pages": 0, "browser": False, **(audit.get("technical") or {})}
+             "error": "", "max_pages": 0, "browser": False, "task_id": "", **(audit.get("technical") or {})}
+    # Labels come from today's table, so a stored crawl picks up a corrected one.
+    crawl["issues"] = [{**i, "label": onpage.LABELS.get(i.get("key"), i.get("label"))} for i in crawl["issues"]]
     if crawl["status"] == "done" and crawl["health"] is None and not crawl["pages_crawled"]:
         # Crawls from before robot checks were caught finished as "done" with
         # nothing in them. Say what happened instead of "no crawl yet".
@@ -1074,6 +1078,22 @@ def technical_view(audit: Mapping[str, Any], prospect: Mapping[str, Any],
         "crawl": crawl,
         "can_run": bool(site),
     }
+
+
+def short_url(url: str) -> str:
+    """A link's path for display, the host dropped: the dialog is about one site."""
+    from urllib.parse import unquote, urlsplit
+
+    parts = urlsplit(url)
+    path = unquote(parts.path or "/") + (f"?{parts.query}" if parts.query else "")
+    return path if len(path) <= 90 else path[:87] + "..."
+
+
+_env.filters["short_url"] = short_url
+
+
+def render_issue(found: Mapping[str, Any] | None, *, error: str = "", note: str = "") -> str:
+    return _env.get_template("_issue.html").render(d=found or {"rows": []}, error=error, note=note)
 
 
 def report_parts_view(audit: Mapping[str, Any], evidence: Sequence[Mapping[str, Any]], *,

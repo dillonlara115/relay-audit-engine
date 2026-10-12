@@ -30,7 +30,6 @@ OWNER_LINES: dict[str, tuple[str, str]] = {
     "is_http": ("page isn't on a secure connection", "pages aren't on a secure connection"),
     "no_description": ("page has no summary for Google to show", "pages have no summary for Google to show"),
     "title_too_long": ("title is too long for Google to show in full", "titles are too long for Google to show in full"),
-    "low_content_rate": ("page has very little text on it", "pages have very little text on them"),
     "https_to_http_links": ("secure page links to an insecure one", "secure pages link to insecure ones"),
 }
 SHOWN = tuple(OWNER_LINES)
@@ -57,14 +56,14 @@ def speed_snapshot(lighthouse: Mapping[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def site_check_snapshot(technical: Mapping[str, Any], *, text_unreliable: bool = False) -> dict[str, Any] | None:
+def site_check_snapshot(technical: Mapping[str, Any]) -> dict[str, Any] | None:
     pages = int(technical.get("pages_crawled") or 0)
     if technical.get("status") != "done" or not pages:
         return None
     lines = []
     for issue in technical.get("issues") or []:
         key, count = issue.get("key"), int(issue.get("count") or 0)
-        if key not in SHOWN or not count or (key == "low_content_rate" and text_unreliable):
+        if key not in SHOWN or not count:
             continue
         one, many = OWNER_LINES[key]
         lines.append({"key": key, "count": count, "text": f"{count} {one if count == 1 else many}"})
@@ -76,11 +75,7 @@ def site_check_snapshot(technical: Mapping[str, Any], *, text_unreliable: bool =
 
 def snapshot(audit: Mapping[str, Any], *, speed: bool, site_check: bool) -> dict[str, Any]:
     """What report_extras should hold for the sections switched on."""
-    from app.tools import stack
-
-    technical = audit.get("technical") or {}
-    unreliable = bool(technical.get("browser")) or stack.any_of(stack.found_on(audit), "delays_scripts")
     return {
         "speed": speed_snapshot(audit.get("lighthouse") or {}) if speed else None,
-        "site_check": site_check_snapshot(technical, text_unreliable=unreliable) if site_check else None,
+        "site_check": site_check_snapshot(audit.get("technical") or {}) if site_check else None,
     }

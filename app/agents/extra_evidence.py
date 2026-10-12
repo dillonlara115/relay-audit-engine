@@ -32,9 +32,10 @@ REACH_WEAK = 0.6
 
 # Crawl issues a homeowner or Google would trip over. Housekeeping (favicons,
 # alt text, render-blocking files) stays on the console and out of the draft.
+# low_content_rate is left out on purpose: it measures text against page code,
+# not how much there is to read, and flagged a 1,151 word homepage.
 CRAWL_KEYS = ("is_4xx_code", "is_5xx_code", "broken_links", "broken_resources", "no_title",
-              "duplicate_title", "duplicate_content", "no_h1_tag", "is_http", "low_content_rate",
-              "no_description")
+              "duplicate_title", "duplicate_content", "no_h1_tag", "is_http", "no_description")
 
 # Labels for the console's finding cards, so a person choosing three can see
 # where a finding came from.
@@ -89,14 +90,10 @@ def reach_row(reach: Mapping[str, Any]) -> tuple[dict[str, Any] | None, str | No
             "note": note}, None
 
 
-def crawl_row(technical: Mapping[str, Any], *, text_unreliable: bool = False) -> dict[str, Any] | None:
+def crawl_row(technical: Mapping[str, Any]) -> dict[str, Any] | None:
     if technical.get("status") != "done":
         return None
-    keys = set(CRAWL_KEYS)
-    if text_unreliable:
-        # A browser crawl, or a tool that holds text back, undercounts words.
-        keys.discard("low_content_rate")
-    issues = [i for i in technical.get("issues") or [] if i.get("key") in keys and i.get("count")]
+    issues = [i for i in technical.get("issues") or [] if i.get("key") in CRAWL_KEYS and i.get("count")]
     if not issues:
         return None
     listed = "; ".join(f"{i['label']}: {i['count']}" for i in issues)
@@ -155,9 +152,7 @@ def merge(audit: Mapping[str, Any], failures: Sequence[Mapping[str, Any]],
     from app.tools import stack
 
     tools = stack.found_on(audit)
-    technical = audit.get("technical") or {}
-    row = crawl_row(technical, text_unreliable=bool(technical.get("browser"))
-                    or stack.any_of(tools, "delays_scripts"))
+    row = crawl_row(audit.get("technical") or {})
     if row:
         failures.append(row)
         used.append("crawl")
