@@ -337,3 +337,36 @@ async def find_business(query: str, *, limit: int = FIND_LIMIT) -> list[PlaceRec
         payload = await _search_page(client, cfg.places_api_key, query, None)
     records = [r for r in (flatten_place(raw) for raw in payload.get("places") or []) if r]
     return records[:limit]
+
+
+NEARBY_URL = "https://places.googleapis.com/v1/places:searchNearby"
+
+
+async def town_at(lat: float, lng: float) -> tuple[str | None, str | None]:
+    """(town, state) nearest a point, for a service-area listing that shows no
+    address: the audit's local searches and the report both need a town.
+    Cached like every Places call; a miss is (None, None), never a guess."""
+    cfg = get_config()
+    if not cfg.places_api_key:
+        return None, None
+    request = {"includedTypes": ["locality"], "maxResultCount": 1, "rankPreference": "DISTANCE",
+               "locationRestriction": {"circle": {"center": {"latitude": round(lat, 4), "longitude": round(lng, 4)},
+                                                  "radius": 25000.0}}}
+    payload = await asyncio.to_thread(store.cache_get, "places_town", request)
+    if payload is None:
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+                r = await client.post(NEARBY_URL, json=request, headers={
+                    "X-Goog-Api-Key": cfg.places_api_key,
+                    "X-Goog-FieldMask": "places.displayName,places.addressComponents"})
+            r.raise_for_status()
+            payload = r.json()
+        except (httpx.HTTPError, ValueError):
+            return None, None
+        await asyncio.to_thread(store.cache_put, "places_town", request, payload)
+    place = (payload.get("places") or [None])[0]
+    if not place:
+        return None, None
+    comps = place.get("addressComponents") or []
+    return (_component(comps, "locality") or (place.get("displayName") or {}).get("text"),
+            _component(comps, "administrative_area_level_1"))

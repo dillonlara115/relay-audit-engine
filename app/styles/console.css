@@ -388,6 +388,7 @@
   .match-facts a { @apply inline-flex flex-row items-center gap-1; }
   .match-facts .ic { @apply w-4 h-4; }
   .match-act { @apply shrink-0; }
+  .maps-offer { @apply flex flex-row flex-wrap items-center gap-x-3 gap-y-2 mt-3 text-sm; }
 
   /* Local reach: one square per Maps search, north at the top, the business
      in the middle. Top three green, 4 to 10 amber, 11 to 20 red, 20+ grey. */

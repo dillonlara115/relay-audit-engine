@@ -104,7 +104,9 @@ def test_no_match_says_so(client, lookup, monkeypatch):
         return []
     monkeypatch.setattr(places, "find_business", none)
     sign_in(client)
-    assert "No Google listing matched" in client.get("/console/add?q=nobody").text
+    page = client.get("/console/add?q=nobody").text
+    assert "Google's business data has no listing matching" in page
+    assert 'href="/console/add?q=nobody&amp;maps=1"' in page, "offers the map search"
 
 
 def test_a_failed_lookup_is_a_line_not_a_500(client, lookup, monkeypatch):
@@ -177,3 +179,98 @@ def test_the_manual_call_list_is_labelled(client, monkeypatch):
     monkeypatch.setattr(routes, "_excluded_for_batch", lambda bid: [])
     sign_in(client)
     assert "Added by hand" in client.get("/console/batches/manual").text
+
+
+# ── Google Maps directly, for listings the Places feed lacks ──────────────────
+
+from app.tools import maps_lookup  # noqa: E402
+
+SUN_SPIRIT = {"type": "maps_search", "rank_group": 1, "title": "Sun Spirit Roofing LLC", "place_id": "ChIJsun",
+              "cid": "123", "address": "Prescott, AZ", "phone": "+1 928-899-7635",
+              "url": "https://sunspiritroofingllc.com/", "category": "Roofing contractor",
+              "latitude": 34.54, "longitude": -112.47, "rating": {"value": 5.0, "votes_count": 26},
+              "address_info": {"city": "Prescott", "region": "AZ", "zip": "86301"}}
+
+
+def test_a_map_result_becomes_the_same_record_a_sweep_stores():
+    r = maps_lookup.to_record(SUN_SPIRIT)
+    assert (r.place_id, r.business_name, r.city, r.state, r.lat) == ("ChIJsun", "Sun Spirit Roofing LLC", "Prescott", "AZ", 34.54)
+    assert r.rating == 5.0 and r.review_count == 26 and r.domain == "sunspiritroofingllc.com"
+    assert r.primary_type == "roofing_contractor" and r.maps_uri == "https://maps.google.com/?cid=123"
+    assert r.first_review_at is None and r.hours_published is None, "the map gives neither; checks skip"
+    assert maps_lookup.to_record({"title": "No id"}) is None
+
+
+def test_the_map_search_is_cached_and_retries_a_dropped_connection(monkeypatch):
+    sent, cache = [], {}
+    monkeypatch.setattr(maps_lookup, "get_config", lambda: Config(dataforseo_login="l", dataforseo_password="p"))
+    monkeypatch.setattr(maps_lookup.store, "cache_get", lambda kind, req: cache.get(json.dumps(req, sort_keys=True)))
+    monkeypatch.setattr(maps_lookup.store, "cache_put", lambda kind, req, body: cache.update({json.dumps(req, sort_keys=True): body}))
+
+    def handler(request):
+        sent.append(json.loads(request.content)[0])
+        if len(sent) == 1:
+            raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+        return httpx.Response(200, json={"tasks": [{"status_code": 20000, "result": [{"items": [SUN_SPIRIT]}]}]})
+
+    async def go():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            first = await maps_lookup.find("Sun Spirit Roofing LLC Prescott AZ", client=http)
+            again = await maps_lookup.find("Sun  Spirit Roofing LLC Prescott AZ", client=http)
+            return first, again
+
+    first, again = asyncio.run(go())
+    assert [r.place_id for r in first] == ["ChIJsun"] == [r.place_id for r in again]
+    assert len(sent) == 2 and sent[0]["location_code"] == 2840 and sent[0]["keyword"] == "Sun Spirit Roofing LLC Prescott AZ"
+
+
+def test_the_add_page_can_search_the_map_and_add_from_it(client, queued, lookup, monkeypatch):
+    async def from_map(q, **kw):
+        return [maps_lookup.to_record(SUN_SPIRIT)]
+
+    monkeypatch.setattr(maps_lookup, "find", from_map)
+    csrf = sign_in(client)
+    page = client.get("/console/add?q=Sun+Spirit+Roofing&maps=1").text
+    assert "Sun Spirit Roofing LLC" in page and "Found on Google Maps directly" in page
+    assert '<input type="hidden" name="maps" value="1">' in page and "Search Google Maps directly" not in page
+    r = client.post("/console/add", data={"csrf": csrf, "q": "Sun Spirit Roofing", "place_id": "ChIJsun", "maps": "1"},
+                    follow_redirects=False)
+    assert r.headers["location"] == "/console/jobs/job-1"
+    pid, fields = lookup["upserts"][0]
+    assert pid == "ChIJsun" and fields["listing_source"] == "maps_search" and fields["lat"] == 34.54
+    assert queued[0][2] == "Audit Sun Spirit Roofing LLC"
+
+
+def test_a_listing_with_no_address_gets_the_town_it_sits_in(monkeypatch):
+    from app.tools import places as places_mod
+
+    monkeypatch.setattr(maps_lookup, "get_config", lambda: Config(dataforseo_login="l", dataforseo_password="p"))
+    hidden = {**SUN_SPIRIT, "address": None, "address_info": {"city": None, "region": None, "zip": None}}
+    monkeypatch.setattr(maps_lookup.store, "cache_get", lambda kind, req: {"items": [hidden]})
+
+    async def town(lat, lng):
+        assert (lat, lng) == (34.54, -112.47)
+        return "Prescott", "AZ"
+
+    monkeypatch.setattr(places_mod, "town_at", town)
+    (r,) = asyncio.run(maps_lookup.find("Sun Spirit Roofing"))
+    assert (r.city, r.state, r.address) == ("Prescott", "AZ", None)
+
+
+def test_town_at_reads_the_nearest_locality(monkeypatch):
+    monkeypatch.setattr(places, "get_config", lambda: Config(places_api_key="k"))
+    monkeypatch.setattr(places.store, "cache_get", lambda kind, req: {"places": [
+        {"displayName": {"text": "Prescott"}, "addressComponents": [
+            {"types": ["locality", "political"], "shortText": "Prescott"},
+            {"types": ["administrative_area_level_1"], "shortText": "AZ"}]}]})
+    assert asyncio.run(places.town_at(34.5667, -112.5422)) == ("Prescott", "AZ")
+    monkeypatch.setattr(places.store, "cache_get", lambda kind, req: {"places": []})
+    assert asyncio.run(places.town_at(0, 0)) == (None, None)
+
+
+def test_the_card_says_where_a_hidden_address_business_works():
+    from app.console import views
+
+    rec = maps_lookup.to_record({**SUN_SPIRIT, "address": None})
+    page = views.render_add(q="x", matches=[{"record": rec}], error="", csrf="t", maps=True)
+    assert "Serves Prescott, AZ (no street address on the listing)" in page

@@ -509,21 +509,26 @@ def render_run(*, csrf: str, markets: Sequence[str], active_jobs: Sequence[Mappi
 
 
 def render_add(*, q: str, matches: Sequence[Mapping[str, Any]], error: str, csrf: str,
-               notice: tuple[str, str] | None = None) -> str:
+               maps: bool = False, notice: tuple[str, str] | None = None) -> str:
     """Look up one roofer by name and town, then pick the right listing."""
     rows = []
     for m in matches:
         r = m["record"]
         rows.append({
-            "place_id": r.place_id, "name": r.business_name, "address": r.address or "",
+            "place_id": r.place_id, "name": r.business_name,
+            "address": r.address or (f"Serves {r.city}{', ' + r.state if r.state else ''} (no street address on the listing)"
+                                     if r.city else "No address on the listing"),
             "website": r.website_url or "", "domain": r.domain or "",
             "rating": r.rating, "reviews": r.review_count, "maps_uri": r.maps_uri or "",
             "phone": r.gbp_phone or "",
             "closed": r.business_status not in (None, "OPERATIONAL"),
             "audit_id": m.get("audit_id") or "", "suppressed": bool(m.get("suppressed")),
         })
+    from urllib.parse import urlencode
+
     return _render("add.html", title="Add a roofer", active="add", csrf=csrf, notice=notice,
-                   q=q, rows=rows, error=error)
+                   q=q, rows=rows, error=error, maps=maps,
+                   maps_href=f"/console/add?{urlencode({'q': q, 'maps': 1})}")
 
 
 def render_job(job: Mapping[str, Any], *, csrf: str,

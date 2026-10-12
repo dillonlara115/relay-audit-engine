@@ -203,11 +203,16 @@ async def start_dispatch(request: Request, batch_id: str = Form(...),
 MANUAL_BATCH = "manual"
 
 
-async def _matches(q: str) -> list[dict[str, Any]]:
-    """Places matches for what was typed, each with what we already hold."""
-    from app.tools.places import find_business
+async def _matches(q: str, *, maps: bool = False) -> list[dict[str, Any]]:
+    """Matches for what was typed, each with what we already hold. From the
+    Places API, or with maps=True from Google Maps itself (paid, cached), for
+    listings the API has not caught up with."""
+    if maps:
+        from app.tools.maps_lookup import find
+    else:
+        from app.tools.places import find_business as find
 
-    records = await find_business(q)
+    records = await find(q)
 
     def known() -> list[dict[str, Any]]:
         rules = store.load_suppressions()
@@ -223,24 +228,24 @@ async def _matches(q: str) -> list[dict[str, Any]]:
 
 
 @router.get("/add")
-async def add_screen(request: Request, q: str = "") -> Response:
+async def add_screen(request: Request, q: str = "", maps: int = 0) -> Response:
     """Look up one roofer on Google Maps by name and town, to audit them
     outside a sweep: a referral, someone met at a supply house."""
     q = " ".join(q.split())[:200]
     matches, error = [], ""
     if q:
         try:
-            matches = await _matches(q)
+            matches = await _matches(q, maps=bool(maps))
         except Exception as exc:  # noqa: BLE001 - a failed lookup is a line on the page
-            log.warning("places lookup failed: %s", exc)
+            log.warning("business lookup failed: %s", exc)
             error = "Google Maps did not answer. Try again in a minute."
-    return _page(views.render_add(q=q, matches=matches, error=error, csrf=csrf_token(request),
-                                  notice=_notice(request)))
+    return _page(views.render_add(q=q, matches=matches, error=error, maps=bool(maps),
+                                  csrf=csrf_token(request), notice=_notice(request)))
 
 
 @router.post("/add")
 async def add_prospect(request: Request, q: str = Form(""), place_id: str = Form(""),
-                       csrf: str = Form(None)) -> Response:
+                       maps: str = Form(""), csrf: str = Form(None)) -> Response:
     """Save the business picked from the lookup and audit it, the same audit a
     sweep runs. The gate is skipped: a person chose this one. Suppression is
     not. The job comes back to the new prospect page."""
@@ -249,11 +254,11 @@ async def add_prospect(request: Request, q: str = Form(""), place_id: str = Form
     from app.markets import resolve_market
     from app.tools.places import prospect_fields
 
-    back = f"/console/add?{urlencode({'q': q})}"
+    back = f"/console/add?{urlencode({'q': q, **({'maps': 1} if maps else {})})}"
     # The lookup again, not hidden form fields: it is cached, so it is free,
     # and nothing about the business comes from the browser.
     try:
-        found = await _matches(q)
+        found = await _matches(q, maps=bool(maps))
     except Exception as exc:  # noqa: BLE001
         return _redirect(_with_notice(back, "not_queued", f"Google Maps did not answer: {exc}"))
     match = next((m for m in found if m["record"].place_id == place_id), None)
@@ -268,7 +273,10 @@ async def add_prospect(request: Request, q: str = Form(""), place_id: str = Form
         market = resolve_market(f"{record.city or ''}, {record.state or ''}" if record.city else "manual")
         fields = prospect_fields(record, market_id=have.get("market_id") or store.market_id_for(market.name),
                                  batch_id=MANUAL_BATCH)
-        fields.update({"source": have.get("source") or "manual", "added_by_hand_at": store.utcnow()})
+        fields.update({"source": have.get("source") or "manual", "added_by_hand_at": store.utcnow(),
+                       # Found on the map, not in the Places feed: no review
+                       # dates or hours, so those checks skip.
+                       **({"listing_source": "maps_search"} if maps else {})})
         store.upsert_prospect(record.place_id, fields)
 
     await asyncio.to_thread(save)

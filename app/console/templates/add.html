@@ -17,11 +17,22 @@
   </form>
 </div>
 
+{% set maps_offer %}
+<div class="maps-offer">
+  <span>On Google Maps but not here? Google's business data can lag the map by weeks for new or recently changed listings.</span>
+  <a class="btn btn-sm" href="{{ maps_href }}">{{ icon("search") }} Search Google Maps directly</a>
+  <span class="muted text-sm">One paid search, about a fifth of a cent.</span>
+</div>
+{% endset %}
 {% if error %}
 <div class="warn-line" role="status">{{ error }}</div>
+{% elif q and not rows and maps %}
+<p class="muted">Google Maps shows nothing for &ldquo;{{ q }}&rdquo; either. Try the name exactly as it appears on the listing, plus the town.</p>
 {% elif q and not rows %}
-<p class="muted">No Google listing matched &ldquo;{{ q }}&rdquo;. Try the name as it appears on Google, or add the town.</p>
+<p class="muted">Google's business data has no listing matching &ldquo;{{ q }}&rdquo;.</p>
+{{ maps_offer }}
 {% endif %}
+{% if maps and rows %}<p class="muted text-sm">Found on Google Maps directly. Review dates and opening hours don't come through this way, so the audit skips the checks that need them.</p>{% endif %}
 
 {% if rows %}
 <h2>Pick the right listing</h2>
@@ -45,7 +56,7 @@
       <a class="btn btn-sm" href="/console/audits/{{ r.audit_id }}">Already a prospect, open</a>
       {% else %}
       <form method="post" action="/console/add">
-        {{ csrf_field(csrf) }}<input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="place_id" value="{{ r.place_id }}">
+        {{ csrf_field(csrf) }}<input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="place_id" value="{{ r.place_id }}">{% if maps %}<input type="hidden" name="maps" value="1">{% endif %}
         <button type="submit" class="btn btn-sm btn-primary">{{ icon("play") }} Add and audit</button>
       </form>
       {% endif %}
@@ -53,5 +64,6 @@
   </li>
   {% endfor %}
 </ul>
+{% if not maps %}{{ maps_offer }}{% endif %}
 {% endif %}
 {% endblock %}
