@@ -492,7 +492,15 @@ def test_spots_whose_search_failed_are_left_off_the_map():
     snap = extras.reach_snapshot(_reach(), map_path=None)
     snap["pins"][0]["band"], snap["pins"][0]["label"] = "none", "?"
     page = render_report(report(reach=snap))
-    assert ">?<" not in page and page.count('class="pin ') == 8
+    assert ">?<" not in page and page.count('class="pin ') == 9 and page.count('class="pin empty') == 1, \
+        "drawn empty so the grid keeps its shape"
+    assert "No roofers listed there" in page
+
+
+def test_a_town_centred_grid_says_so():
+    snap = extras.reach_snapshot({**_reach(), "center_on": "town", "center_label": "Prescott"}, map_path=None)
+    page = render_report(report(reach=snap))
+    assert "from spots all around Prescott" in page and "Circled: the middle of Prescott" in page
 
 
 def test_no_top_three_anywhere_says_so():

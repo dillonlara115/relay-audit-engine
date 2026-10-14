@@ -435,6 +435,8 @@
   .rpin.poor { --rc: var(--color-error); }
   .rpin.miss { --rc: var(--color-base-300); color: var(--color-ink2); }
   .rpin.none { --rc: var(--color-base-200); color: var(--color-ink2); }
+  .rpin.empty { --rc: transparent; box-shadow: none; border: 2px dashed var(--color-base-100); cursor: default; }
+  .rcell.empty { --rc: transparent; border: 2px dashed var(--color-line); }
   .rpin.center { box-shadow: 0 0 0 3px var(--color-base-content), 0 1px 4px rgb(0 0 0 / 0.35); }
   .rpop { @apply bg-base-100 border border-line rounded-box p-4 shadow-lg max-w-sm w-[90vw]; margin: auto; }
   .rpop::backdrop { background: rgb(0 0 0 / 0.15); }

@@ -30,12 +30,31 @@ ZOOM = "13z"          # roughly a few miles across, how a phone frames a local s
 PARALLEL = 8
 
 KEYWORDS = ("roofer", "roof repair", "roof replacement", "roofing contractor")
+CENTERS = ("business", "town")
+
+
+def default_center(prospect: Mapping[str, Any]) -> str:
+    """A business that shows a street address is centred on it, as Local
+    Falcon does. A service-area business hides its address, and its map pin
+    can sit miles from the homes it serves (Sun Spirit Roofing's sat in forest
+    west of Prescott), so it is centred on its town."""
+    return "town" if not prospect.get("address") and prospect.get("city") else "business"
 GRID_SIZES = (5, 7)
 RADII_MILES = (3, 5, 10)
 
 
 class ReachUnavailable(RuntimeError):
     """No credentials, or not one point came back."""
+
+
+# Google Maps answered, and listed nobody: a spot in national forest west of
+# Prescott, October 2026. Not a failed search, and not a ranking either: no
+# roofer shows there, so the spot is drawn empty and left out of the counts.
+NO_RESULTS = 40102
+
+
+class NoRoofersHere(Exception):
+    pass
 
 
 @dataclass(frozen=True)
@@ -55,6 +74,7 @@ class Spot:
     rank: int | None = None          # their position, 1 based; None when not in the top DEPTH
     top: list[dict[str, Any]] = field(default_factory=list)   # the first three, as listed
     error: str = ""
+    empty: bool = False              # Google Maps listed no businesses at this spot
 
 
 def grid(lat: float, lng: float, *, size: int, radius_miles: float) -> list[Point]:
@@ -82,7 +102,10 @@ def _match(item: Mapping[str, Any], place_id: str, domain: str, name: str) -> bo
 def read_point(body: Mapping[str, Any], *, place_id: str, domain: str, name: str) -> tuple[int | None, list[dict[str, Any]], float]:
     """(their rank, the first three, what the call cost) from one response."""
     task = (body.get("tasks") or [{}])[0]
-    if int(task.get("status_code") or 0) >= 40000:
+    code = int(task.get("status_code") or 0)
+    if code == NO_RESULTS:
+        raise NoRoofersHere()
+    if code >= 40000:
         raise ReachUnavailable(f"DataForSEO: {task.get('status_message') or 'refused'}")
     cost = float(task.get("cost") or body.get("cost") or 0)
     result = (task.get("result") or [{}])[0] or {}
@@ -128,6 +151,8 @@ async def run(*, place_id: str, domain: str, name: str, lat: float, lng: float, 
                     return spot
                 spot.rank, spot.top, cost = read_point(r.json(), place_id=place_id, domain=domain, name=name)
                 spent[0] += cost
+            except NoRoofersHere:
+                spot.empty = True
             except (httpx.HTTPError, ValueError, ReachUnavailable) as exc:
                 spot.error = str(exc)[:160] or type(exc).__name__
         return spot
@@ -137,16 +162,17 @@ async def run(*, place_id: str, domain: str, name: str, lat: float, lng: float, 
     finally:
         if owned:
             await http.aclose()
-    answered = [s for s in spots if not s.error]
+    answered = [s for s in spots if not s.error and not s.empty]
     if not answered:
-        raise ReachUnavailable(spots[0].error if spots else "no points to search")
+        raise ReachUnavailable(next((s.error for s in spots if s.error), "")
+                               or "Google Maps listed no roofers at any spot on the grid.")
     return summarize(spots, keyword=keyword, size=size, radius_miles=radius_miles,
                      cost=round(spent[0], 4))
 
 
 def summarize(spots: list[Spot], *, keyword: str, size: int, radius_miles: float,
               cost: float) -> dict[str, Any]:
-    answered = [s for s in spots if not s.error]
+    answered = [s for s in spots if not s.error and not s.empty]
     ranks = [s.rank for s in answered if s.rank]
     rivals: dict[str, dict[str, Any]] = {}
     for s in answered:
@@ -161,8 +187,9 @@ def summarize(spots: list[Spot], *, keyword: str, size: int, radius_miles: float
     return {
         "keyword": keyword, "size": size, "radius_miles": radius_miles, "cost": cost,
         "points": [{"row": s.row, "col": s.col, "lat": s.lat, "lng": s.lng, "rank": s.rank,
-                    "top": [t["title"] for t in s.top], "error": s.error} for s in spots],
+                    "top": [t["title"] for t in s.top], "error": s.error, "empty": s.empty} for s in spots],
         "answered": len(answered),
+        "empty": sum(1 for s in spots if s.empty),
         "top3": sum(1 for r in ranks if r <= 3),
         "found": len(ranks),
         "average_rank": round(sum(ranks) / len(ranks), 1) if ranks else None,

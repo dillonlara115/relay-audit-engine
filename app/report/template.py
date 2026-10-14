@@ -105,6 +105,7 @@ _PAGE = """<!doctype html>
           font-weight: 700; font-size: 0.8rem; color: #fff; background: var(--c); border: 2px solid #fff;
           box-shadow: 0 1px 3px rgba(0,0,0,.35); }}
   .pin.miss {{ --c: #b9b1a4; color: var(--asphalt); }} .pin.none {{ --c: #d9d1c4; color: var(--asphalt); }}
+  .pin.empty {{ background: transparent; border: 2px dashed rgba(22,18,14,.45); box-shadow: none; }}
   .pin.here {{ box-shadow: 0 0 0 3px var(--asphalt), 0 1px 3px rgba(0,0,0,.35); }}
   .gridonly {{ display: grid; gap: 6px; margin: 10px 0 8px; }}
   .gridonly .pin {{ position: static; transform: none; width: auto; max-width: none; }}
@@ -308,11 +309,16 @@ def _positions_block(positions: Mapping[str, Any]) -> str:
 
 def _reach_block(reach: Mapping[str, Any], map_url: str | None) -> str:
     esc = html_escape.escape
-    # A spot whose search never came back is our gap, not theirs: left off.
-    pins = [p for p in reach.get("pins") or [] if p.get("band") != "none"]
+    # A spot whose search failed is our gap, not theirs: drawn empty, like a
+    # spot where Google lists nobody, so the grid keeps its shape.
+    pins = [{**p, "band": "empty", "label": ""} if p.get("band") == "none" else p
+            for p in reach.get("pins") or []]
     answered, top3 = int(reach.get("answered") or 0), int(reach.get("top3") or 0)
     found, missing = int(reach.get("found") or 0), int(reach.get("missing") or 0)
     lower = max(0, found - top3)
+    town = reach.get("center_label") if reach.get("center_on") == "town" else ""
+    place_ringed = f"the middle of {town}" if town else "your business"
+    around = esc(town) if town else "your business"
 
     def pin(p: Mapping[str, Any], *, placed: bool) -> str:
         style = f' style="left: {p["x"]}%; top: {p["y"]}%"' if placed else ""
@@ -328,7 +334,10 @@ def _reach_block(reach: Mapping[str, Any], map_url: str | None) -> str:
                  + "".join(pin(p, placed=False) for p in pins) + "</div>")
     key = ('<div class="key"><span><i class="good"></i>Top 3, where most people look</span>'
            '<span><i class="ok"></i>4th to 10th</span><span><i class="poor"></i>11th to 20th</span>'
-           '<span><i style="--c: #b9b1a4"></i>Not in the first 20</span><span>Circled: your business</span></div>')
+           '<span><i style="--c: #b9b1a4"></i>Not in the first 20</span>'
+           + ('<span><i style="--c: transparent; outline: 1px dashed rgba(22,18,14,.5)"></i>No roofers listed there</span>'
+              if any(p.get("band") == "empty" for p in pins) else "")
+           + f'<span>Circled: {esc(place_ringed)}</span></div>')
     parts = [f"At {top3} {'spot' if top3 == 1 else 'spots'}, you're in the top 3, where most homeowners look."
              if top3 else "At none of these spots are you in the top 3, where most homeowners look."]
     if lower:
@@ -337,7 +346,7 @@ def _reach_block(reach: Mapping[str, Any], map_url: str | None) -> str:
         parts.append(f"At {missing}, you don't come up at all.")
     return ("<h2>Where you show up in Google Maps</h2>\n  "
             f"<p>Google Maps shows different roofers depending on where the person searching is standing. "
-            f"So we searched \u201c{esc(reach.get('keyword') or '')}\u201d from {answered} spots around your "
-            f"business, up to {esc(str(reach.get('radius_miles') or ''))} miles out. Each circle shows where you "
+            f"So we searched \u201c{esc(reach.get('keyword') or '')}\u201d from spots all around {around}, up to "
+            f"{esc(str(reach.get('radius_miles') or ''))} miles out. Each circle shows where you "
             "landed on the list from that spot.</p>\n  "
             + board + key + "<p>" + " ".join(parts) + "</p>")

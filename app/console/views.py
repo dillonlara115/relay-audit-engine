@@ -1163,7 +1163,9 @@ def reach_view(audit: Mapping[str, Any], prospect: Mapping[str, Any],
     rows: list[list[dict[str, Any]]] = [[] for _ in range(size)]
     for pt in sorted(r["points"], key=lambda p: (p.get("row", 0), p.get("col", 0))):
         rank = pt.get("rank")
-        if pt.get("error"):
+        if pt.get("empty"):
+            label, band, note = "", "empty", "Google Maps lists no roofers at this spot."
+        elif pt.get("error"):
             label, band, note = "?", "none", "This search did not come back."
         elif rank is None:
             label, band, note = "20+", "miss", "Not in the first 20."
@@ -1202,6 +1204,12 @@ def reach_view(audit: Mapping[str, Any], prospect: Mapping[str, Any],
         "finished": finished.strftime("%b %d, %Y") if hasattr(finished, "strftime") else "",
         "can_run": isinstance(prospect.get("lat"), (int, float)) and isinstance(prospect.get("lng"), (int, float)),
         "keywords": reach.KEYWORDS, "sizes": reach.GRID_SIZES, "radii": reach.RADII_MILES,
+        "center_note": (f"Ringed: the middle of {r.get('center_label')}" if r.get("center_on") == "town"
+                        else "Ringed: the business"),
+        "centers": [("business", "Their business pin"),
+                    ("town", f"The middle of {prospect.get('city')}" if prospect.get("city") else "Their town")],
+        "center_choice": r.get("center_on") or reach.default_center(prospect),
+        "empty_count": int(r.get("empty") or 0),
     }
 
 

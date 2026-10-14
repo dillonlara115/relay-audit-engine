@@ -445,6 +445,18 @@ async def run_reach_job(job_id: str, params: Mapping[str, Any]) -> dict[str, Any
     if not isinstance(lat, (int, float)) or not isinstance(lng, (int, float)):
         raise RuntimeError("this prospect has no map location on record")
 
+    # Where the grid is centred: the business's pin, or the middle of its town.
+    center_on = params.get("center") if params.get("center") in reach.CENTERS else reach.default_center(prospect)
+    center_label = "the business"
+    if center_on == "town":
+        from app.tools.places import town_center
+
+        town = await town_center(str(prospect.get("city") or ""), prospect.get("state"))
+        if town:
+            lat, lng = town
+            center_label = str(prospect.get("city"))
+        else:
+            center_on = "business"
     keyword = params.get("keyword") if params.get("keyword") in reach.KEYWORDS else reach.KEYWORDS[0]
     size = next((s for s in reach.GRID_SIZES if str(s) == str(params.get("size"))), reach.GRID_SIZES[0])
     radius = next((r for r in reach.RADII_MILES if str(r) == str(params.get("radius"))), reach.RADII_MILES[1])
@@ -471,6 +483,7 @@ async def run_reach_job(job_id: str, params: Mapping[str, Any]) -> dict[str, Any
     # a 5 by 5 run leaves nothing of an earlier 7 by 7 behind.
     await asyncio.to_thread(store.update_audit, audit_id, {"local_reach": {
         **result, "status": "done", "error": "", "job_id": job_id, "center": {"lat": lat, "lng": lng},
+        "center_on": center_on, "center_label": center_label,
         "map": map_record, "finished_at": store.utcnow()}})
     await say(f"In the top three at {result['top3']} of {result['answered']} spots, "
               f"listed at all at {result['found']}. Cost ${result['cost']:.2f}.")

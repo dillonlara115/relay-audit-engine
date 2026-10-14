@@ -204,7 +204,7 @@ def test_run_reach_queues_a_job_that_comes_back_to_the_section(client, queued, m
                 follow_redirects=False)
     kind, params, label = queued[0]
     assert kind == jobs.KIND_REACH and label == "Local reach for Apex"
-    assert params == {"audit_id": "a1", "keyword": "roofer", "size": "5", "radius": "3",
+    assert params == {"audit_id": "a1", "keyword": "roofer", "size": "5", "radius": "3", "center": "",
                       "return_to": "/console/audits/a1#reach"}
 
 
@@ -408,3 +408,69 @@ def test_no_run_no_map(client, monkeypatch):
     csrf = sign_in(client)
     r = client.post("/console/audits/a1/reach/map", data={"csrf": csrf}, follow_redirects=False)
     assert "notice=reach_map_failed" in r.headers["location"]
+
+
+
+# ── Where the grid is centred, and spots with nobody listed ───────────────────
+
+
+def test_no_roofers_listed_is_an_empty_spot_not_a_failure(dfs):
+    def handler(request):
+        lat = float(json.loads(request.content)[0]["location_coordinate"].split(",")[1])
+        if lat < -104.8:   # the west half: forest, nobody listed
+            return httpx.Response(200, json={"tasks": [{"status_code": 40102, "status_message": "No Search Results."}]})
+        return httpx.Response(200, json=_body([_item(2, "Apex", "p1")]))
+
+    out = _run(handler, size=5)
+    empty = [p for p in out["points"] if p["empty"]]
+    assert len(empty) == 10 and not any(p["error"] for p in out["points"])
+    assert out["answered"] == 15 and out["empty"] == 10 and out["top3"] == 15
+
+
+def test_a_grid_with_nobody_listed_anywhere_says_so(dfs):
+    body = {"tasks": [{"status_code": 40102, "status_message": "No Search Results."}]}
+    with pytest.raises(reach.ReachUnavailable, match="no roofers"):
+        _run(lambda r: httpx.Response(200, json=body))
+
+
+def test_a_business_hiding_its_address_is_centred_on_its_town():
+    assert reach.default_center({"address": None, "city": "Prescott"}) == "town"
+    assert reach.default_center({"address": "12 Main St, Pueblo", "city": "Pueblo"}) == "business"
+    assert reach.default_center({"address": None, "city": None}) == "business"
+
+
+def test_the_job_centres_on_the_town_when_asked(reach_env, monkeypatch):
+    from app.tools import places
+
+    async def town(city, state=None):
+        assert city == "Apexville"
+        return (38.9, -104.7)
+
+    monkeypatch.setattr(places, "town_center", town)
+    monkeypatch.setattr(job_runner.store, "get_prospect", lambda pid: {
+        "lat": 38.8, "lng": -104.8, "city": "Apexville", "address": None, "business_name": "Apex"})
+    asyncio.run(job_runner.run_reach_job("j1", {"audit_id": "a1", "size": "5"}))
+    run = reach_env["runs"][0]
+    assert (run["lat"], run["lng"]) == (38.9, -104.7)
+    saved = reach_env["updates"][-1]["local_reach"]
+    assert saved["center_on"] == "town" and saved["center_label"] == "Apexville"
+    assert saved["center"] == {"lat": 38.9, "lng": -104.7}
+
+
+def test_a_town_that_cannot_be_found_falls_back_to_the_business(reach_env, monkeypatch):
+    from app.tools import places
+
+    async def nowhere(city, state=None):
+        return None
+
+    monkeypatch.setattr(places, "town_center", nowhere)
+    asyncio.run(job_runner.run_reach_job("j1", {"audit_id": "a1", "center": "town"}))
+    assert reach_env["updates"][-1]["local_reach"]["center_on"] == "business"
+    assert (reach_env["runs"][0]["lat"], reach_env["runs"][0]["lng"]) == (38.8, -104.8)
+
+
+def test_the_console_offers_the_centre_and_names_the_ring():
+    page = _page({"local_reach": {**_record(), "center_on": "town", "center_label": "Prescott"}},
+                 prospect={"city": "Prescott", "address": None})
+    assert 'name="center"' in page and '<option value="town" selected>' in page
+    assert "Ringed: the middle of Prescott" in page

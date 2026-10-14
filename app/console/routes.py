@@ -1082,7 +1082,8 @@ async def technical_issue(audit_id: str, key: str) -> Response:
 
 @router.post("/audits/{audit_id}/reach")
 async def run_reach(audit_id: str, request: Request, csrf: str = Form(None),
-                    keyword: str = Form(""), size: str = Form(""), radius: str = Form("")) -> Response:
+                    keyword: str = Form(""), size: str = Form(""), radius: str = Form(""),
+                    center: str = Form("")) -> Response:
     """A grid of Maps searches around the business. Paid per point, so it runs
     only from this button, and comes back to the Local reach section."""
     audit = await asyncio.to_thread(store.get_audit, audit_id)
@@ -1091,7 +1092,7 @@ async def run_reach(audit_id: str, request: Request, csrf: str = Form(None),
     name = await _business_name(audit)
     return await _start(request, csrf, jobs.KIND_REACH,
                         {"audit_id": audit_id, "keyword": keyword, "size": size, "radius": radius,
-                         "return_to": f"/console/audits/{audit_id}#reach"},
+                         "center": center, "return_to": f"/console/audits/{audit_id}#reach"},
                         f"Local reach for {name}")
 
 

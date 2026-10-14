@@ -370,3 +370,28 @@ async def town_at(lat: float, lng: float) -> tuple[str | None, str | None]:
     comps = place.get("addressComponents") or []
     return (_component(comps, "locality") or (place.get("displayName") or {}).get("text"),
             _component(comps, "administrative_area_level_1"))
+
+
+async def town_center(city: str, state: str | None = None) -> tuple[float, float] | None:
+    """Where Google puts the middle of a town, for a Local reach grid centred
+    on the town a service-area business works rather than on its hidden base.
+    Cached; None when there is no answer, never a guess."""
+    cfg = get_config()
+    if not cfg.places_api_key or not city:
+        return None
+    request = {"textQuery": f"{city}, {state}" if state else city, "includedType": "locality", "pageSize": 1}
+    payload = await asyncio.to_thread(store.cache_get, "places_town_center", request)
+    if payload is None:
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+                r = await client.post(SEARCH_URL, json=request, headers={
+                    "X-Goog-Api-Key": cfg.places_api_key, "X-Goog-FieldMask": "places.location,places.displayName"})
+            r.raise_for_status()
+            payload = r.json()
+        except (httpx.HTTPError, ValueError):
+            return None
+        await asyncio.to_thread(store.cache_put, "places_town_center", request, payload)
+    loc = ((payload.get("places") or [{}])[0] or {}).get("location") or {}
+    if loc.get("latitude") is None or loc.get("longitude") is None:
+        return None
+    return float(loc["latitude"]), float(loc["longitude"])

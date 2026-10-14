@@ -217,7 +217,9 @@ def reach_snapshot(reach: Mapping[str, Any], *, map_path: str | None) -> dict[st
     pins = []
     for pt in sorted(reach["points"], key=lambda p: (p.get("row", 0), p.get("col", 0))):
         rank = pt.get("rank")
-        if pt.get("error"):
+        if pt.get("empty"):
+            label, band = "", "empty"
+        elif pt.get("error"):
             label, band = "?", "none"
         elif rank is None:
             label, band = "20+", "miss"
@@ -232,7 +234,9 @@ def reach_snapshot(reach: Mapping[str, Any], *, map_path: str | None) -> dict[st
     found = int(reach.get("found") or 0)
     return {"keyword": str(reach.get("keyword") or ""), "radius_miles": reach.get("radius_miles"),
             "size": size, "answered": answered, "top3": int(reach.get("top3") or 0), "found": found,
-            "missing": max(0, answered - found), "pins": pins, "map_path": map_path if on_map else None}
+            "missing": max(0, answered - found), "pins": pins, "map_path": map_path if on_map else None,
+            "center_on": reach.get("center_on") or "business", "center_label": reach.get("center_label") or "",
+            "empty": int(reach.get("empty") or 0)}
 
 
 def default_site_check(audit: Mapping[str, Any]) -> dict[str, Any] | None:
