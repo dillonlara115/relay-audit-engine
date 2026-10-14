@@ -93,7 +93,10 @@ _PAGE = """<!doctype html>
   .ranks {{ width: 100%; border-collapse: collapse; background: #fff; border-radius: 6px; overflow: hidden; margin: 0 0 14px; }}
   .ranks td {{ padding: 12px 14px; border-bottom: 1px solid #ece6dc; vertical-align: top; }}
   .ranks tr:last-child td {{ border-bottom: 0; }}
-  .ranks td.place {{ font-weight: 700; text-align: right; width: 42%; }}
+  .ranks td.place {{ font-weight: 700; text-align: right; width: 40%; }}
+  .ranks th {{ text-align: left; font-size: 0.85rem; font-weight: 600; opacity: 0.7; padding: 10px 14px 6px; }}
+  .ranks th.place {{ text-align: right; }}
+  .ranks .where {{ font-size: 0.9rem; opacity: 0.75; }}
   .gmap {{ position: relative; width: 100%; aspect-ratio: 1; border-radius: 6px; overflow: hidden;
           border: 3px solid var(--asphalt); margin: 10px 0 8px; background: #e8e2d6; }}
   .gmap img {{ position: absolute; inset: 0; width: 100%; height: 100%; }}
@@ -266,19 +269,50 @@ def _check_line(line: Any) -> str:
     return f"<li>{esc(line.get('text') or '')}{sub}</li>"
 
 
+def _nth(n: int) -> str:
+    if 10 <= n % 100 <= 20:
+        return f"{n}th"
+    return f"{n}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th') }"
+
+
+def _position_row(row: Mapping[str, Any]) -> tuple[str, str, str] | None:
+    """(what a homeowner searches, where they searched, where you came up)."""
+    if "kind" not in row:   # saved before the wording moved here
+        return (str(row.get("search") or ""), "", str(row.get("place") or "")) if row.get("search") else None
+    kind, query, rank = row.get("kind"), str(row.get("query") or ""), row.get("rank")
+    if kind == "maps":
+        return (query, "Google Maps", f"{_nth(int(rank))} on the list" if rank else "Not in the top 3")
+    if kind == "search":
+        return (query, "Google search", f"{_nth(int(rank))} on the page" if rank
+                else "Not on the first two pages")
+    if kind == "grid":
+        top3, answered = int(row.get("top3") or 0), int(row.get("answered") or 0)
+        where = f"Google Maps, from {answered} spots within {row.get('radius_miles')} miles of you"
+        place = (f"Top 3 at {top3} of {answered} spots" if top3
+                 else f"Not in the top 3 at any of the {answered} spots")
+        return (query, where, place)
+    return None
+
+
 def _positions_block(positions: Mapping[str, Any]) -> str:
     esc = html_escape.escape
-    rows = "".join(f'<tr><td>{esc(r["search"])}</td><td class="place">{esc(r["place"])}</td></tr>'
-                   for r in positions.get("rows") or [])
-    return ("<h2>Where you rank on Google</h2>\n  <p>Where your business came up when we searched the way "
-            "homeowners near you do.</p>\n  " f'<table class="ranks">{rows}</table>')
+    rows = [r for r in (_position_row(x) for x in positions.get("rows") or []) if r]
+    body = "".join(
+        f'<tr><td><b>\u201c{esc(q)}\u201d</b>' + (f'<br><span class="where">{esc(w)}</span>' if w else "")
+        + f'</td><td class="place">{esc(p)}</td></tr>' for q, w, p in rows)
+    return ("<h2>Where you show up on Google</h2>\n  <p>We searched for a roofer the way a homeowner near "
+            "you would. Here is where your business came up.</p>\n  "
+            '<table class="ranks"><thead><tr><th>What a homeowner searches</th><th class="place">Where you came up'
+            f"</th></tr></thead><tbody>{body}</tbody></table>")
 
 
 def _reach_block(reach: Mapping[str, Any], map_url: str | None) -> str:
     esc = html_escape.escape
-    pins = reach.get("pins") or []
+    # A spot whose search never came back is our gap, not theirs: left off.
+    pins = [p for p in reach.get("pins") or [] if p.get("band") != "none"]
     answered, top3 = int(reach.get("answered") or 0), int(reach.get("top3") or 0)
     found, missing = int(reach.get("found") or 0), int(reach.get("missing") or 0)
+    lower = max(0, found - top3)
 
     def pin(p: Mapping[str, Any], *, placed: bool) -> str:
         style = f' style="left: {p["x"]}%; top: {p["y"]}%"' if placed else ""
@@ -292,13 +326,18 @@ def _reach_block(reach: Mapping[str, Any], map_url: str | None) -> str:
         size = int(reach.get("size") or 1)
         board = (f'<div class="gridonly" style="grid-template-columns: repeat({size}, 1fr)">'
                  + "".join(pin(p, placed=False) for p in pins) + "</div>")
-    key = ('<div class="key"><span><i class="good"></i>Top 3</span><span><i class="ok"></i>4 to 10</span>'
-           '<span><i class="poor"></i>11 to 20</span><span><i style="--c: #b9b1a4"></i>Not in the first 20</span>'
-           '<span>Ringed: your business</span></div>')
-    summary = (f"<p>You came up in the top three at {top3} of the {answered} spots, and somewhere in the first 20 "
-               f"at {found}." + (f" At {missing} spots you didn't come up at all." if missing else "") + "</p>")
+    key = ('<div class="key"><span><i class="good"></i>Top 3, where most people look</span>'
+           '<span><i class="ok"></i>4th to 10th</span><span><i class="poor"></i>11th to 20th</span>'
+           '<span><i style="--c: #b9b1a4"></i>Not in the first 20</span><span>Circled: your business</span></div>')
+    parts = [f"At {top3} {'spot' if top3 == 1 else 'spots'}, you're in the top 3, where most homeowners look."
+             if top3 else "At none of these spots are you in the top 3, where most homeowners look."]
+    if lower:
+        parts.append(f"At {lower}, you're further down the list.")
+    if missing:
+        parts.append(f"At {missing}, you don't come up at all.")
     return ("<h2>Where you show up in Google Maps</h2>\n  "
-            f"<p>We searched \u201c{esc(reach.get('keyword') or '')}\u201d on Google Maps from {answered} spots up to "
-            f"{esc(str(reach.get('radius_miles') or ''))} miles around your business, the way homeowners across "
-            "your area would. Each circle is where you came up at that spot.</p>\n  "
-            + board + key + summary)
+            f"<p>Google Maps shows different roofers depending on where the person searching is standing. "
+            f"So we searched \u201c{esc(reach.get('keyword') or '')}\u201d from {answered} spots around your "
+            f"business, up to {esc(str(reach.get('radius_miles') or ''))} miles out. Each circle shows where you "
+            "landed on the list from that spot.</p>\n  "
+            + board + key + "<p>" + " ".join(parts) + "</p>")

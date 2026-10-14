@@ -400,9 +400,9 @@ def _reach(**over):
 def test_rankings_come_from_searches_already_made():
     pos = extras.positions_snapshot(CHECKS, city="Pueblo", reach=_reach())
     assert pos["rows"] == [
-        {"search": "A roofer in Pueblo, on Google Maps", "place": "Not in the top 3 Google shows"},
-        {"search": "Roof replacement in Pueblo, on Google search", "place": "Number 7"},
-        {"search": "\u201croof repair\u201d on Google Maps, from 9 spots up to 3 miles around you", "place": "Top 3 at 3 of 9"}]
+        {"kind": "maps", "query": "roofer Pueblo", "rank": None},
+        {"kind": "search", "query": "roof replacement Pueblo", "rank": 7},
+        {"kind": "grid", "query": "roof repair", "top3": 3, "answered": 9, "radius_miles": 3}]
     assert extras.positions_snapshot([{"code": "F8", "status": "skip"}], city="Pueblo") is None
 
 
@@ -413,7 +413,8 @@ def test_the_maps_grid_never_names_another_business():
     assert "Rival" not in json.dumps(snap)
     page = render_report(report(reach=snap, reach_map_url="https://storage.example/m.png"))
     assert "Where you show up in Google Maps" in page and 'src="https://storage.example/m.png"' in page
-    assert page.count('class="pin ') == 9 and "At 3 spots you didn" in page and "Rival" not in page
+    assert page.count('class="pin ') == 9 and "At 3, you don" in page and "Rival" not in page
+    assert "At 3 spots, you're in the top 3, where most homeowners look." in page
     assert forbidden_terms_in(page) == [] and not contains_forbidden_dash(page)
     assert "map_path" not in json.dumps(report(reach=snap).to_dict())
 
@@ -426,7 +427,8 @@ def test_without_a_map_the_grid_still_shows():
 
 def test_the_rankings_table_renders():
     page = render_report(report(positions=extras.positions_snapshot(CHECKS, city="Pueblo")))
-    assert "Where you rank on Google" in page and '<td class="place">Number 7</td>' in page
+    assert "Where you show up on Google" in page and '<td class="place">7th on the page</td>' in page
+    assert "What a homeowner searches" in page and "\u201croofer Pueblo\u201d" in page and "Not in the top 3" in page
     assert forbidden_terms_in(page) == []
 
 
@@ -441,7 +443,7 @@ def test_saving_the_grid_freezes_its_own_map_copy(client, pool_store):
     (src, dest), = pool_store["frozen"]
     assert src == "evidence/p1/a1/reach-map.png" and dest.startswith("snapshots/a1/reach-map-")
     saved = pool_store["saved"][-1]["report_extras"]
-    assert saved["reach"]["map_path"] == dest and saved["positions"]["rows"][1]["place"] == "Number 7"
+    assert saved["reach"]["map_path"] == dest and saved["positions"]["rows"][1]["rank"] == 7
 
 
 def test_the_panel_offers_both_new_sections():
@@ -463,3 +465,42 @@ def test_a_published_report_signs_the_frozen_map(monkeypatch):
     monkeypatch.setattr(pub.evidence_store, "signed_url", lambda path: f"https://signed.example/{path}")
     page = pub.render_by_slug("slug")
     assert 'src="https://signed.example/snapshots/a1/reach-map.png"' in page
+
+
+
+# ── Plain words (the "Top 3 at 0 of 15" report, October 2026) ─────────────────
+
+from app.report.template import _nth, _position_row  # noqa: E402
+
+
+def test_none_in_the_top_three_is_said_plainly():
+    row = {"kind": "grid", "query": "roofer", "top3": 0, "answered": 15, "radius_miles": 5}
+    assert _position_row(row) == ("roofer", "Google Maps, from 15 spots within 5 miles of you",
+                                  "Not in the top 3 at any of the 15 spots")
+    page = render_report(report(positions={"rows": [row]}))
+    assert "Top 3 at 0" not in page
+
+
+def test_positions_read_as_places_on_a_list():
+    assert [_nth(n) for n in (1, 2, 3, 4, 11, 12, 13, 21, 22)] == \
+        ["1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st", "22nd"]
+    assert _position_row({"kind": "maps", "query": "roofer Prescott", "rank": 2})[2] == "2nd on the list"
+    assert _position_row({"kind": "search", "query": "x", "rank": None})[2] == "Not on the first two pages"
+
+
+def test_spots_whose_search_failed_are_left_off_the_map():
+    snap = extras.reach_snapshot(_reach(), map_path=None)
+    snap["pins"][0]["band"], snap["pins"][0]["label"] = "none", "?"
+    page = render_report(report(reach=snap))
+    assert ">?<" not in page and page.count('class="pin ') == 8
+
+
+def test_no_top_three_anywhere_says_so():
+    snap = extras.reach_snapshot(_reach(top3=0, found=4, answered=9), map_path=None)
+    page = render_report(report(reach=snap))
+    assert "At none of these spots are you in the top 3" in page and "At 4, you're further down the list." in page
+
+
+def test_rows_saved_in_the_old_wording_still_show():
+    page = render_report(report(positions={"rows": [{"search": "A roofer in Pueblo, on Google Maps", "place": "Number 2"}]}))
+    assert "A roofer in Pueblo, on Google Maps" in page and "Number 2" in page

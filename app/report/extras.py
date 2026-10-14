@@ -179,33 +179,25 @@ def site_check_snapshot(technical: Mapping[str, Any], *, with_items: bool = True
             "lines": lines}
 
 
-def _ordinal_place(rank: Any) -> str:
-    return f"Number {int(rank)}" if isinstance(rank, (int, float)) else ""
-
-
 def positions_snapshot(checks: list[Mapping[str, Any]], *, city: str,
                        reach: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
     """Where they rank, from searches the audit and Local reach already made.
-    Each row: what was searched, where they came up. None when nothing was
-    measured."""
+    Raw numbers only: the report words them when it renders, so a wording fix
+    reaches reports already saved. None when nothing was measured."""
     by = {str(c.get("code")): c for c in checks}
-    town = city or "your area"
-    rows = []
+    rows: list[dict[str, Any]] = []
     f8 = by.get("F8") or {}
     if f8.get("status") in ("pass", "fail"):
-        rank = (f8.get("observed") or {}).get("map_pack_rank")
-        rows.append({"search": f"A roofer in {town}, on Google Maps",
-                     "place": _ordinal_place(rank) or "Not in the top 3 Google shows"})
+        rows.append({"kind": "maps", "query": f"roofer {city}".strip(),
+                     "rank": (f8.get("observed") or {}).get("map_pack_rank")})
     f9 = by.get("F9") or {}
     if f9.get("status") in ("pass", "fail"):
-        rank = (f9.get("observed") or {}).get("organic_rank")
-        rows.append({"search": f"Roof replacement in {town}, on Google search",
-                     "place": _ordinal_place(rank) or "Not in the first 20 results"})
+        rows.append({"kind": "search", "query": f"roof replacement {city}".strip(),
+                     "rank": (f9.get("observed") or {}).get("organic_rank")})
     r = reach or {}
     if r.get("status") == "done" and r.get("answered"):
-        rows.append({"search": f"\u201c{r.get('keyword')}\u201d on Google Maps, from {r['answered']} spots "
-                               f"up to {r.get('radius_miles')} miles around you",
-                     "place": f"Top 3 at {r.get('top3') or 0} of {r['answered']}"})
+        rows.append({"kind": "grid", "query": str(r.get("keyword") or ""), "top3": int(r.get("top3") or 0),
+                     "answered": int(r["answered"]), "radius_miles": r.get("radius_miles")})
     return {"rows": rows} if rows else None
 
 
