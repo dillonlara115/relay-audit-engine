@@ -90,10 +90,30 @@ def reach_row(reach: Mapping[str, Any]) -> tuple[dict[str, Any] | None, str | No
             "note": note}, None
 
 
+def _verified(technical: Mapping[str, Any], issue: Mapping[str, Any]) -> dict[str, Any]:
+    """A broken files or links count checked against the crawl's own list:
+    each item once, and nothing that was only refused to our crawler. Left as
+    it is when the list cannot be read."""
+    from app.tools import onpage
+
+    key, task_id = issue.get("key"), technical.get("task_id")
+    if key not in onpage.BROKEN_KEYS or not task_id:
+        return dict(issue)
+    try:
+        _rows, total = onpage.real_breaks(onpage.cached_detail(str(task_id), str(key)))
+    except onpage.OnPageUnavailable:
+        return dict(issue)
+    return {**issue, "count": total}
+
+
 def crawl_row(technical: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Reads the crawl's broken files and links lists when it has them, so
+    call it off the event loop."""
     if technical.get("status") != "done":
         return None
-    issues = [i for i in technical.get("issues") or [] if i.get("key") in CRAWL_KEYS and i.get("count")]
+    issues = [_verified(technical, i) for i in technical.get("issues") or []
+              if i.get("key") in CRAWL_KEYS and i.get("count")]
+    issues = [i for i in issues if i.get("count")]
     if not issues:
         return None
     listed = "; ".join(f"{i['label']}: {i['count']}" for i in issues)

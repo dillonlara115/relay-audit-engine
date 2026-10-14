@@ -253,7 +253,8 @@ async def _draft_row(job_id: str, row: Any, prospect: Mapping[str, Any],
     from app.agents import extra_evidence
 
     audit = await asyncio.to_thread(store.get_audit, row.audit_id) or {}
-    failures, passing, sources = extra_evidence.merge(audit, failures, passing)
+    # merge reads the crawl's item lists, so it runs off the event loop.
+    failures, passing, sources = await asyncio.to_thread(extra_evidence.merge, audit, failures, passing)
 
     diagnosis = await draft_findings(
         business_name=row.business_name, city=row.city or "",

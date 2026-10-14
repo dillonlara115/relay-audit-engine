@@ -234,7 +234,7 @@ def test_each_problem_names_its_pages(monkeypatch):
     assert links["items"][0] == {"link": "/roof-repair/", "href": "https://a.com/roof-repair/",
                                  "note": "links to /old-page/ (\u201cGet a quote\u201d)"}
     assert links["more"] == 7, "9 in all, 2 shown"
-    assert files["items"][0] == {"link": "/storm/", "href": "https://a.com/storm/", "note": "hail.png doesn't load"}
+    assert files["items"][0] == {"link": "/storm/", "href": "https://a.com/storm/", "note": "hail.png doesn't load, on 3 pages"}
     assert files["items"][1] == {"link": "y.js", "href": None, "note": "doesn't load"}
     assert titles["items"] == [{"link": "/thanks/", "href": "https://a.com/thanks/", "note": ""}]
 
@@ -312,3 +312,64 @@ def test_file_names_survive_long_paths_and_the_homepage_has_a_name():
     assert extras.path_of("https://a.com/") == "Homepage"
     items, _ = extras.items_for("broken_links", {"total": 1, "rows": [["https://a.com/x/", "404", "https://a.com/", ""]]})
     assert items[0]["link"] == "Homepage"
+
+
+
+# ── Refused is not broken (Sun Spirit Roofing, October 2026) ─────────────────
+
+SUN = {"status": "done", "pages_crawled": 18, "health": 89, "task_id": "T9", "issues": [
+    {"key": "broken_resources", "count": 18}, {"key": "no_description", "count": 18}]}
+SUN_DETAIL = {
+    "broken_resources": {"total": 1, "rows": [["https://ss.com/146ea4e67f.js", "403, blocked to our crawler",
+                                                "https://ss.com/ (+17 more)"]]},
+    "no_description": {"total": 18, "rows": [["https://ss.com/", "Home"]]},
+}
+
+
+def test_a_file_refused_to_our_crawler_is_not_reported_broken(monkeypatch):
+    monkeypatch.setattr(onpage, "cached_detail", lambda task, key: SUN_DETAIL[key])
+    check = extras.site_check_snapshot(SUN)
+    assert [line["key"] for line in check["lines"]] == ["no_description"], \
+        "one script answering 403 on 18 pages was '18 images or files don't load'"
+
+
+def test_broken_files_are_counted_once_each(monkeypatch):
+    detail = {"total": 2, "rows": [["https://a.com/x.png", "404", "https://a.com/ (+17 more)"],
+                                   ["https://a.com/y.js", "403, blocked to our crawler", "https://a.com/"]]}
+    monkeypatch.setattr(onpage, "cached_detail", lambda task, key: detail)
+    check = extras.site_check_snapshot({**SUN, "issues": [{"key": "broken_resources", "count": 19}]})
+    (line,) = check["lines"]
+    assert line["text"] == "1 image or file doesn't load" and line["items"][0]["note"] == "x.png doesn't load, on 18 pages"
+
+
+def test_drafts_see_the_verified_count(monkeypatch):
+    from app.agents import extra_evidence as ex
+
+    monkeypatch.setattr(onpage, "cached_detail", lambda task, key: SUN_DETAIL[key])
+    row = ex.crawl_row({**SUN, "issues": [{"key": "broken_resources", "label": "Broken images or files", "count": 18},
+                                          {"key": "no_description", "label": "Pages with no meta description", "count": 18}]})
+    assert "Broken images" not in row["note"] and "Pages with no meta description: 18" in row["note"]
+
+
+def test_the_console_says_when_a_file_was_only_refused(dfs):
+    client, _ = _routed_one({"resources": {"total_items_count": 1, "items": [{"url": "https://a.com/x.js", "status_code": 403}]},
+                             "pages_by_resource": {"total_items_count": 0, "items": []}})
+    d = onpage.detail("T1", "broken_resources", client=client)
+    assert d["rows"][0][1] == "403, blocked to our crawler"
+
+
+import httpx  # noqa: E402
+
+from app.config import Config  # noqa: E402
+
+
+@pytest.fixture()
+def dfs(monkeypatch):
+    monkeypatch.setattr(onpage, "get_config", lambda: Config(dataforseo_login="l", dataforseo_password="p"))
+
+
+def _routed_one(responses):
+    def handler(request):
+        path = request.url.path.rsplit("/", 1)[-1]
+        return httpx.Response(200, json={"tasks": [{"status_code": 20000, "result": [responses[path]]}]})
+    return httpx.Client(transport=httpx.MockTransport(handler)), None

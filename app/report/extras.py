@@ -100,17 +100,24 @@ def _clean(text: str) -> str | None:
 def items_for(key: str, found: Mapping[str, Any]) -> tuple[list[dict[str, Any]], int]:
     """(up to ITEMS_SHOWN items, how many there are in all) for one problem.
     Each item: link (a path to show), href (their page, or None), note."""
+    from app.tools import onpage
+
     out: list[dict[str, Any]] = []
     rows = list(found.get("rows") or [])
+    total = int(found.get("total") or len(rows))
+    if key in onpage.BROKEN_KEYS:
+        rows, total = onpage.real_breaks(found)
     if key == "broken_links":
         for to, _status, frm, text in ((r + ["", "", "", ""])[:4] for r in rows):
             note = f"links to {path_of(to)}" + (f" (\u201c{text}\u201d)" if text else "")
             out.append({"link": path_of(frm), "href": frm or None, "note": note})
     elif key == "broken_resources":
         for file, _status, where in ((r + ["", "", ""])[:3] for r in rows):
-            page = where.split(" (+", 1)[0]
+            page, _, more = where.partition(" (+")
+            others = int(more.split(" ", 1)[0]) if more[:1].isdigit() else 0
+            on = f", on {others + 1} pages" if others else ""
             out.append({"link": path_of(page) if page else _file_name(file), "href": page or None,
-                        "note": f"{_file_name(file)} doesn't load" if page else "doesn't load"})
+                        "note": f"{_file_name(file)} doesn't load{on}" if page else "doesn't load"})
     elif key == "duplicate_title":
         for g in found.get("groups") or []:
             for page in g.get("pages") or []:
@@ -131,7 +138,8 @@ def items_for(key: str, found: Mapping[str, Any]) -> tuple[list[dict[str, Any]],
         kept.append({**item, "note": note, "link": link})
         if len(kept) == ITEMS_SHOWN:
             break
-    total = int(found.get("total") or len(out)) if key != "duplicate_title" else len(out)
+    if key == "duplicate_title":
+        total = len(out)
     return kept, total
 
 
@@ -147,16 +155,24 @@ def site_check_snapshot(technical: Mapping[str, Any], *, with_items: bool = True
         key, count = issue.get("key"), int(issue.get("count") or 0)
         if key not in SHOWN or not count:
             continue
-        one, many = OWNER_LINES[key]
-        line: dict[str, Any] = {"key": key, "text": f"{count} {one if count == 1 else many}",
-                                "items": [], "more": 0}
+        items: list[dict[str, Any]] = []
+        total = 0
         if with_items and task_id:
             try:
-                items, total = items_for(key, onpage.cached_detail(str(task_id), key))
+                found = onpage.cached_detail(str(task_id), key)
             except onpage.OnPageUnavailable:
-                items, total = [], 0
-            line["items"], line["more"] = items, max(0, total - len(items)) if items else 0
-        lines.append(line)
+                found = None
+            if found is not None:
+                items, total = items_for(key, found)
+                if key in onpage.BROKEN_KEYS:
+                    # Count what is really broken, once each: the crawl's own
+                    # figure counts a file once per page and counts refusals.
+                    count = total
+                    if not count:
+                        continue
+        one, many = OWNER_LINES[key]
+        lines.append({"key": key, "text": f"{count} {one if count == 1 else many}",
+                      "items": items, "more": max(0, total - len(items)) if items else 0})
     lines.sort(key=lambda line: SHOWN.index(line["key"]))
     health = technical.get("health")
     return {"pages": pages, "health": health if isinstance(health, (int, float)) else None,

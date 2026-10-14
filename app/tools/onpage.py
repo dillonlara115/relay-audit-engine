@@ -54,6 +54,11 @@ METRIC_CHECKS: tuple[tuple[str, str], ...] = (
 LABELS = dict(PAGE_CHECKS + METRIC_CHECKS)
 
 DETAIL_LIMIT = 100        # rows a detail list shows
+# Answers that mean "not for you", not "broken": a site's security refusing a
+# crawler. Sun Spirit Roofing's one script answered 403 on all 18 pages and
+# was reported as 18 broken files; a homeowner's browser loads it fine.
+BLOCKED_STATUSES = ("401", "403", "429")
+BROKEN_KEYS = ("broken_resources", "broken_links")
 DETAIL_PAGES_FOR = 25     # broken files whose pages are looked up, one call each
 
 
@@ -162,6 +167,29 @@ def _post(path: str, body: Mapping[str, Any], client: httpx.Client) -> Mapping[s
     return (_task(r.json()).get("result") or [{}])[0] or {}
 
 
+def _status(code: Any) -> str:
+    text = str(code or "")
+    if not text or text == "0":
+        return "no answer"
+    if text in BLOCKED_STATUSES:
+        return f"{text}, blocked to our crawler"
+    return text
+
+
+def is_blocked(status: str) -> bool:
+    return str(status).split(",", 1)[0] in BLOCKED_STATUSES
+
+
+def real_breaks(found: Mapping[str, Any]) -> tuple[list[list[str]], int]:
+    """A broken files or links list without what was only refused to our
+    crawler: (the rows left, how many there are in all)."""
+    rows = list(found.get("rows") or [])
+    kept = [r for r in rows if not is_blocked(r[1] if len(r) > 1 else "")]
+    total = int(found.get("total") or len(rows))
+    # A list cut at DETAIL_LIMIT: take the refused share off the full count.
+    return kept, (total - (len(rows) - len(kept)) if total > len(rows) else len(kept))
+
+
 def _secs(ms: Any) -> str:
     return f"{ms / 1000:.1f} s" if isinstance(ms, (int, float)) else ""
 
@@ -193,13 +221,13 @@ def detail(task_id: str, key: str, *, client: httpx.Client | None = None) -> dic
             with ThreadPoolExecutor(max_workers=8) as pool:
                 wheres = list(pool.map(found_on, items[:DETAIL_PAGES_FOR]))
             wheres += [""] * (len(items) - len(wheres))
-            rows = [[it.get("url") or "", str(it.get("status_code") or "no answer"), where]
+            rows = [[it.get("url") or "", _status(it.get("status_code")), where]
                     for it, where in zip(items, wheres)]
             return {"columns": ["File", "Status", "Found on"], "rows": rows,
                     "total": int(res.get("total_items_count") or len(rows))}
         if key == "broken_links":
             res = _post("links", {"id": task_id, "filters": [["is_broken", "=", True]], "limit": DETAIL_LIMIT}, http)
-            rows = [[it.get("link_to") or "", str(it.get("page_to_status_code") or "no answer"),
+            rows = [[it.get("link_to") or "", _status(it.get("page_to_status_code")),
                      it.get("link_from") or "", str(it.get("text") or "")] for it in res.get("items") or []]
             return {"columns": ["Link goes to", "Status", "On page", "Link text"], "rows": rows,
                     "total": int(res.get("total_items_count") or len(rows))}
