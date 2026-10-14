@@ -90,6 +90,23 @@ _PAGE = """<!doctype html>
   .checks ul li {{ margin: 0 0 4px; overflow-wrap: anywhere; }}
   .checks .more {{ opacity: 0.7; list-style: none; margin-left: -18px; }}
   .note {{ font-size: 0.95rem; opacity: 0.8; }}
+  .ranks {{ width: 100%; border-collapse: collapse; background: #fff; border-radius: 6px; overflow: hidden; margin: 0 0 14px; }}
+  .ranks td {{ padding: 12px 14px; border-bottom: 1px solid #ece6dc; vertical-align: top; }}
+  .ranks tr:last-child td {{ border-bottom: 0; }}
+  .ranks td.place {{ font-weight: 700; text-align: right; width: 42%; }}
+  .gmap {{ position: relative; width: 100%; aspect-ratio: 1; border-radius: 6px; overflow: hidden;
+          border: 3px solid var(--asphalt); margin: 10px 0 8px; background: #e8e2d6; }}
+  .gmap img {{ position: absolute; inset: 0; width: 100%; height: 100%; }}
+  .pin {{ position: absolute; transform: translate(-50%, -50%); width: 9.5%; max-width: 38px; min-width: 22px;
+          aspect-ratio: 1; border-radius: 50%; display: grid; place-items: center; font-family: 'PT Sans', sans-serif;
+          font-weight: 700; font-size: 0.8rem; color: #fff; background: var(--c); border: 2px solid #fff;
+          box-shadow: 0 1px 3px rgba(0,0,0,.35); }}
+  .pin.miss {{ --c: #b9b1a4; color: var(--asphalt); }} .pin.none {{ --c: #d9d1c4; color: var(--asphalt); }}
+  .pin.here {{ box-shadow: 0 0 0 3px var(--asphalt), 0 1px 3px rgba(0,0,0,.35); }}
+  .gridonly {{ display: grid; gap: 6px; margin: 10px 0 8px; }}
+  .gridonly .pin {{ position: static; transform: none; width: auto; max-width: none; }}
+  .key {{ display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.85rem; opacity: 0.8; margin-bottom: 12px; }}
+  .key i {{ display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--c); margin-right: 5px; }}
 </style>
 </head>
 <body>
@@ -107,6 +124,10 @@ _PAGE = """<!doctype html>
 
   <h2>Three things costing you booked jobs</h2>
   {findings_block}
+
+  {positions_block}
+
+  {reach_block}
 
   {speed_block}
 
@@ -185,6 +206,8 @@ def render_report(report: PublicReport) -> str:
         if report.competitor_note else ""
     )
     return _PAGE.format(
+        positions_block=_positions_block(report.positions) if report.positions else "",
+        reach_block=_reach_block(report.reach, report.reach_map_url) if report.reach else "",
         speed_block=_speed_block(report.speed) if report.speed else "",
         site_check_block=_site_check_block(report.site_check) if report.site_check else "",
         business_name=esc(report.business_name),
@@ -241,3 +264,41 @@ def _check_line(line: Any) -> str:
             rows.append(f'<li class="more">and {int(line["more"])} more</li>')
         sub = "<ul>" + "".join(rows) + "</ul>"
     return f"<li>{esc(line.get('text') or '')}{sub}</li>"
+
+
+def _positions_block(positions: Mapping[str, Any]) -> str:
+    esc = html_escape.escape
+    rows = "".join(f'<tr><td>{esc(r["search"])}</td><td class="place">{esc(r["place"])}</td></tr>'
+                   for r in positions.get("rows") or [])
+    return ("<h2>Where you rank on Google</h2>\n  <p>Where your business came up when we searched the way "
+            "homeowners near you do.</p>\n  " f'<table class="ranks">{rows}</table>')
+
+
+def _reach_block(reach: Mapping[str, Any], map_url: str | None) -> str:
+    esc = html_escape.escape
+    pins = reach.get("pins") or []
+    answered, top3 = int(reach.get("answered") or 0), int(reach.get("top3") or 0)
+    found, missing = int(reach.get("found") or 0), int(reach.get("missing") or 0)
+
+    def pin(p: Mapping[str, Any], *, placed: bool) -> str:
+        style = f' style="left: {p["x"]}%; top: {p["y"]}%"' if placed else ""
+        here = " here" if p.get("center") else ""
+        return f'<div class="pin {esc(p["band"])}{here}"{style}>{esc(p["label"])}</div>'
+
+    if map_url and all("x" in p for p in pins):
+        board = (f'<div class="gmap"><img src="{esc(map_url, quote=True)}" alt="Map of the area we searched" '
+                 f'width="640" height="640">' + "".join(pin(p, placed=True) for p in pins) + "</div>")
+    else:
+        size = int(reach.get("size") or 1)
+        board = (f'<div class="gridonly" style="grid-template-columns: repeat({size}, 1fr)">'
+                 + "".join(pin(p, placed=False) for p in pins) + "</div>")
+    key = ('<div class="key"><span><i class="good"></i>Top 3</span><span><i class="ok"></i>4 to 10</span>'
+           '<span><i class="poor"></i>11 to 20</span><span><i style="--c: #b9b1a4"></i>Not in the first 20</span>'
+           '<span>Ringed: your business</span></div>')
+    summary = (f"<p>You came up in the top three at {top3} of the {answered} spots, and somewhere in the first 20 "
+               f"at {found}." + (f" At {missing} spots you didn't come up at all." if missing else "") + "</p>")
+    return ("<h2>Where you show up in Google Maps</h2>\n  "
+            f"<p>We searched \u201c{esc(reach.get('keyword') or '')}\u201d on Google Maps from {answered} spots up to "
+            f"{esc(str(reach.get('radius_miles') or ''))} miles around your business, the way homeowners across "
+            "your area would. Each circle is where you came up at that spot.</p>\n  "
+            + board + key + summary)

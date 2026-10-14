@@ -149,6 +149,17 @@ def freeze_for_report(gcs_path: str, slug: str) -> str:
     return destination
 
 
+def freeze_copy(gcs_path: str, destination: str) -> str:
+    """Copy one artifact to a path nothing else writes, for a report section
+    that must keep showing the picture it was saved with after a re-run
+    overwrites the original in place."""
+    cfg = get_config()
+    cfg.require("gcs_evidence_bucket")
+    bucket = _client().bucket(cfg.gcs_evidence_bucket)
+    bucket.copy_blob(bucket.blob(gcs_path), bucket, destination)
+    return destination
+
+
 def signed_url(gcs_path: str, *, days: int = SIGNED_URL_DAYS) -> str:
     """A time-boxed public URL for one artifact, regenerated per page load."""
     cfg = get_config()

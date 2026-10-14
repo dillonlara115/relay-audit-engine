@@ -31,6 +31,7 @@ def build_public_report(
     *,
     slug: str,
     screenshot_url: str | None = None,
+    reach_map_url: str | None = None,
 ) -> PublicReport:
     findings = tuple(
         PublicFinding(
@@ -50,6 +51,9 @@ def build_public_report(
         competitor_note=findings_doc.get("competitor_note"),
         speed=(audit.get("report_extras") or {}).get("speed"),
         site_check=(audit.get("report_extras") or {}).get("site_check"),
+        positions=(audit.get("report_extras") or {}).get("positions"),
+        reach=(audit.get("report_extras") or {}).get("reach"),
+        reach_map_url=reach_map_url,
     )
 
 
@@ -213,8 +217,18 @@ def render_by_slug(slug: str) -> str | None:
         except Exception:  # noqa: BLE001 - a page without its screenshot still loads
             screenshot_url = None
 
+    # The map saved with the Maps grid section, its own frozen copy.
+    reach_map_url = None
+    map_path = ((audit.get("report_extras") or {}).get("reach") or {}).get("map_path")
+    if map_path:
+        try:
+            reach_map_url = evidence_store.signed_url(map_path)
+        except Exception:  # noqa: BLE001 - the grid still shows, without the map behind it
+            reach_map_url = None
+
     report = build_public_report(
-        audit, prospect, findings, slug=slug, screenshot_url=screenshot_url
+        audit, prospect, findings, slug=slug, screenshot_url=screenshot_url,
+        reach_map_url=reach_map_url,
     )
     return render_report(report)
 

@@ -179,6 +179,70 @@ def site_check_snapshot(technical: Mapping[str, Any], *, with_items: bool = True
             "lines": lines}
 
 
+def _ordinal_place(rank: Any) -> str:
+    return f"Number {int(rank)}" if isinstance(rank, (int, float)) else ""
+
+
+def positions_snapshot(checks: list[Mapping[str, Any]], *, city: str,
+                       reach: Mapping[str, Any] | None = None) -> dict[str, Any] | None:
+    """Where they rank, from searches the audit and Local reach already made.
+    Each row: what was searched, where they came up. None when nothing was
+    measured."""
+    by = {str(c.get("code")): c for c in checks}
+    town = city or "your area"
+    rows = []
+    f8 = by.get("F8") or {}
+    if f8.get("status") in ("pass", "fail"):
+        rank = (f8.get("observed") or {}).get("map_pack_rank")
+        rows.append({"search": f"A roofer in {town}, on Google Maps",
+                     "place": _ordinal_place(rank) or "Not in the top 3 Google shows"})
+    f9 = by.get("F9") or {}
+    if f9.get("status") in ("pass", "fail"):
+        rank = (f9.get("observed") or {}).get("organic_rank")
+        rows.append({"search": f"Roof replacement in {town}, on Google search",
+                     "place": _ordinal_place(rank) or "Not in the first 20 results"})
+    r = reach or {}
+    if r.get("status") == "done" and r.get("answered"):
+        rows.append({"search": f"\u201c{r.get('keyword')}\u201d on Google Maps, from {r['answered']} spots "
+                               f"up to {r.get('radius_miles')} miles around you",
+                     "place": f"Top 3 at {r.get('top3') or 0} of {r['answered']}"})
+    return {"rows": rows} if rows else None
+
+
+def reach_snapshot(reach: Mapping[str, Any], *, map_path: str | None) -> dict[str, Any] | None:
+    """The Maps grid for the report: every spot, its position, no names.
+    Pins sit on the map by the same projection the console uses; without a
+    map they fall back to rows and columns."""
+    from app.tools import staticmap
+
+    if reach.get("status") != "done" or not reach.get("points"):
+        return None
+    size = int(reach.get("size") or 0)
+    middle = (size - 1) // 2
+    center = reach.get("center") or {}
+    zoom = (reach.get("map") or {}).get("zoom")
+    on_map = bool(map_path and zoom and center.get("lat") is not None)
+    pins = []
+    for pt in sorted(reach["points"], key=lambda p: (p.get("row", 0), p.get("col", 0))):
+        rank = pt.get("rank")
+        if pt.get("error"):
+            label, band = "?", "none"
+        elif rank is None:
+            label, band = "20+", "miss"
+        else:
+            label, band = str(rank), "good" if rank <= 3 else "ok" if rank <= 10 else "poor"
+        pin = {"row": pt.get("row", 0), "col": pt.get("col", 0), "label": label, "band": band,
+               "center": pt.get("row") == middle and pt.get("col") == middle}
+        if on_map:
+            pin["x"], pin["y"] = staticmap.offset((center["lat"], center["lng"]), pt["lat"], pt["lng"], zoom)
+        pins.append(pin)
+    answered = int(reach.get("answered") or 0)
+    found = int(reach.get("found") or 0)
+    return {"keyword": str(reach.get("keyword") or ""), "radius_miles": reach.get("radius_miles"),
+            "size": size, "answered": answered, "top3": int(reach.get("top3") or 0), "found": found,
+            "missing": max(0, answered - found), "pins": pins, "map_path": map_path if on_map else None}
+
+
 def default_site_check(audit: Mapping[str, Any]) -> dict[str, Any] | None:
     """The report_extras write that puts the page check on by default, or None
     when a person has chosen, the report is already out, or there is nothing
@@ -192,9 +256,14 @@ def default_site_check(audit: Mapping[str, Any]) -> dict[str, Any] | None:
     return {"report_extras": {"site_check": snap, "default": True}}
 
 
-def snapshot(audit: Mapping[str, Any], *, speed: bool, site_check: bool) -> dict[str, Any]:
+def snapshot(audit: Mapping[str, Any], *, speed: bool, site_check: bool, positions: bool = False,
+             reach: bool = False, checks: list[Mapping[str, Any]] = (), city: str = "",
+             reach_map_path: str | None = None) -> dict[str, Any]:
     """What report_extras should hold for the sections switched on."""
+    local = audit.get("local_reach") or {}
     return {
         "speed": speed_snapshot(audit.get("lighthouse") or {}) if speed else None,
         "site_check": site_check_snapshot(audit.get("technical") or {}) if site_check else None,
+        "positions": positions_snapshot(list(checks), city=city, reach=local) if positions else None,
+        "reach": reach_snapshot(local, map_path=reach_map_path) if reach else None,
     }

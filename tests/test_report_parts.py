@@ -83,6 +83,11 @@ def pool_store(client, monkeypatch):
     monkeypatch.setattr(routes.store, "get_draft_findings", lambda aid: env["doc"])
     monkeypatch.setattr(routes.store, "set_findings_pool", lambda aid, pool: env["saved"].append(pool))
     monkeypatch.setattr(routes.store, "update_audit", lambda aid, f: env["saved"].append(f))
+    monkeypatch.setattr(routes.store, "get_prospect", lambda pid: {"business_name": "Apex", "city": "Pueblo"})
+    monkeypatch.setattr(routes.store, "audit_checks", lambda aid: env.get("checks", []))
+    from app.store import evidence as evidence_store
+    monkeypatch.setattr(evidence_store, "audit_evidence", lambda aid: env.get("evidence", []))
+    monkeypatch.setattr(evidence_store, "freeze_copy", lambda src, dest: env.setdefault("frozen", []).append((src, dest)) or dest)
     return env
 
 
@@ -373,3 +378,88 @@ def _routed_one(responses):
         path = request.url.path.rsplit("/", 1)[-1]
         return httpx.Response(200, json={"tasks": [{"status_code": 20000, "result": [responses[path]]}]})
     return httpx.Client(transport=httpx.MockTransport(handler)), None
+
+
+
+# ── Rankings and the Maps grid on the report ──────────────────────────────────
+
+CHECKS = [{"code": "F8", "status": "fail", "observed": {}},
+          {"code": "F9", "status": "pass", "observed": {"organic_rank": 7}},
+          {"code": "F3", "status": "fail"}]
+
+
+def _reach(**over):
+    pts = [{"row": r, "col": c, "lat": 38.25 + (1 - r) * 0.02, "lng": -104.6 + (c - 1) * 0.02,
+            "rank": (2 if r == 0 else 12 if r == 1 else None), "top": ["Rival Roofing"], "error": ""}
+           for r in range(3) for c in range(3)]
+    return {"status": "done", "keyword": "roof repair", "radius_miles": 3, "size": 3, "points": pts,
+            "answered": 9, "top3": 3, "found": 6, "center": {"lat": 38.25, "lng": -104.6},
+            "map": {"zoom": 12, "error": ""}, "competitors": [{"title": "Rival Roofing", "spots": 9, "rating": 4.9, "reviews": 300}], **over}
+
+
+def test_rankings_come_from_searches_already_made():
+    pos = extras.positions_snapshot(CHECKS, city="Pueblo", reach=_reach())
+    assert pos["rows"] == [
+        {"search": "A roofer in Pueblo, on Google Maps", "place": "Not in the top 3 Google shows"},
+        {"search": "Roof replacement in Pueblo, on Google search", "place": "Number 7"},
+        {"search": "\u201croof repair\u201d on Google Maps, from 9 spots up to 3 miles around you", "place": "Top 3 at 3 of 9"}]
+    assert extras.positions_snapshot([{"code": "F8", "status": "skip"}], city="Pueblo") is None
+
+
+def test_the_maps_grid_never_names_another_business():
+    snap = extras.reach_snapshot(_reach(), map_path="snapshots/a1/reach-map.png")
+    assert len(snap["pins"]) == 9 and snap["pins"][4]["center"] and snap["missing"] == 3
+    assert "x" in snap["pins"][0] and snap["map_path"] == "snapshots/a1/reach-map.png"
+    assert "Rival" not in json.dumps(snap)
+    page = render_report(report(reach=snap, reach_map_url="https://storage.example/m.png"))
+    assert "Where you show up in Google Maps" in page and 'src="https://storage.example/m.png"' in page
+    assert page.count('class="pin ') == 9 and "At 3 spots you didn" in page and "Rival" not in page
+    assert forbidden_terms_in(page) == [] and not contains_forbidden_dash(page)
+    assert "map_path" not in json.dumps(report(reach=snap).to_dict())
+
+
+def test_without_a_map_the_grid_still_shows():
+    snap = extras.reach_snapshot(_reach(map={"zoom": 12, "error": "403"}), map_path=None)
+    page = render_report(report(reach=snap))
+    assert 'class="gridonly"' in page and "<img" not in page.split("Where you show up")[1].split("</p>")[1]
+
+
+def test_the_rankings_table_renders():
+    page = render_report(report(positions=extras.positions_snapshot(CHECKS, city="Pueblo")))
+    assert "Where you rank on Google" in page and '<td class="place">Number 7</td>' in page
+    assert forbidden_terms_in(page) == []
+
+
+def test_saving_the_grid_freezes_its_own_map_copy(client, pool_store):
+    pool_store["audit"] = {"prospect_id": "p1", "local_reach": _reach()}
+    pool_store["checks"] = CHECKS
+    pool_store["evidence"] = [{"kind": "reach_map", "gcs_path": "evidence/p1/a1/reach-map.png"}]
+    csrf = sign_in(client)
+    r = client.post("/console/audits/a1/report-sections",
+                    data={"csrf": csrf, "positions": "1", "reach": "1"}, follow_redirects=False)
+    assert "notice=sections_saved" in r.headers["location"]
+    (src, dest), = pool_store["frozen"]
+    assert src == "evidence/p1/a1/reach-map.png" and dest.startswith("snapshots/a1/reach-map-")
+    saved = pool_store["saved"][-1]["report_extras"]
+    assert saved["reach"]["map_path"] == dest and saved["positions"]["rows"][1]["place"] == "Number 7"
+
+
+def test_the_panel_offers_both_new_sections():
+    page = _prospect_page(audit={"local_reach": _reach()})
+    assert 'name="positions" value="1"' in page and 'name="reach" value="1">' in page
+    assert "Run Local reach first" not in page
+    assert 'name="reach" value="1" disabled' in _prospect_page()
+
+
+def test_a_published_report_signs_the_frozen_map(monkeypatch):
+    from app.report import publish as pub
+
+    snap = extras.reach_snapshot(_reach(), map_path="snapshots/a1/reach-map.png")
+    audit = {"audit_id": "a1", "prospect_id": "p1", "published_at": T0, "report_extras": {"reach": snap}}
+    monkeypatch.setattr(pub, "load_by_slug", lambda slug: (audit, {"business_name": "Apex", "city": "Pueblo"}, {
+        "status": "approved", "selected": [1, 2, 3], "findings": [
+            {"ordinal": i, "what_we_saw": f"s{i}", "what_it_means": "m", "what_fixing_takes": "f"} for i in (1, 2, 3)]}))
+    monkeypatch.setattr(pub.evidence_store, "audit_evidence", lambda aid: [])
+    monkeypatch.setattr(pub.evidence_store, "signed_url", lambda path: f"https://signed.example/{path}")
+    page = pub.render_by_slug("slug")
+    assert 'src="https://signed.example/snapshots/a1/reach-map.png"' in page

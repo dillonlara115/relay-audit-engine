@@ -53,6 +53,9 @@ class PublicReport:
     # Optional sections a person switched on, snapshots from app/report/extras.py.
     speed: Mapping[str, Any] | None = None
     site_check: Mapping[str, Any] | None = None
+    positions: Mapping[str, Any] | None = None
+    reach: Mapping[str, Any] | None = None
+    reach_map_url: str | None = None      # minted per page load, never stored
 
     def __post_init__(self) -> None:
         # Exactly three, enforced at runtime, not just at publish time.
@@ -80,6 +83,8 @@ class PublicReport:
             "competitor_note": self.competitor_note,
             "speed": dict(self.speed) if self.speed else None,
             "site_check": dict(self.site_check) if self.site_check else None,
+            "positions": dict(self.positions) if self.positions else None,
+            "reach": {k: v for k, v in self.reach.items() if k != "map_path"} if self.reach else None,
         }
 
 

@@ -902,7 +902,8 @@ async def _change_findings(request: Request, csrf: str | None, audit_id: str, wh
 
 @router.post("/audits/{audit_id}/report-sections")
 async def set_report_sections(audit_id: str, request: Request, csrf: str = Form(None),
-                              speed: str = Form(""), site_check: str = Form("")) -> Response:
+                              speed: str = Form(""), site_check: str = Form(""),
+                              positions: str = Form(""), reach: str = Form("")) -> Response:
     """Switch the optional report sections on or off. Switching one on takes a
     snapshot of today's results; the report never changes behind it."""
     if not check_csrf(request, csrf):
@@ -914,15 +915,38 @@ async def set_report_sections(audit_id: str, request: Request, csrf: str = Form(
         return Response(status_code=404)
     # Reads the crawl's item lists, so off the event loop. Saving is a choice:
     # from here on the page check is no longer switched on by default.
-    snap = await asyncio.to_thread(extras.snapshot, audit, speed=bool(speed), site_check=bool(site_check))
+    def build() -> dict[str, Any]:
+        from app.store import evidence as evidence_store
+
+        prospect = store.get_prospect(str(audit.get("prospect_id") or "")) or {}
+        checks = store.audit_checks(audit_id) if positions else []
+        map_path = None
+        if reach:
+            # Its own copy: a later Local reach run rewrites the original.
+            source = next((e.get("gcs_path") for e in evidence_store.audit_evidence(audit_id)
+                           if e.get("kind") == "reach_map" and e.get("gcs_path")), None)
+            if source and not ((audit.get("local_reach") or {}).get("map") or {}).get("error"):
+                try:
+                    map_path = evidence_store.freeze_copy(
+                        source, f"snapshots/{audit_id}/reach-map-{store.utcnow():%Y%m%d%H%M%S}.png")
+                except Exception as exc:  # noqa: BLE001 - the grid still goes on, without the map
+                    log.warning("reach map not frozen: %s", exc)
+        return extras.snapshot(audit, speed=bool(speed), site_check=bool(site_check),
+                               positions=bool(positions), reach=bool(reach), checks=checks,
+                               city=str(prospect.get("city") or ""), reach_map_path=map_path)
+
+    snap = await asyncio.to_thread(build)
     await asyncio.to_thread(store.update_audit, audit_id, {"report_extras": {
         **snap, "chosen": True, "default": False, "updated_at": store.utcnow()}})
     missing = [label for asked, key, label in ((speed, "speed", "the speed test"),
-                                               (site_check, "site_check", "the page check"))
+                                               (site_check, "site_check", "the page check"),
+                                               (positions, "positions", "the rankings"),
+                                               (reach, "reach", "the Maps grid"))
                if asked and not snap[key]]
     if missing:
         return _redirect(_with_notice(f"/console/audits/{audit_id}", "sections_partial",
-                                      f"No results yet for {' or '.join(missing)}. Run technical audit first.")
+                                      f"No results yet for {' or '.join(missing)}. Run the audit or "
+                                      "Local reach it needs first.")
                          + "#on-report")
     return _redirect(_with_notice(f"/console/audits/{audit_id}", "sections_saved") + "#on-report")
 
