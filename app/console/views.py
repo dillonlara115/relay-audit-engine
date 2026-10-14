@@ -1108,8 +1108,12 @@ def report_parts_view(audit: Mapping[str, Any], evidence: Sequence[Mapping[str, 
         "screenshot": next((e.get("url") for e in evidence if e.get("kind") == "screenshot" and e.get("url")), None),
         "speed_on": stamp if saved.get("speed") else "",
         "site_check_on": stamp if saved.get("site_check") else "",
+        # On by default until someone saves a choice: ticked when it will be
+        # added, and labelled so it never looks like a choice someone made.
+        "site_check_default": bool(saved.get("default")) or (
+            not saved.get("chosen") and not saved.get("site_check") and not audit.get("report_slug")),
         "speed_ready": extras.speed_snapshot(audit.get("lighthouse") or {}) is not None,
-        "site_check_ready": extras.site_check_snapshot(audit.get("technical") or {}) is not None,
+        "site_check_ready": extras.site_check_snapshot(audit.get("technical") or {}, with_items=False) is not None,
         "published": bool(audit.get("report_slug")),
         "report_url": report_url if audit.get("report_slug") else None,
     }

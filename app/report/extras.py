@@ -1,9 +1,15 @@
 """Optional report sections: Google's speed test and a check of every page.
 
-Off unless a person turns one on for a prospect. Turning one on takes a
-snapshot of today's results into the audit (report_extras), so the report
-stays a record of one day: a later Technical run changes the console, never a
-page the owner already has, until someone turns the section off and on again.
+The speed test is off unless a person turns it on. The page check is on by
+default: when a crawl finishes, and again at publish, it is added unless a
+person has saved a choice for this prospect, and never onto a report that is
+already out. Either way it is a snapshot of one day's results into the audit
+(report_extras), so a later Technical run changes the console, never a page
+the owner already has, until someone saves the section again.
+
+The page check names the actual pages: up to ITEMS_SHOWN under each problem,
+read from the crawl already on record (free), each linked to the page on the
+owner's own site where the problem sits.
 
 Owner language. The speed test is Google's, named as Google's, because anyone
 can run it themselves; nothing here uses our own vocabulary, and the payload
@@ -56,21 +62,118 @@ def speed_snapshot(lighthouse: Mapping[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def site_check_snapshot(technical: Mapping[str, Any]) -> dict[str, Any] | None:
+ITEMS_SHOWN = 5
+
+
+def path_of(url: str) -> str:
+    """A URL as the owner would recognise it on their own site: the path."""
+    path = _full_path(url)
+    if path == "/":
+        return "Homepage"
+    return path if len(path) <= 70 else path[:67] + "..."
+
+
+def _full_path(url: str) -> str:
+    from urllib.parse import unquote, urlsplit
+
+    parts = urlsplit(url or "")
+    return unquote(parts.path or "/") if parts.scheme else unquote(url or "")
+
+
+def _file_name(url: str) -> str:
+    """The file's own name, from the whole path: shortening first cut
+    'Untitled-27-1024x574.png' to 'Untitled-27-10...'."""
+    name = _full_path(url).rstrip("/").rsplit("/", 1)[-1]
+    return (name if len(name) <= 60 else name[:57] + "...") or path_of(url)
+
+
+def _clean(text: str) -> str | None:
+    """Their own site's words, under our copy rules: dashes cleaned, and None
+    when what is left would trip the report's vocabulary check."""
+    from app.copy_rules import sanitize
+    from app.report.data import forbidden_terms_in
+
+    cleaned, _ = sanitize(" ".join(str(text or "").split()))
+    return None if forbidden_terms_in(cleaned) else cleaned
+
+
+def items_for(key: str, found: Mapping[str, Any]) -> tuple[list[dict[str, Any]], int]:
+    """(up to ITEMS_SHOWN items, how many there are in all) for one problem.
+    Each item: link (a path to show), href (their page, or None), note."""
+    out: list[dict[str, Any]] = []
+    rows = list(found.get("rows") or [])
+    if key == "broken_links":
+        for to, _status, frm, text in ((r + ["", "", "", ""])[:4] for r in rows):
+            note = f"links to {path_of(to)}" + (f" (\u201c{text}\u201d)" if text else "")
+            out.append({"link": path_of(frm), "href": frm or None, "note": note})
+    elif key == "broken_resources":
+        for file, _status, where in ((r + ["", "", ""])[:3] for r in rows):
+            page = where.split(" (+", 1)[0]
+            out.append({"link": path_of(page) if page else _file_name(file), "href": page or None,
+                        "note": f"{_file_name(file)} doesn't load" if page else "doesn't load"})
+    elif key == "duplicate_title":
+        for g in found.get("groups") or []:
+            for page in g.get("pages") or []:
+                out.append({"link": path_of(page), "href": page,
+                            "note": f"shares the title \u201c{str(g.get('shared') or '')[:60]}\u201d"})
+    else:
+        for row in rows:
+            page, extra = row[0], (row[2] if len(row) > 2 else "")
+            note = {"title_too_long": f"title is {extra} characters" if extra else "",
+                    "is_4xx_code": "page not found", "is_5xx_code": "server error"}.get(key, "")
+            out.append({"link": path_of(page), "href": page or None, "note": note})
+    kept = []
+    for item in out:
+        note = _clean(item["note"]) if item["note"] else ""
+        link = _clean(item["link"])
+        if note is None or not link:
+            continue
+        kept.append({**item, "note": note, "link": link})
+        if len(kept) == ITEMS_SHOWN:
+            break
+    total = int(found.get("total") or len(out)) if key != "duplicate_title" else len(out)
+    return kept, total
+
+
+def site_check_snapshot(technical: Mapping[str, Any], *, with_items: bool = True) -> dict[str, Any] | None:
     pages = int(technical.get("pages_crawled") or 0)
     if technical.get("status") != "done" or not pages:
         return None
+    from app.tools import onpage
+
+    task_id = technical.get("task_id")
     lines = []
     for issue in technical.get("issues") or []:
         key, count = issue.get("key"), int(issue.get("count") or 0)
         if key not in SHOWN or not count:
             continue
         one, many = OWNER_LINES[key]
-        lines.append({"key": key, "count": count, "text": f"{count} {one if count == 1 else many}"})
+        line: dict[str, Any] = {"key": key, "text": f"{count} {one if count == 1 else many}",
+                                "items": [], "more": 0}
+        if with_items and task_id:
+            try:
+                items, total = items_for(key, onpage.cached_detail(str(task_id), key))
+            except onpage.OnPageUnavailable:
+                items, total = [], 0
+            line["items"], line["more"] = items, max(0, total - len(items)) if items else 0
+        lines.append(line)
     lines.sort(key=lambda line: SHOWN.index(line["key"]))
     health = technical.get("health")
     return {"pages": pages, "health": health if isinstance(health, (int, float)) else None,
-            "lines": [line["text"] for line in lines]}
+            "lines": lines}
+
+
+def default_site_check(audit: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The report_extras write that puts the page check on by default, or None
+    when a person has chosen, the report is already out, or there is nothing
+    to show."""
+    extras = audit.get("report_extras") or {}
+    if extras.get("chosen") or extras.get("site_check") or audit.get("report_slug"):
+        return None
+    snap = site_check_snapshot(audit.get("technical") or {})
+    if not snap:
+        return None
+    return {"report_extras": {"site_check": snap, "default": True}}
 
 
 def snapshot(audit: Mapping[str, Any], *, speed: bool, site_check: bool) -> dict[str, Any]:

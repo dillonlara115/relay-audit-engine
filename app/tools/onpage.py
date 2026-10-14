@@ -233,3 +233,28 @@ def detail(task_id: str, key: str, *, client: httpx.Client | None = None) -> dic
     finally:
         if client is None:
             http.close()
+
+
+def cached_detail(task_id: str, key: str) -> dict[str, Any]:
+    """detail(), read once and then from the Firestore cache. Kept as JSON text:
+    rows are lists of cells, and Firestore refuses a list directly inside a
+    list. The cache is a saving, never a gate: a cache fault still answers."""
+    import json
+    import logging
+
+    from app.store import firestore as store
+
+    log = logging.getLogger("relay.onpage")
+    request = {"task": str(task_id), "key": key}
+    try:
+        cached = store.cache_get("onpage_detail", request)
+        if cached and cached.get("json"):
+            return json.loads(cached["json"])
+    except Exception as exc:  # noqa: BLE001
+        log.warning("issue cache read failed: %s", exc)
+    found = detail(str(task_id), key)
+    try:
+        store.cache_put("onpage_detail", request, {"json": json.dumps(found)})
+    except Exception as exc:  # noqa: BLE001
+        log.warning("issue cache write failed: %s", exc)
+    return found

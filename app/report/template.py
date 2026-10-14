@@ -86,6 +86,9 @@ _PAGE = """<!doctype html>
   .good {{ --c: #1f7a43; }} .ok {{ --c: #a86200; }} .poor {{ --c: #c0341d; }}
   .checks {{ background: #fff; border-radius: 6px; padding: 16px 18px 6px 36px; margin: 0 0 14px; }}
   .checks li {{ margin: 0 0 10px; }}
+  .checks ul {{ margin: 6px 0 4px 2px; padding-left: 18px; font-size: 0.95rem; }}
+  .checks ul li {{ margin: 0 0 4px; overflow-wrap: anywhere; }}
+  .checks .more {{ opacity: 0.7; list-style: none; margin-left: -18px; }}
   .note {{ font-size: 0.95rem; opacity: 0.8; }}
 </style>
 </head>
@@ -215,6 +218,26 @@ def _site_check_block(check: Mapping[str, Any]) -> str:
     health = (f" Overall, the site rates {int(round(check['health']))} out of 100 on site health."
               if check.get("health") is not None else "")
     lines = check.get("lines") or []
-    body = ('<ul class="checks">' + "".join(f"<li>{esc(line)}</li>" for line in lines) + "</ul>"
+    body = ('<ul class="checks">' + "".join(_check_line(line) for line in lines) + "</ul>"
             if lines else "<p>Nothing broken turned up. That part of the site is in good shape.</p>")
     return _SITE_CHECK.format(pages=int(check.get("pages") or 0), health=health, lines=body)
+
+
+def _check_line(line: Any) -> str:
+    """One problem, and under it the pages where it sits. A snapshot saved
+    before items existed carries the line as plain text."""
+    esc = html_escape.escape
+    if isinstance(line, str):
+        return f"<li>{esc(line)}</li>"
+    items = line.get("items") or []
+    sub = ""
+    if items:
+        rows = []
+        for it in items:
+            link = (f'<a href="{esc(it["href"], quote=True)}">{esc(it["link"])}</a>'
+                    if it.get("href") else esc(it.get("link") or ""))
+            rows.append(f"<li>{link}{(': ' + esc(it['note'])) if it.get('note') else ''}</li>")
+        if line.get("more"):
+            rows.append(f'<li class="more">and {int(line["more"])} more</li>')
+        sub = "<ul>" + "".join(rows) + "</ul>"
+    return f"<li>{esc(line.get('text') or '')}{sub}</li>"

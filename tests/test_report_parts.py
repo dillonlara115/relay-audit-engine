@@ -135,9 +135,9 @@ def test_snapshots_speak_the_owners_language():
     speed = extras.speed_snapshot(LH)
     assert [r["label"] for r in speed["ratings"]] == ["Speed", "Accessibility", "Best practices", "Search basics"]
     assert speed["main_content"] == "6.8 seconds" and speed["real_visitors"] and speed["measured"] == "October 1, 2026"
-    check = extras.site_check_snapshot(TECH)
-    assert check["lines"] == ["7 links lead nowhere", "1 page has no title for Google to show"]
-    assert "favicon" not in json.dumps(check) and "text" not in json.dumps(check["lines"])
+    check = extras.site_check_snapshot(TECH, with_items=False)
+    assert [line["text"] for line in check["lines"]] == ["7 links lead nowhere", "1 page has no title for Google to show"]
+    assert "favicon" not in json.dumps(check)
     assert extras.site_check_snapshot({"status": "done", "pages_crawled": 0}) is None
 
 
@@ -183,7 +183,8 @@ def test_the_panel_shows_the_screenshot_and_what_is_switched_on():
                                  "report_extras": {"speed": extras.speed_snapshot(LH), "updated_at": T0}})
     assert 'id="on-report"' in page and "Change screenshot" in page
     assert 'name="speed" value="1" checked' in page and "Saved Oct 01" in page
-    assert 'name="site_check" value="1">' in page, "ready, not switched on, not disabled"
+    assert 'name="site_check" value="1" checked>' in page and "On by default" in page, \
+        "no choice saved yet, so the page check is on by default"
 
 
 def test_the_draft_job_keeps_custom_findings(monkeypatch):
@@ -207,3 +208,107 @@ def test_the_draft_job_keeps_custom_findings(monkeypatch):
     monkeypatch.setattr("app.agents.diagnostician.draft_findings", draft)
     asyncio.run(job_runner.run_draft_job("j1", {"batch_id": "b1", "only_audit_id": "a1"}))
     assert [f["code"] for f in saved["pool"]] == ["F1", "F2", "F3", "X1"]
+
+
+# ── The actual pages, and on by default ──────────────────────────────────────
+
+from app.tools import onpage  # noqa: E402
+
+DETAILS = {
+    "broken_links": {"total": 9, "columns": [], "rows": [
+        ["https://a.com/old-page/", "404", "https://a.com/roof-repair/", "Get a quote"],
+        ["https://a.com/gone/", "404", "https://a.com/", ""]]},
+    "broken_resources": {"total": 2, "columns": [], "rows": [
+        ["https://a.com/wp-content/uploads/hail.png", "404", "https://a.com/storm/ (+2 more)"],
+        ["https://cdn.x.com/y.js", "no answer", ""]]},
+    "no_title": {"total": 1, "columns": [], "rows": [["https://a.com/thanks/", ""]]},
+}
+TECH2 = {"status": "done", "pages_crawled": 40, "health": 81, "task_id": "T1", "issues": [
+    {"key": "broken_links", "count": 9}, {"key": "broken_resources", "count": 2}, {"key": "no_title", "count": 1}]}
+
+
+def test_each_problem_names_its_pages(monkeypatch):
+    monkeypatch.setattr(onpage, "cached_detail", lambda task, key: DETAILS[key])
+    check = extras.site_check_snapshot(TECH2)
+    links, files, titles = check["lines"]
+    assert links["items"][0] == {"link": "/roof-repair/", "href": "https://a.com/roof-repair/",
+                                 "note": "links to /old-page/ (\u201cGet a quote\u201d)"}
+    assert links["more"] == 7, "9 in all, 2 shown"
+    assert files["items"][0] == {"link": "/storm/", "href": "https://a.com/storm/", "note": "hail.png doesn't load"}
+    assert files["items"][1] == {"link": "y.js", "href": None, "note": "doesn't load"}
+    assert titles["items"] == [{"link": "/thanks/", "href": "https://a.com/thanks/", "note": ""}]
+
+
+def test_their_words_are_held_to_our_copy_rules(monkeypatch):
+    rows = [["https://a.com/x/", "404", "https://a.com/a/", "Hail \u2014 storm help"],
+            ["https://a.com/y/", "404", "https://a.com/b/", "Check your roof score"]]
+    monkeypatch.setattr(onpage, "cached_detail", lambda task, key: {"total": 2, "rows": rows})
+    items, total = extras.items_for("broken_links", {"total": 2, "rows": rows})
+    assert len(items) == 1 and "\u2014" not in items[0]["note"] and total == 2
+
+
+def test_a_crawl_that_cannot_be_read_still_gives_the_counts(monkeypatch):
+    def gone(task, key):
+        raise onpage.OnPageUnavailable("expired")
+    monkeypatch.setattr(onpage, "cached_detail", gone)
+    check = extras.site_check_snapshot(TECH2)
+    assert [line["items"] for line in check["lines"]] == [[], [], []] and check["lines"][0]["text"] == "9 links lead nowhere"
+
+
+def test_the_report_lists_the_pages_under_each_problem(monkeypatch):
+    monkeypatch.setattr(onpage, "cached_detail", lambda task, key: DETAILS[key])
+    page = render_report(report(site_check=extras.site_check_snapshot(TECH2)))
+    assert '<a href="https://a.com/roof-repair/">/roof-repair/</a>: links to /old-page/' in page
+    assert "and 7 more" in page and "y.js: doesn" in page
+    assert forbidden_terms_in(page) == [] and not contains_forbidden_dash(page)
+
+
+def test_an_older_snapshot_of_plain_lines_still_renders():
+    page = render_report(report(site_check={"pages": 3, "health": 90, "lines": ["2 links lead nowhere"]}))
+    assert "<li>2 links lead nowhere</li>" in page
+
+
+def test_on_by_default_until_someone_chooses(monkeypatch):
+    monkeypatch.setattr(onpage, "cached_detail", lambda task, key: DETAILS[key])
+    write = extras.default_site_check({"technical": TECH2})
+    assert write["report_extras"]["default"] is True and len(write["report_extras"]["site_check"]["lines"]) == 3
+    assert extras.default_site_check({"technical": TECH2, "report_extras": {"chosen": True}}) is None
+    assert extras.default_site_check({"technical": TECH2, "report_slug": "abc"}) is None, "never onto a report already out"
+    assert extras.default_site_check({"technical": {"status": "crawling"}}) is None
+
+
+def test_saving_marks_a_choice(client, pool_store, monkeypatch):
+    monkeypatch.setattr(onpage, "cached_detail", lambda task, key: DETAILS[key])
+    pool_store["audit"] = {"prospect_id": "p1", "technical": TECH2}
+    csrf = sign_in(client)
+    client.post("/console/audits/a1/report-sections", data={"csrf": csrf}, follow_redirects=False)
+    saved = pool_store["saved"][-1]["report_extras"]
+    assert saved["chosen"] is True and saved["site_check"] is None and saved["default"] is False
+
+
+def test_publishing_a_first_report_adds_the_page_check(monkeypatch):
+    from app.report import publish as pub
+
+    audit = {"audit_id": "a1", "prospect_id": "p1", "technical": TECH2}
+    writes = []
+    monkeypatch.setattr(onpage, "cached_detail", lambda task, key: DETAILS[key])
+    monkeypatch.setattr(pub.store, "get_audit", lambda aid: audit)
+    monkeypatch.setattr(pub.store, "get_prospect", lambda pid: {"business_name": "Apex", "city": "Pueblo"})
+    monkeypatch.setattr(pub.store, "load_suppressions", lambda: {})
+    monkeypatch.setattr(pub.store, "suppression_hit", lambda *a, **k: None)
+    monkeypatch.setattr(pub.store, "get_draft_findings", lambda aid: {
+        "status": "approved", "selected": [1, 2, 3], "findings": [
+            {"ordinal": i, "what_we_saw": f"s{i}", "what_it_means": "m", "what_fixing_takes": "f"} for i in (1, 2, 3)]})
+    monkeypatch.setattr(pub.evidence_store, "audit_evidence", lambda aid: [{"kind": "screenshot", "gcs_path": "p"}])
+    monkeypatch.setattr(pub.evidence_store, "freeze_for_report", lambda path, slug: "frozen")
+    monkeypatch.setattr(pub.store, "update_audit", lambda aid, f: writes.append(f))
+    pub.publish("a1")
+    assert writes[0]["report_extras"]["default"] is True and "report_slug" in writes[-1]
+
+
+def test_file_names_survive_long_paths_and_the_homepage_has_a_name():
+    long = "https://a.com/%22http:/a.com/wp-content/uploads/2024/09/a-very-long-folder-name/Untitled-27-1024x574.png/"
+    assert extras._file_name(long) == "Untitled-27-1024x574.png"
+    assert extras.path_of("https://a.com/") == "Homepage"
+    items, _ = extras.items_for("broken_links", {"total": 1, "rows": [["https://a.com/x/", "404", "https://a.com/", ""]]})
+    assert items[0]["link"] == "Homepage"

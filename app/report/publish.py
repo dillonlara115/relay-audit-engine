@@ -119,6 +119,19 @@ def publish(audit_id: str) -> PublishResult:
     if not evidence:
         raise PublishBlocked("no stored evidence for this audit, nothing may be claimed")
 
+    # The page check is on by default: a report going out for the first time
+    # carries it unless a person switched it off.
+    if not audit.get("report_slug"):
+        from app.report.extras import default_site_check
+
+        try:
+            write = default_site_check(audit)
+        except Exception:  # noqa: BLE001 - the report ships without it, not not at all
+            write = None
+        if write:
+            store.update_audit(audit_id, write)
+            audit = {**audit, "report_extras": {**(audit.get("report_extras") or {}), **write["report_extras"]}}
+
     slug = audit.get("report_slug") or new_slug()
 
     # The dash rule is asserted against the final rendered page, screenshots

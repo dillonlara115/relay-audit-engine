@@ -413,6 +413,9 @@ async def run_technical_job(job_id: str, params: Mapping[str, Any]) -> dict[str,
             **onpage.distil(result), "status": "done", "task_id": task_id, "error": None,
             "browser": browser, "needs_browser": browser, "finished_at": store.utcnow()}})
         await say("Crawl finished.")
+        from app.console.routes import _site_check_by_default
+
+        await asyncio.to_thread(_site_check_by_default, audit_id)
         return {"audit_id": audit_id}
     await say("Still crawling. The prospect page has Check again, which picks up the results "
               "without starting another crawl.")

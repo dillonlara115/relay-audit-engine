@@ -912,9 +912,11 @@ async def set_report_sections(audit_id: str, request: Request, csrf: str = Form(
     audit = await asyncio.to_thread(store.get_audit, audit_id)
     if audit is None:
         return Response(status_code=404)
-    snap = extras.snapshot(audit, speed=bool(speed), site_check=bool(site_check))
-    await asyncio.to_thread(store.update_audit, audit_id,
-                            {"report_extras": {**snap, "updated_at": store.utcnow()}})
+    # Reads the crawl's item lists, so off the event loop. Saving is a choice:
+    # from here on the page check is no longer switched on by default.
+    snap = await asyncio.to_thread(extras.snapshot, audit, speed=bool(speed), site_check=bool(site_check))
+    await asyncio.to_thread(store.update_audit, audit_id, {"report_extras": {
+        **snap, "chosen": True, "default": False, "updated_at": store.utcnow()}})
     missing = [label for asked, key, label in ((speed, "speed", "the speed test"),
                                                (site_check, "site_check", "the page check"))
                if asked and not snap[key]]
@@ -976,6 +978,19 @@ async def run_technical(audit_id: str, request: Request, csrf: str = Form(None))
                         f"Technical audit for {name}")
 
 
+def _site_check_by_default(audit_id: str) -> None:
+    """Put the page check on the report once a crawl is in, unless a person
+    chose otherwise or the report is already out. Never fatal."""
+    from app.report import extras
+
+    try:
+        write = extras.default_site_check(store.get_audit(audit_id) or {})
+        if write:
+            store.update_audit(audit_id, write)
+    except Exception as exc:  # noqa: BLE001 - the crawl result is saved either way
+        log.warning("default site check not added: %s", exc)
+
+
 @router.post("/audits/{audit_id}/technical/check")
 async def check_technical(audit_id: str, request: Request, csrf: str = Form(None)) -> Response:
     """Read a crawl that was still running when its job ended. Starts nothing
@@ -1007,6 +1022,7 @@ async def check_technical(audit_id: str, request: Request, csrf: str = Form(None
             return "technical_pending", "No pages came back from the crawl."
         store.update_audit(audit_id, {"technical": {**onpage.distil(result), "status": "done",
                                                     "error": None, "finished_at": store.utcnow()}})
+        _site_check_by_default(audit_id)
         return "technical_done", "Crawl results are in."
 
     code, detail = await asyncio.to_thread(check)
@@ -1025,24 +1041,10 @@ async def technical_issue(audit_id: str, key: str) -> Response:
         task_id = ((store.get_audit(audit_id) or {}).get("technical") or {}).get("task_id")
         if not task_id:
             return None, "No crawl on record. Run technical audit first."
-        request = {"task": str(task_id), "key": key}
-        # Kept as JSON text: rows are lists of cells, and Firestore refuses a
-        # list directly inside a list. The cache is a saving, never a gate.
         try:
-            cached = store.cache_get("onpage_detail", request)
-            if cached and cached.get("json"):
-                return json.loads(cached["json"]), ""
-        except Exception as exc:  # noqa: BLE001
-            log.warning("issue cache read failed: %s", exc)
-        try:
-            found = onpage.detail(str(task_id), key)
+            return onpage.cached_detail(str(task_id), key), ""
         except onpage.OnPageUnavailable as exc:
             return None, str(exc)
-        try:
-            store.cache_put("onpage_detail", request, {"json": json.dumps(found)})
-        except Exception as exc:  # noqa: BLE001
-            log.warning("issue cache write failed: %s", exc)
-        return found, ""
 
     found, error = await asyncio.to_thread(load)
     note = ("Pages are looked up for the first 25 files." if key == "broken_resources"
