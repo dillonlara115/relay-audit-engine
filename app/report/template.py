@@ -485,5 +485,10 @@ def _short_block(report: PublicReport) -> str:
         return ""
     lines = seen[:2]
     if report.findings:
-        lines.append(f"The biggest thing costing you jobs: {report.findings[0].what_we_saw}")
+        first = report.findings[0].what_we_saw.strip()
+        # Mid-sentence now, so a leading capital drops, unless it is a name
+        # or an acronym (a second capital letter says so).
+        if len(first) > 1 and first[0].isupper() and not first[1].isupper() and first.split()[0] not in ("I", "Google"):
+            first = first[0].lower() + first[1:]
+        lines.append(f"The biggest thing costing you jobs: {first}")
     return ("<h2>The short version</h2>\n  <ul class=\"short\">" + "".join(f"<li>{esc(x)}</li>" for x in lines) + "</ul>")
