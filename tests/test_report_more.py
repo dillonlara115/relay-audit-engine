@@ -130,7 +130,7 @@ def test_reviews_compared_with_the_roofers_who_show_up_most():
     assert [o["name"] for o in snap["others"]] == ["", "", ""], "no names unless ticked; one with no review count is left out"
     page = render_report(report(reviews=snap))
     assert "You have 26 reviews. The roofers who show up most often in Google Maps near you have" in page
-    assert "Your newest review is 3 days old." in page and page.count('class="bar') == 4
+    assert "Your newest review is 3 days old." in page and len(__import__('re').findall(r'class="bar( you)?"', page)) == 4
     assert "Another roofer near you" in page and forbidden_terms_in(page) == []
     named = extras.reviews_snapshot(prospect, _with_rivals(), with_names=True)
     assert [o["name"] for o in named["others"]] == ["Arrow Roofing Inc.", "Heritage Roofing, Prescott", "Yavapai Roofing"]
