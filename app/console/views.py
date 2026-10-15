@@ -1116,7 +1116,12 @@ def report_parts_view(audit: Mapping[str, Any], evidence: Sequence[Mapping[str, 
         "site_check_ready": extras.site_check_snapshot(audit.get("technical") or {}, with_items=False) is not None,
         "positions_on": stamp if saved.get("positions") else "",
         "reach_on": stamp if saved.get("reach") else "",
-        "rivals_on": bool((saved.get("reach") or {}).get("rivals")),
+        "rivals_on": bool((saved.get("reach") or {}).get("rivals"))
+                     or any(o.get("name") for o in (saved.get("reviews") or {}).get("others") or [])
+                     or any(a.get("names") for a in (saved.get("ai") or {}).get("answers") or []),
+        "reviews_on": stamp if saved.get("reviews") else "",
+        "demand_on": stamp if saved.get("demand") else "",
+        "ai_on": stamp if saved.get("ai") else "",
         "reach_ready": (audit.get("local_reach") or {}).get("status") == "done",
         "published": bool(audit.get("report_slug")),
         "report_url": report_url if audit.get("report_slug") else None,

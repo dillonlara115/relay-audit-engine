@@ -54,6 +54,9 @@ def build_public_report(
         positions=(audit.get("report_extras") or {}).get("positions"),
         reach=(audit.get("report_extras") or {}).get("reach"),
         reach_map_url=reach_map_url,
+        reviews=(audit.get("report_extras") or {}).get("reviews"),
+        demand=(audit.get("report_extras") or {}).get("demand"),
+        ai=(audit.get("report_extras") or {}).get("ai"),
     )
 
 

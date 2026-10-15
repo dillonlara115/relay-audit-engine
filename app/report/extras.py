@@ -264,6 +264,53 @@ def reach_snapshot(reach: Mapping[str, Any], *, map_path: str | None,
             "rivals": rivals_for_report(list(reach.get("competitors") or [])) if with_rivals else []}
 
 
+def reviews_snapshot(prospect: Mapping[str, Any], reach: Mapping[str, Any], *,
+                     with_names: bool = False) -> dict[str, Any] | None:
+    """Their Google reviews next to the roofers who held the Maps top three
+    most often in Local reach. None without both sides to compare."""
+    from datetime import datetime, timezone
+
+    count = prospect.get("review_count")
+    others = [c for c in reach.get("competitors") or [] if isinstance(c.get("reviews"), (int, float))]
+    if not isinstance(count, (int, float)) or reach.get("status") != "done" or not others:
+        return None
+    newest = prospect.get("latest_review_at")
+    days = None
+    if hasattr(newest, "tzinfo"):
+        newest = newest if newest.tzinfo else newest.replace(tzinfo=timezone.utc)
+        days = max(0, (datetime.now(timezone.utc) - newest).days)
+    rows = []
+    for c in others[:RIVALS_SHOWN]:
+        name = _clean(str(c.get("title") or "")) if with_names else ""
+        if with_names and not name:
+            continue
+        rating = c.get("rating")
+        rows.append({"name": name or "", "reviews": int(c["reviews"]),
+                     "rating": round(float(rating), 1) if isinstance(rating, (int, float)) else None})
+    if not rows:
+        return None
+    rating = prospect.get("rating")
+    return {"you": {"reviews": int(count), "newest_days": days,
+                    "rating": round(float(rating), 1) if isinstance(rating, (int, float)) else None},
+            "others": rows, "average": round(sum(r["reviews"] for r in rows) / len(rows))}
+
+
+def demand_snapshot(found: Mapping[str, Any], *, town: str) -> dict[str, Any] | None:
+    rows = [{"phrase": str(r["phrase"]), "monthly": int(r["monthly"])} for r in found.get("rows") or []]
+    return {"town": town, "rows": rows, "top": int(found.get("top") or 0)} if rows else None
+
+
+def ai_snapshot(found: Mapping[str, Any], *, with_names: bool = False) -> dict[str, Any] | None:
+    """What each assistant said: whether it named them, and how many others
+    it named. Those names only when a person ticks that for this report."""
+    answers = []
+    for a in found.get("answers") or []:
+        names = [n for n in (_clean(x) for x in a.get("named") or []) if n]
+        answers.append({"assistant": str(a.get("assistant") or ""), "named_you": bool(a.get("named_you")),
+                        "others": len(names), "names": names if with_names else []})
+    return {"question": _clean(str(found.get("question") or "")) or "", "answers": answers} if answers else None
+
+
 def default_site_check(audit: Mapping[str, Any]) -> dict[str, Any] | None:
     """The report_extras write that puts the page check on by default, or None
     when a person has chosen, the report is already out, or there is nothing
@@ -279,10 +326,17 @@ def default_site_check(audit: Mapping[str, Any]) -> dict[str, Any] | None:
 
 def snapshot(audit: Mapping[str, Any], *, speed: bool, site_check: bool, positions: bool = False,
              reach: bool = False, rivals: bool = False, checks: list[Mapping[str, Any]] = (),
-             city: str = "", reach_map_path: str | None = None) -> dict[str, Any]:
-    """What report_extras should hold for the sections switched on."""
+             city: str = "", reach_map_path: str | None = None, reviews: bool = False,
+             prospect: Mapping[str, Any] | None = None, demand: Mapping[str, Any] | None = None,
+             ai: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """What report_extras should hold for the sections switched on. demand
+    and ai are the lookups already made for this save, or None when their
+    sections are off."""
     local = audit.get("local_reach") or {}
     return {
+        "reviews": reviews_snapshot(prospect or {}, local, with_names=rivals) if reviews else None,
+        "demand": demand_snapshot(demand, town=city) if demand else None,
+        "ai": ai_snapshot(ai, with_names=rivals) if ai else None,
         "speed": speed_snapshot(audit.get("lighthouse") or {}) if speed else None,
         "site_check": site_check_snapshot(audit.get("technical") or {}) if site_check else None,
         "positions": positions_snapshot(list(checks), city=city, reach=local) if positions else None,

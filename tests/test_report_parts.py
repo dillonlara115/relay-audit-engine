@@ -553,4 +553,4 @@ def test_saving_with_names_ticked(client, pool_store):
 
 def test_the_panel_offers_names_under_the_map():
     page = _prospect_page(audit={"local_reach": _with_rivals()})
-    assert 'name="rivals" value="1">' in page and "Name the roofers who show up instead" in page
+    assert 'name="rivals" value="1">' in page and "Name other roofers." in page

@@ -904,7 +904,8 @@ async def _change_findings(request: Request, csrf: str | None, audit_id: str, wh
 async def set_report_sections(audit_id: str, request: Request, csrf: str = Form(None),
                               speed: str = Form(""), site_check: str = Form(""),
                               positions: str = Form(""), reach: str = Form(""),
-                              rivals: str = Form("")) -> Response:
+                              rivals: str = Form(""), reviews: str = Form(""),
+                              demand: str = Form(""), ai: str = Form("")) -> Response:
     """Switch the optional report sections on or off. Switching one on takes a
     snapshot of today's results; the report never changes behind it."""
     if not check_csrf(request, csrf):
@@ -932,10 +933,27 @@ async def set_report_sections(audit_id: str, request: Request, csrf: str = Form(
                         source, f"snapshots/{audit_id}/reach-map-{store.utcnow():%Y%m%d%H%M%S}.png")
                 except Exception as exc:  # noqa: BLE001 - the grid still goes on, without the map
                     log.warning("reach map not frozen: %s", exc)
+        city, state = str(prospect.get("city") or ""), prospect.get("state")
+        # The two paid lookups run only for the boxes ticked, and are cached
+        # for 30 days, so saving again costs nothing.
+        found_demand = found_ai = None
+        if demand:
+            from app.tools import demand as demand_tool
+            try:
+                found_demand = demand_tool.look_up(city, state)
+            except demand_tool.DemandUnavailable as exc:
+                log.warning("search demand not found: %s", exc)
+        if ai:
+            from app.tools import ai_answers
+            try:
+                found_ai = ai_answers.ask(city, state, name=str(prospect.get("business_name") or ""),
+                                          domain=prospect.get("domain"))
+            except ai_answers.AnswersUnavailable as exc:
+                log.warning("ai answers not found: %s", exc)
         return extras.snapshot(audit, speed=bool(speed), site_check=bool(site_check),
-                               positions=bool(positions), reach=bool(reach),
-                               rivals=bool(reach) and bool(rivals), checks=checks,
-                               city=str(prospect.get("city") or ""), reach_map_path=map_path)
+                               positions=bool(positions), reach=bool(reach), rivals=bool(rivals),
+                               checks=checks, city=city, reach_map_path=map_path,
+                               reviews=bool(reviews), prospect=prospect, demand=found_demand, ai=found_ai)
 
     snap = await asyncio.to_thread(build)
     await asyncio.to_thread(store.update_audit, audit_id, {"report_extras": {
@@ -943,7 +961,10 @@ async def set_report_sections(audit_id: str, request: Request, csrf: str = Form(
     missing = [label for asked, key, label in ((speed, "speed", "the speed test"),
                                                (site_check, "site_check", "the page check"),
                                                (positions, "positions", "the rankings"),
-                                               (reach, "reach", "the Maps grid"))
+                                               (reach, "reach", "the Maps grid"),
+                                               (reviews, "reviews", "the review comparison"),
+                                               (demand, "demand", "the search counts"),
+                                               (ai, "ai", "the AI answers"))
                if asked and not snap[key]]
     if missing:
         return _redirect(_with_notice(f"/console/audits/{audit_id}", "sections_partial",

@@ -98,6 +98,18 @@ _PAGE = """<!doctype html>
   .ranks th.place {{ text-align: right; }}
   .ranks .where {{ font-size: 0.9rem; opacity: 0.75; }}
   .rivals td.place {{ width: auto; white-space: nowrap; }}
+  .short {{ background: #fff; border-left: 6px solid var(--asphalt); border-radius: 6px; padding: 16px 18px 6px 36px; margin: 8px 0 8px; }}
+  .short li {{ margin: 0 0 10px; }}
+  .bars {{ background: #fff; border-radius: 6px; padding: 14px 16px 6px; margin: 0 0 14px; }}
+  .bar {{ margin: 0 0 12px; }}
+  .bar .who {{ display: flex; justify-content: space-between; gap: 10px; font-size: 0.95rem; }}
+  .bar .track {{ height: 12px; background: #ece6dc; border-radius: 6px; margin-top: 4px; overflow: hidden; }}
+  .bar .fill {{ height: 100%; width: var(--w); background: #8a8175; border-radius: 6px; }}
+  .bar.you .fill {{ background: var(--orange); }}
+  .bar.you .who {{ font-weight: 700; }}
+  .asked {{ font-style: italic; }}
+  .said {{ background: #fff; border-radius: 6px; padding: 14px 16px; margin: 0 0 10px; }}
+  .said b {{ font-family: 'PT Sans', sans-serif; }}
   h3.sub {{ font-family: 'PT Sans', sans-serif; font-size: 1.1rem; margin: 22px 0 6px; }}
   .gmap {{ position: relative; width: 100%; aspect-ratio: 1; border-radius: 6px; overflow: hidden;
           border: 3px solid var(--asphalt); margin: 10px 0 8px; background: #e8e2d6; }}
@@ -121,6 +133,8 @@ _PAGE = """<!doctype html>
   <h1>{business_name}</h1>
   <div class="city">{city}</div>
 
+  {short_block}
+
   <h2>What we did</h2>
   <p>We searched for a roofer in {city} the way a homeowner with a leaking roof
   would, and looked at what they find. Then we walked through every step that
@@ -131,9 +145,15 @@ _PAGE = """<!doctype html>
   <h2>Three things costing you booked jobs</h2>
   {findings_block}
 
+  {demand_block}
+
   {positions_block}
 
   {reach_block}
+
+  {reviews_block}
+
+  {ai_block}
 
   {speed_block}
 
@@ -212,6 +232,10 @@ def render_report(report: PublicReport) -> str:
         if report.competitor_note else ""
     )
     return _PAGE.format(
+        short_block=_short_block(report),
+        demand_block=_demand_block(report.demand) if report.demand else "",
+        reviews_block=_reviews_block(report.reviews) if report.reviews else "",
+        ai_block=_ai_block(report.ai) if report.ai else "",
         positions_block=_positions_block(report.positions) if report.positions else "",
         reach_block=_reach_block(report.reach, report.reach_map_url) if report.reach else "",
         speed_block=_speed_block(report.speed) if report.speed else "",
@@ -366,3 +390,100 @@ def _reach_block(reach: Mapping[str, Any], map_url: str | None) -> str:
             f"{esc(str(reach.get('radius_miles') or ''))} miles out. Each circle shows where you "
             "landed on the list from that spot.</p>\n  "
             + board + key + "<p>" + " ".join(parts) + "</p>" + rival_block)
+
+
+def _plural(n: int, one: str, many: str) -> str:
+    return f"{n} {one if n == 1 else many}"
+
+
+def _demand_block(d: Mapping[str, Any]) -> str:
+    esc = html_escape.escape
+    rows = "".join(f'<tr><td><b>\u201c{esc(r["phrase"])}\u201d</b></td><td class="place">{int(r["monthly"]):,} a month</td></tr>'
+                   for r in d.get("rows") or [])
+    town = esc(d.get("town") or "your area")
+    return (f"<h2>How many people are looking</h2>\n  <p>Google counts at least {int(d.get('top') or 0):,} searches a "
+            f"month for a roofer in {town}, from people typing it one way alone. Here are the ways people "
+            "type it most, with Google's own monthly counts.</p>\n  "
+            '<table class="ranks"><thead><tr><th>What people type</th><th class="place">Searches</th></tr></thead>'
+            f"<tbody>{rows}</tbody></table>")
+
+
+def _reviews_block(r: Mapping[str, Any]) -> str:
+    esc = html_escape.escape
+    you, others = r.get("you") or {}, r.get("others") or []
+    top = max([int(you.get("reviews") or 0)] + [int(o["reviews"]) for o in others]) or 1
+
+    def bar(label: str, reviews: int, rating: Any, *, mine: bool) -> str:
+        stars = f"{rating:.1f} stars, " if isinstance(rating, (int, float)) else ""
+        return (f'<div class="bar{" you" if mine else ""}"><div class="who"><span>{esc(label)}</span>'
+                f"<span>{stars}{_plural(reviews, 'review', 'reviews')}</span></div>"
+                f'<div class="track"><div class="fill" style="--w: {max(2, round(100 * reviews / top))}%"></div></div></div>')
+
+    bars = bar("You", int(you.get("reviews") or 0), you.get("rating"), mine=True) + "".join(
+        bar(o.get("name") or "Another roofer near you", int(o["reviews"]), o.get("rating"), mine=False)
+        for o in others)
+    mine, avg = int(you.get("reviews") or 0), int(r.get("average") or 0)
+    if mine >= avg:
+        line = f"You have {_plural(mine, 'review', 'reviews')}, more than the {avg} the roofers around you average."
+    else:
+        line = (f"You have {_plural(mine, 'review', 'reviews')}. The roofers who show up most often in Google Maps "
+                f"near you have {avg} on average.")
+    if you.get("newest_days") is not None:
+        d = int(you["newest_days"])
+        line += " Your newest review is from today." if d == 0 else f" Your newest review is {_plural(d, 'day', 'days')} old."
+    return ("<h2>How your reviews compare</h2>\n  <p>Homeowners read reviews before they call, and Google leans on "
+            "them when it decides who to show. " + line + "</p>\n  " f'<div class="bars">{bars}</div>')
+
+
+def _ai_block(a: Mapping[str, Any]) -> str:
+    esc = html_escape.escape
+    said = []
+    for ans in a.get("answers") or []:
+        who, others, names = esc(ans["assistant"]), int(ans.get("others") or 0), ans.get("names") or []
+        verdict = "named you." if ans.get("named_you") else "didn't name you."
+        if others:
+            rest = (f" It named {_plural(others, 'other roofer', 'other roofers')}" +
+                    (": " + ", ".join(esc(n) for n in names) + "." if names else "."))
+        else:
+            rest = ""
+        said.append(f'<div class="said"><b>{who}</b> {verdict}{rest}</div>')
+    return ("<h2>What AI assistants say</h2>\n  <p>More homeowners now ask an AI assistant who to call instead of "
+            f'searching. We asked two of them the same question:</p>\n  <p class="asked">\u201c{esc(a.get("question") or "")}\u201d</p>\n  '
+            + "".join(said))
+
+
+def _short_block(report: PublicReport) -> str:
+    """Three lines at the top, from what the report goes on to show. Nothing
+    new is claimed here: each line repeats a figure from a section below, and
+    the last is the finding a person put first. Left off when the report has
+    nothing beyond its findings, where it would only repeat them."""
+    esc = html_escape.escape
+    seen: list[str] = []
+    reach, positions = report.reach or {}, report.positions or {}
+    if reach.get("answered"):
+        top3, n = int(reach.get("top3") or 0), int(reach["answered"])
+        seen.append(f"In Google Maps, you're in the top 3 at {top3} of {n} spots around you." if top3
+                    else f"In Google Maps, you're not in the top 3 at any of the {n} spots we searched from.")
+    else:
+        maps = next((r for r in positions.get("rows") or [] if r.get("kind") == "maps"), None)
+        if maps:
+            seen.append(f"Searching \u201c{maps['query']}\u201d on Google Maps, you're "
+                        + (f"{_nth(int(maps['rank']))} on the list." if maps.get("rank") else "not in the top 3."))
+    if report.demand and report.demand.get("top"):
+        seen.append(f"Google counts at least {int(report.demand['top']):,} searches a month for a roofer in "
+                    f"{report.demand.get('town') or 'your area'}.")
+    ai = report.ai or {}
+    if ai.get("answers"):
+        missed = [x["assistant"] for x in ai["answers"] if not x.get("named_you")]
+        if missed:
+            seen.append(f"{' and '.join(missed)} {'doesn' if len(missed) == 1 else 'don'}'t name you when asked for the best roofers near you.")
+    if report.reviews and len(seen) < 2:
+        you, avg = int((report.reviews.get("you") or {}).get("reviews") or 0), int(report.reviews.get("average") or 0)
+        if you < avg:
+            seen.append(f"You have {you} reviews; the roofers who show up most average {avg}.")
+    if not seen:
+        return ""
+    lines = seen[:2]
+    if report.findings:
+        lines.append(f"The biggest thing costing you jobs: {report.findings[0].what_we_saw}")
+    return ("<h2>The short version</h2>\n  <ul class=\"short\">" + "".join(f"<li>{esc(x)}</li>" for x in lines) + "</ul>")

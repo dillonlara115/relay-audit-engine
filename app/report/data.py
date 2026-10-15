@@ -56,6 +56,9 @@ class PublicReport:
     positions: Mapping[str, Any] | None = None
     reach: Mapping[str, Any] | None = None
     reach_map_url: str | None = None      # minted per page load, never stored
+    reviews: Mapping[str, Any] | None = None
+    demand: Mapping[str, Any] | None = None
+    ai: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         # Exactly three, enforced at runtime, not just at publish time.
@@ -85,6 +88,9 @@ class PublicReport:
             "site_check": dict(self.site_check) if self.site_check else None,
             "positions": dict(self.positions) if self.positions else None,
             "reach": {k: v for k, v in self.reach.items() if k != "map_path"} if self.reach else None,
+            "reviews": dict(self.reviews) if self.reviews else None,
+            "demand": dict(self.demand) if self.demand else None,
+            "ai": dict(self.ai) if self.ai else None,
         }
 
 
