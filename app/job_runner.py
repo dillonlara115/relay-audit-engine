@@ -468,7 +468,7 @@ async def run_reach_job(job_id: str, params: Mapping[str, Any]) -> dict[str, Any
         await asyncio.to_thread(jobs.log, job_id, line)
 
     await say(f"Searching Google Maps for \"{keyword}\" from {size * size} spots, "
-              f"{radius:g} miles out from the business.")
+              f"{radius:g} miles out from {'the middle of ' + center_label if center_on == 'town' else 'the business'}.")
     try:
         result = await reach.run(place_id=prospect_id, domain=str(prospect.get("domain") or ""),
                                  name=str(prospect.get("business_name") or ""), lat=float(lat),

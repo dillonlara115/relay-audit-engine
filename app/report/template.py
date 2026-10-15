@@ -343,7 +343,8 @@ def _reach_block(reach: Mapping[str, Any], map_url: str | None) -> str:
     if lower:
         parts.append(f"At {lower}, you're further down the list.")
     if missing:
-        parts.append(f"At {missing}, you don't come up at all.")
+        # Past the first 20 is not absent: Sun Spirit Roofing was 34th.
+        parts.append(f"At {missing}, you're not in the first 20 results.")
     return ("<h2>Where you show up in Google Maps</h2>\n  "
             f"<p>Google Maps shows different roofers depending on where the person searching is standing. "
             f"So we searched \u201c{esc(reach.get('keyword') or '')}\u201d from spots all around {around}, up to "

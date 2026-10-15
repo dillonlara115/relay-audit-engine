@@ -413,7 +413,7 @@ def test_the_maps_grid_never_names_another_business():
     assert "Rival" not in json.dumps(snap)
     page = render_report(report(reach=snap, reach_map_url="https://storage.example/m.png"))
     assert "Where you show up in Google Maps" in page and 'src="https://storage.example/m.png"' in page
-    assert page.count('class="pin ') == 9 and "At 3, you don" in page and "Rival" not in page
+    assert page.count('class="pin ') == 9 and "At 3, you're not in the first 20 results." in page and "Rival" not in page
     assert "At 3 spots, you're in the top 3, where most homeowners look." in page
     assert forbidden_terms_in(page) == [] and not contains_forbidden_dash(page)
     assert "map_path" not in json.dumps(report(reach=snap).to_dict())
