@@ -29,6 +29,8 @@ ASSISTANTS: tuple[tuple[str, str, dict[str, Any]], ...] = (
     ("Perplexity", "perplexity/llm_responses/live", {"model_name": "sonar"}),
 )
 _SUFFIXES = {"llc", "inc", "co", "company", "corp", "corporation", "the", "ltd", "l.l.c."}
+_TRADE = re.compile(r"roof|exterior|construct|contract|build|restor|gutter|siding|renovat|remodel|home|"
+                    r"\b(llc|inc|co|corp|company|services?|group|solutions|pros?)\b")
 
 
 class AnswersUnavailable(RuntimeError):
@@ -60,6 +62,10 @@ def named_businesses(text: str) -> list[str]:
         if not 1 <= len(words) <= 6 or re.search(r"\d|/|\+|%", name) or not name[0].isupper():
             continue
         if name.lower().split()[0] in {"i", "i'd", "i’d", "if", "for", "when", "before", "best", "why", "what"}:
+            continue
+        # A bold heading ("My recommendation") is not a business. A roofer's
+        # name carries a trade word or a company ending.
+        if not _TRADE.search(name.lower()):
             continue
         found.append(name)
     # "Legacy Roofing" and "Legacy Roofing LLC" in one answer are one roofer.

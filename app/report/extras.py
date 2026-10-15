@@ -296,7 +296,8 @@ def reviews_snapshot(prospect: Mapping[str, Any], reach: Mapping[str, Any], *,
 
 
 def demand_snapshot(found: Mapping[str, Any], *, town: str) -> dict[str, Any] | None:
-    rows = [{"phrase": str(r["phrase"]), "monthly": int(r["monthly"])} for r in found.get("rows") or []]
+    rows = [{"phrase": str(r["phrase"]), "monthly": int(r["monthly"]), "alike": int(r.get("alike") or 0)}
+            for r in found.get("rows") or []]
     return {"town": town, "rows": rows, "top": int(found.get("top") or 0)} if rows else None
 
 

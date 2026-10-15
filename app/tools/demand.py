@@ -75,4 +75,13 @@ def look_up(city: str, state: str | None = None, *, client: httpx.Client | None 
                            and it["search_volume"] > 0]}
         store.cache_put("search_demand", request, cached)
     rows = sorted(cached.get("rows") or [], key=lambda r: -r["monthly"])
-    return {"rows": rows[:SHOWN], "top": rows[0]["monthly"] if rows else 0}
+    # Google gives close variants one shared figure ("prescott roofing",
+    # "prescott roofers", "roofing prescott": 390 each). One row per figure,
+    # with how many other phrasings share it.
+    grouped: list[dict[str, Any]] = []
+    for r in rows:
+        if grouped and grouped[-1]["monthly"] == r["monthly"]:
+            grouped[-1]["alike"] += 1
+        else:
+            grouped.append({**r, "alike": 0})
+    return {"rows": grouped[:SHOWN], "top": rows[0]["monthly"] if rows else 0}

@@ -8,6 +8,7 @@ of this file and the escaping visible at the call site.
 from __future__ import annotations
 
 import html as html_escape
+import re
 from typing import Any, Mapping
 
 from app.report.data import PublicReport
@@ -398,8 +399,12 @@ def _plural(n: int, one: str, many: str) -> str:
 
 def _demand_block(d: Mapping[str, Any]) -> str:
     esc = html_escape.escape
-    rows = "".join(f'<tr><td><b>\u201c{esc(r["phrase"])}\u201d</b></td><td class="place">{int(r["monthly"]):,} a month</td></tr>'
-                   for r in d.get("rows") or [])
+    rows = "".join(
+        f'<tr><td><b>\u201c{esc(r["phrase"])}\u201d</b>'
+        + (f'<br><span class="where">and {_plural(int(r["alike"]), "way", "ways")} like it; Google counts them together</span>'
+           if r.get("alike") else "")
+        + f'</td><td class="place">{int(r["monthly"]):,} a month</td></tr>'
+        for r in d.get("rows") or [])
     town = esc(d.get("town") or "your area")
     return (f"<h2>How many people are looking</h2>\n  <p>Google counts at least {int(d.get('top') or 0):,} searches a "
             f"month for a roofer in {town}, from people typing it one way alone. Here are the ways people "
@@ -485,7 +490,9 @@ def _short_block(report: PublicReport) -> str:
         return ""
     lines = seen[:2]
     if report.findings:
+        # The finding's first sentence: the rest is for the finding below.
         first = report.findings[0].what_we_saw.strip()
+        first = re.split(r"(?<=[.!?])\s+", first, maxsplit=1)[0]
         # Mid-sentence now, so a leading capital drops, unless it is a name
         # or an acronym (a second capital letter says so).
         if len(first) > 1 and first[0].isupper() and not first[1].isupper() and first.split()[0] not in ("I", "Google"):

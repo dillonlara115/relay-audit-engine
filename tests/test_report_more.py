@@ -53,8 +53,8 @@ def test_only_phrases_google_counted_are_kept_biggest_first(dfs):
     http = httpx.Client(transport=httpx.MockTransport(handler))
     found = demand.look_up("Prescott", "AZ", client=http)
     again = demand.look_up("Prescott", "AZ", client=http)
-    assert found == again == {"rows": [{"phrase": "prescott roofing", "monthly": 390},
-                                       {"phrase": "roof repair prescott az", "monthly": 20}], "top": 390}
+    assert found == again == {"rows": [{"phrase": "prescott roofing", "monthly": 390, "alike": 0},
+                                       {"phrase": "roof repair prescott az", "monthly": 20, "alike": 0}], "top": 390}
     assert len(sent) == 1 and sent[0]["location_code"] == 2840, "one paid lookup, then the cache"
 
 
@@ -183,3 +183,35 @@ def test_a_failed_lookup_says_so(client, pool_store, monkeypatch):
     csrf = sign_in(client)
     r = client.post("/console/audits/a1/report-sections", data={"csrf": csrf, "ai": "1"}, follow_redirects=False)
     assert "notice=sections_partial" in r.headers["location"]
+
+
+# ── From the first live run (Sun Spirit Roofing, October 2026) ────────────────
+
+
+def test_variants_google_counts_together_are_one_row(dfs):
+    def handler(request):
+        return httpx.Response(200, json={"tasks": [{"status_code": 20000, "result": [
+            {"keyword": k, "search_volume": 390} for k in ("prescott roofing", "prescott roofers", "roofing prescott")]
+            + [{"keyword": "roof repair prescott az", "search_volume": 20}]}]})
+
+    found = demand.look_up("Prescott", "AZ", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    assert found["rows"] == [{"phrase": "prescott roofing", "monthly": 390, "alike": 2},
+                             {"phrase": "roof repair prescott az", "monthly": 20, "alike": 0}]
+    page = render_report(report(demand=extras.demand_snapshot(found, town="Prescott")))
+    assert page.count("390 a month") == 1 and "and 2 ways like it" in page
+
+
+def test_a_bold_heading_is_not_a_business():
+    text = "**Arrow Roofing** is solid. **My recommendation** is to get quotes. **Granite Basin Roofing** too. **Tip Top Roofing Service**"
+    assert ai_answers.named_businesses(text) == ["Arrow Roofing", "Granite Basin Roofing", "Tip Top Roofing Service"]
+
+
+def test_the_short_version_takes_only_the_findings_first_sentence():
+    from app.report.data import PublicFinding
+
+    findings = (PublicFinding(1, "Homeowners nearby do not see you in the map results. Even from your own address, others win.", "m", "f"),
+                PublicFinding(2, "b", "m", "f"), PublicFinding(3, "c", "m", "f"))
+    page = render_report(report(findings=findings, reach={"answered": 4, "top3": 1, "pins": []}))
+    short = page.split("<h2>The short version</h2>")[1].split("</ul>")[0]
+    assert "costing you jobs: homeowners nearby do not see you in the map results.</li>" in short
+    assert "Even from your own address" not in short
