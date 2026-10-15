@@ -903,7 +903,8 @@ async def _change_findings(request: Request, csrf: str | None, audit_id: str, wh
 @router.post("/audits/{audit_id}/report-sections")
 async def set_report_sections(audit_id: str, request: Request, csrf: str = Form(None),
                               speed: str = Form(""), site_check: str = Form(""),
-                              positions: str = Form(""), reach: str = Form("")) -> Response:
+                              positions: str = Form(""), reach: str = Form(""),
+                              rivals: str = Form("")) -> Response:
     """Switch the optional report sections on or off. Switching one on takes a
     snapshot of today's results; the report never changes behind it."""
     if not check_csrf(request, csrf):
@@ -932,7 +933,8 @@ async def set_report_sections(audit_id: str, request: Request, csrf: str = Form(
                 except Exception as exc:  # noqa: BLE001 - the grid still goes on, without the map
                     log.warning("reach map not frozen: %s", exc)
         return extras.snapshot(audit, speed=bool(speed), site_check=bool(site_check),
-                               positions=bool(positions), reach=bool(reach), checks=checks,
+                               positions=bool(positions), reach=bool(reach),
+                               rivals=bool(reach) and bool(rivals), checks=checks,
                                city=str(prospect.get("city") or ""), reach_map_path=map_path)
 
     snap = await asyncio.to_thread(build)

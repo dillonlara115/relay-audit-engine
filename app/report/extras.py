@@ -201,10 +201,34 @@ def positions_snapshot(checks: list[Mapping[str, Any]], *, city: str,
     return {"rows": rows} if rows else None
 
 
-def reach_snapshot(reach: Mapping[str, Any], *, map_path: str | None) -> dict[str, Any] | None:
-    """The Maps grid for the report: every spot, its position, no names.
-    Pins sit on the map by the same projection the console uses; without a
-    map they fall back to rows and columns."""
+RIVALS_SHOWN = 5
+
+
+def rivals_for_report(competitors: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """The roofers who held the top three most often, as Google Maps lists
+    them: name, how many spots, rating, reviews. Nothing said about them
+    beyond that. Names run through the copy rules like any text from outside;
+    one that would trip them is left out rather than block the report."""
+    out = []
+    for c in competitors:
+        name = _clean(str(c.get("title") or ""))
+        if not name:
+            continue
+        rating = c.get("rating")
+        out.append({"name": name, "spots": int(c.get("spots") or 0),
+                    "rating": round(float(rating), 1) if isinstance(rating, (int, float)) else None,
+                    "reviews": int(c["reviews"]) if isinstance(c.get("reviews"), (int, float)) else None})
+        if len(out) == RIVALS_SHOWN:
+            break
+    return out
+
+
+def reach_snapshot(reach: Mapping[str, Any], *, map_path: str | None,
+                   with_rivals: bool = False) -> dict[str, Any] | None:
+    """The Maps grid for the report: every spot and its position. Other
+    roofers are named only when a person ticks that for this report
+    (with_rivals). Pins sit on the map by the same projection the console
+    uses; without a map they fall back to rows and columns."""
     from app.tools import staticmap
 
     if reach.get("status") != "done" or not reach.get("points"):
@@ -236,7 +260,8 @@ def reach_snapshot(reach: Mapping[str, Any], *, map_path: str | None) -> dict[st
             "size": size, "answered": answered, "top3": int(reach.get("top3") or 0), "found": found,
             "missing": max(0, answered - found), "pins": pins, "map_path": map_path if on_map else None,
             "center_on": reach.get("center_on") or "business", "center_label": reach.get("center_label") or "",
-            "empty": int(reach.get("empty") or 0)}
+            "empty": int(reach.get("empty") or 0),
+            "rivals": rivals_for_report(list(reach.get("competitors") or [])) if with_rivals else []}
 
 
 def default_site_check(audit: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -253,13 +278,13 @@ def default_site_check(audit: Mapping[str, Any]) -> dict[str, Any] | None:
 
 
 def snapshot(audit: Mapping[str, Any], *, speed: bool, site_check: bool, positions: bool = False,
-             reach: bool = False, checks: list[Mapping[str, Any]] = (), city: str = "",
-             reach_map_path: str | None = None) -> dict[str, Any]:
+             reach: bool = False, rivals: bool = False, checks: list[Mapping[str, Any]] = (),
+             city: str = "", reach_map_path: str | None = None) -> dict[str, Any]:
     """What report_extras should hold for the sections switched on."""
     local = audit.get("local_reach") or {}
     return {
         "speed": speed_snapshot(audit.get("lighthouse") or {}) if speed else None,
         "site_check": site_check_snapshot(audit.get("technical") or {}) if site_check else None,
         "positions": positions_snapshot(list(checks), city=city, reach=local) if positions else None,
-        "reach": reach_snapshot(local, map_path=reach_map_path) if reach else None,
+        "reach": reach_snapshot(local, map_path=reach_map_path, with_rivals=rivals) if reach else None,
     }

@@ -512,3 +512,45 @@ def test_no_top_three_anywhere_says_so():
 def test_rows_saved_in_the_old_wording_still_show():
     page = render_report(report(positions={"rows": [{"search": "A roofer in Pueblo, on Google Maps", "place": "Number 2"}]}))
     assert "A roofer in Pueblo, on Google Maps" in page and "Number 2" in page
+
+
+# ── Naming the roofers who show up instead, when a person ticks it ────────────
+
+
+def _with_rivals(**over):
+    comps = [{"title": "Arrow Roofing Inc.", "spots": 14, "rating": 4.9, "reviews": 212},
+             {"title": "Heritage Roofing — Prescott", "spots": 11, "rating": 4.94, "reviews": 527},
+             {"title": "Band of Roofers", "spots": 6, "rating": None, "reviews": None},
+             {"title": "Yavapai Roofing", "spots": 5, "rating": 4.8, "reviews": 87}]
+    return _reach(competitors=comps, **over)
+
+
+def test_names_stay_off_unless_ticked():
+    assert extras.reach_snapshot(_with_rivals(), map_path=None)["rivals"] == []
+
+
+def test_the_roofers_who_show_up_instead_are_listed_as_google_shows_them():
+    snap = extras.reach_snapshot(_with_rivals(), map_path=None, with_rivals=True)
+    names = [r["name"] for r in snap["rivals"]]
+    assert names == ["Arrow Roofing Inc.", "Heritage Roofing, Prescott", "Yavapai Roofing"], \
+        "dashes cleaned; a name that trips the report's vocabulary is left out, not the report"
+    assert snap["rivals"][1] == {"name": "Heritage Roofing, Prescott", "spots": 11, "rating": 4.9, "reviews": 527}
+    page = render_report(report(reach=snap))
+    assert "Who homeowners see instead" in page and "<b>Arrow Roofing Inc.</b>" in page
+    assert "4.9 stars" in page and "527 reviews" in page
+    assert forbidden_terms_in(page) == [] and not contains_forbidden_dash(page)
+
+
+def test_saving_with_names_ticked(client, pool_store):
+    pool_store["audit"] = {"prospect_id": "p1", "local_reach": _with_rivals()}
+    csrf = sign_in(client)
+    client.post("/console/audits/a1/report-sections", data={"csrf": csrf, "reach": "1", "rivals": "1"},
+                follow_redirects=False)
+    assert pool_store["saved"][-1]["report_extras"]["reach"]["rivals"][0]["name"] == "Arrow Roofing Inc."
+    client.post("/console/audits/a1/report-sections", data={"csrf": csrf, "rivals": "1"}, follow_redirects=False)
+    assert pool_store["saved"][-1]["report_extras"]["reach"] is None, "names never go on without the map"
+
+
+def test_the_panel_offers_names_under_the_map():
+    page = _prospect_page(audit={"local_reach": _with_rivals()})
+    assert 'name="rivals" value="1">' in page and "Name the roofers who show up instead" in page

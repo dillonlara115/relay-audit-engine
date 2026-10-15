@@ -97,6 +97,8 @@ _PAGE = """<!doctype html>
   .ranks th {{ text-align: left; font-size: 0.85rem; font-weight: 600; opacity: 0.7; padding: 10px 14px 6px; }}
   .ranks th.place {{ text-align: right; }}
   .ranks .where {{ font-size: 0.9rem; opacity: 0.75; }}
+  .rivals td.place {{ width: auto; white-space: nowrap; }}
+  h3.sub {{ font-family: 'PT Sans', sans-serif; font-size: 1.1rem; margin: 22px 0 6px; }}
   .gmap {{ position: relative; width: 100%; aspect-ratio: 1; border-radius: 6px; overflow: hidden;
           border: 3px solid var(--asphalt); margin: 10px 0 8px; background: #e8e2d6; }}
   .gmap img {{ position: absolute; inset: 0; width: 100%; height: 100%; }}
@@ -345,9 +347,22 @@ def _reach_block(reach: Mapping[str, Any], map_url: str | None) -> str:
     if missing:
         # Past the first 20 is not absent: Sun Spirit Roofing was 34th.
         parts.append(f"At {missing}, you're not in the first 20 results.")
+    rivals = reach.get("rivals") or []
+    rival_block = ""
+    if rivals:
+        rows = "".join(
+            f'<tr><td><b>{esc(r["name"])}</b></td>'
+            f'<td class="place">{int(r["spots"])} of {answered}</td>'
+            f'<td class="place">' + (f'{r["rating"]:.1f} stars' if r.get("rating") is not None else "")
+            + (f'<br><span class="where">{int(r["reviews"])} reviews</span>' if r.get("reviews") is not None else "")
+            + "</td></tr>" for r in rivals)
+        rival_block = ("<h3 class=\"sub\">Who homeowners see instead</h3>\n  <p>These roofers showed up in the "
+                       "top 3 most often across the same spots.</p>\n  "
+                       '<table class="ranks rivals"><thead><tr><th>Roofer</th><th class="place">In the top 3 at</th>'
+                       f'<th class="place">On Google</th></tr></thead><tbody>{rows}</tbody></table>')
     return ("<h2>Where you show up in Google Maps</h2>\n  "
             f"<p>Google Maps shows different roofers depending on where the person searching is standing. "
             f"So we searched \u201c{esc(reach.get('keyword') or '')}\u201d from spots all around {around}, up to "
             f"{esc(str(reach.get('radius_miles') or ''))} miles out. Each circle shows where you "
             "landed on the list from that spot.</p>\n  "
-            + board + key + "<p>" + " ".join(parts) + "</p>")
+            + board + key + "<p>" + " ".join(parts) + "</p>" + rival_block)

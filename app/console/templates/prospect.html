@@ -167,7 +167,9 @@
     <label class="pick"><input type="checkbox" class="checkbox checkbox-primary checkbox-sm mt-0.5" name="positions" value="1"{% if rp.positions_on %} checked{% endif %}>
       <span><b>Where you rank on Google.</b> Their Maps position for &ldquo;roofer&rdquo; in their town, their website's position for &ldquo;roof replacement&rdquo;, and, after Local reach, how many grid spots put them in the top three.{% if rp.positions_on %} <span class="muted">Saved {{ rp.positions_on }}.</span>{% endif %}</span></label>
     <label class="pick"><input type="checkbox" class="checkbox checkbox-primary checkbox-sm mt-0.5" name="reach" value="1"{% if rp.reach_on %} checked{% endif %}{% if not rp.reach_ready and not rp.reach_on %} disabled{% endif %}>
-      <span><b>Where you show up in Google Maps.</b> The Local reach map with their position at every spot. Other businesses are never named.{% if not rp.reach_ready %} <span class="muted">Run Local reach first.</span>{% elif rp.reach_on %} <span class="muted">Saved {{ rp.reach_on }}.</span>{% endif %}</span></label>
+      <span><b>Where you show up in Google Maps.</b> The Local reach map with their position at every spot.{% if not rp.reach_ready %} <span class="muted">Run Local reach first.</span>{% elif rp.reach_on %} <span class="muted">Saved {{ rp.reach_on }}.</span>{% endif %}</span></label>
+    <label class="pick ml-7"><input type="checkbox" class="checkbox checkbox-primary checkbox-sm mt-0.5" name="rivals" value="1"{% if rp.rivals_on %} checked{% endif %}{% if not rp.reach_ready and not rp.reach_on %} disabled{% endif %}>
+      <span><b>Name the roofers who show up instead.</b> The five who held the top 3 most often across the grid, with their Google rating and reviews. Goes with the map above; off unless you tick it.</span></label>
     <p class="hint">Saving takes a snapshot of today's results, so a later re-run never changes what the owner already has. Save again to refresh it.{% if rp.published %} Changes show on the published report right away.{% endif %}</p>
     <div class="flex flex-row flex-wrap gap-2 items-center"><button type="submit" class="btn btn-sm btn-primary">Save report sections</button>{% if rp.report_url %}<a class="btn btn-sm btn-ghost" href="{{ rp.report_url }}" target="_blank" rel="noopener noreferrer">{{ icon("external") }} Open report</a>{% endif %}</div>
   </form>
@@ -264,7 +266,7 @@
     shows one. -#}
 <div class="pagehead mt-8" id="reach">
   <div><h2 class="mt-0">Local reach</h2>
-  <p class="muted text-sm">Where they show up in Google Maps across the area around the business, and who shows up instead{% if reach.finished %}. Last run {{ reach.finished }}{% endif %}. A weak result can become a finding when you draft; other businesses are never named on the report.</p></div>
+  <p class="muted text-sm">Where they show up in Google Maps across the area around the business, and who shows up instead{% if reach.finished %}. Last run {{ reach.finished }}{% endif %}. A weak result can become a finding when you draft. Other roofers are named on the report only if you tick that below.</p></div>
   {% if reach.can_run %}
   <form class="reach-form" method="post" action="/console/audits/{{ p.audit_id }}/reach"
         onsubmit="return confirm('Run ' + (this.size.value * this.size.value) + ' Google Maps searches? Each one uses DataForSEO credits.')">
